@@ -7,3 +7,6 @@ license.workspace = true
 repository.workspace = true
 rust-version.workspace = true
 authors.workspace = true
+
+[dependencies]
+tl-proto.workspace = true
