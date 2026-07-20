@@ -53,3 +53,29 @@ jobs:
       # regression does.
       - name: network tests
         run: cargo test -- --ignored
+
+  node:
+    name: node binding
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # napi-rs 3.x needs a newer toolchain than the core floor; stable satisfies it.
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: install
+        working-directory: bindings/node
+        run: npm install
+      - name: clippy
+        run: cargo clippy -p ton-net-node --all-targets -- -D warnings
+      - name: build addon
+        working-directory: bindings/node
+        run: npx napi build --platform
+      # The gate test reaches mainnet and skips if no liteserver is reachable.
+      - name: gate test
+        working-directory: bindings/node
+        run: node test.mjs
