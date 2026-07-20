@@ -7,3 +7,11 @@ license.workspace = true
 repository.workspace = true
 rust-version.workspace = true
 authors.workspace = true
+
+[dependencies]
+ton-net-tl.workspace = true
+curve25519-dalek.workspace = true
+sha2.workspace = true
+aes.workspace = true
+ctr.workspace = true
+thiserror.workspace = true

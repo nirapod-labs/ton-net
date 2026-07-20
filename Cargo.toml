@@ -25,6 +25,9 @@ rust-version = "1.85"
 authors = ["The ton-net Authors"]
 
 [workspace.dependencies]
+# Internal crates, referenced by path in the workspace and by version once published.
+ton-net-tl = { path = "crates/ton-net-tl", version = "0.1.0-alpha.1" }
+
 # External crates on the lines fixed in NET-ADR-003. Each member crate opts in as
 # its layer is built through the v0.1.0 plan; unreferenced entries are inert.
 tl-proto = "0.5"
