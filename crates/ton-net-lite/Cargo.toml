@@ -7,3 +7,14 @@ license.workspace = true
 repository.workspace = true
 rust-version.workspace = true
 authors.workspace = true
+
+[dependencies]
+ton-net-tl.workspace = true
+ton-net-adnl.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+# The ignored network test drives a real handshake over the TCP transport on a tokio
+# current-thread runtime.
+ton-net-adnl.workspace = true
+tokio = { workspace = true, features = ["rt", "macros", "time"] }
