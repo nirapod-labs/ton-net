@@ -2,3 +2,6 @@ target/
 .DS_Store
 node_modules/
 *.node
+# napi-rs generates these from the Rust binding at build time.
+bindings/node/index.js
+bindings/node/index.d.ts

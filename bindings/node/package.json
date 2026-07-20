@@ -4,5 +4,18 @@
   "description": "Node.js binding for the ton-net TON client",
   "license": "Apache-2.0",
   "repository": "https://github.com/nirapod-labs/ton-net",
-  "private": true
+  "private": true,
+  "main": "index.js",
+  "types": "index.d.ts",
+  "napi": {
+    "binaryName": "ton-net"
+  },
+  "scripts": {
+    "build": "napi build --platform --release",
+    "build:debug": "napi build --platform",
+    "test": "node test.mjs"
+  },
+  "devDependencies": {
+    "@napi-rs/cli": "^3.0.0"
+  }
 }
