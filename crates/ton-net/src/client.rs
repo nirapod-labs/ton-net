@@ -105,3 +105,25 @@ async fn bounded<T>(call: impl Future<Output = Result<T, LiteError>>) -> Result<
         Err(_elapsed) => Err(Error::Timeout),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // A call that never answers must resolve to `Error::Timeout`, never hang. With the
+    // clock paused, tokio advances virtual time to the deadline the moment the runtime is
+    // otherwise idle, so this proves the bound in real time without a fifteen-second wait.
+    #[tokio::test(start_paused = true)]
+    async fn a_call_that_never_answers_times_out() {
+        let never = std::future::pending::<Result<(), LiteError>>();
+        let result: Result<(), Error> = bounded(never).await;
+        assert!(matches!(result, Err(Error::Timeout)));
+    }
+
+    // A call that answers before the deadline passes its result through untouched.
+    #[tokio::test(start_paused = true)]
+    async fn a_call_that_answers_is_not_timed_out() {
+        let ready = std::future::ready::<Result<u32, LiteError>>(Ok(7));
+        assert_eq!(bounded(ready).await.unwrap(), 7);
+    }
+}

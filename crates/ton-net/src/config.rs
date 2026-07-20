@@ -143,6 +143,26 @@ mod tests {
     }
 
     #[test]
+    fn from_json_ignores_the_other_config_sections() {
+        // The real global.config.json carries dht, validator, and per-server fields this
+        // release does not read. Parsing must ignore them, not fail on them.
+        let json = format!(
+            r#"{{"@type":"config.global","dht":{{"k":1}},"liteservers":[{{"ip":84478511,"port":19949,"extra":true,"id":{{"@type":"pub.ed25519","key":"{KEY}"}}}}],"validator":{{"zero_state":{{"workchain":-1}}}}}}"#
+        );
+        let config = Config::from_json(&json).unwrap();
+        assert_eq!(config.liteservers().len(), 1);
+        assert_eq!(config.liteservers()[0].addr, "5.9.10.47:19949");
+    }
+
+    #[test]
+    fn from_json_rejects_an_unsupported_key_type() {
+        let json = format!(
+            r#"{{"liteservers":[{{"ip":84478511,"port":19949,"id":{{"@type":"pub.unknown","key":"{KEY}"}}}}]}}"#
+        );
+        assert!(matches!(Config::from_json(&json), Err(Error::Config(_))));
+    }
+
+    #[test]
     fn from_json_rejects_malformed_json() {
         assert!(matches!(
             Config::from_json("{not json"),
