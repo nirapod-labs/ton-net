@@ -15,3 +15,13 @@ sha2.workspace = true
 aes.workspace = true
 ctr.workspace = true
 thiserror.workspace = true
+getrandom.workspace = true
+# The native transport only. TcpTransport reads and writes bytes; the driver above it
+# is generic over the Transport seam and pulls no runtime of its own.
+tokio = { workspace = true, features = ["net", "io-util", "time"] }
+
+[dev-dependencies]
+# The ignored network test runs on a tokio current-thread runtime and builds its query
+# from the liteserver TL types.
+tokio = { workspace = true, features = ["rt", "macros"] }
+ton-net-tl.workspace = true
