@@ -8,8 +8,9 @@ on:
 env:
   CARGO_TERM_COLOR: always
 
-# Node binding and network integration tests get their own jobs as those layers
-# land in the v0.1.0 plan. This gate covers the core crates.
+# The Node binding gets its own job as that layer lands in the v0.1.0 plan. The
+# hermetic gate covers the core crates; the network job runs the ignored tests that
+# reach a live liteserver.
 jobs:
   check:
     name: fmt, clippy, docs, tests
@@ -39,3 +40,16 @@ jobs:
       - uses: dtolnay/rust-toolchain@1.85.0
       - uses: Swatinem/rust-cache@v2
       - run: cargo build
+
+  network:
+    name: network integration
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      # The ignored tests reach a live mainnet liteserver. Each skips if its server is
+      # unreachable, so liteserver rotation does not fail the build, but a real protocol
+      # regression does.
+      - name: network tests
+        run: cargo test -- --ignored
