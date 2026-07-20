@@ -1,0 +1,13 @@
+[package]
+name = "adnl-spike"
+version = "0.0.0"
+edition = "2021"
+
+[dependencies]
+curve25519-dalek = "4"
+sha2 = "0.10"
+aes = "0.8"
+ctr = "0.9"
+
+[profile.dev]
+opt-level = 1
