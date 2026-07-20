@@ -110,4 +110,5 @@ verified against the reference, not inferred.
 ## License
 
 Apache-2.0 (permissive, unlike the C++ reference's LGPL), so any project, in any
-language, can embed it without a copyleft obligation. Finalized with the first tag.
+language, can embed it without a copyleft obligation. See [LICENSE](LICENSE) and
+[NOTICE](NOTICE).
