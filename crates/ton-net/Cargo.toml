@@ -9,3 +9,15 @@ license.workspace = true
 repository.workspace = true
 rust-version.workspace = true
 authors.workspace = true
+
+[dependencies]
+ton-net-lite.workspace = true
+ton-net-adnl.workspace = true
+serde = { workspace = true }
+serde_json.workspace = true
+thiserror.workspace = true
+# Only the timer, to bound every call. The socket and runtime come from the caller.
+tokio = { workspace = true, features = ["time"] }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt", "macros", "time"] }

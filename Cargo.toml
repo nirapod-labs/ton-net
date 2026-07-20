@@ -28,6 +28,7 @@ authors = ["The ton-net Authors"]
 # Internal crates, referenced by path in the workspace and by version once published.
 ton-net-tl = { path = "crates/ton-net-tl", version = "0.1.0-alpha.1" }
 ton-net-adnl = { path = "crates/ton-net-adnl", version = "0.1.0-alpha.1" }
+ton-net-lite = { path = "crates/ton-net-lite", version = "0.1.0-alpha.1" }
 
 # External crates on the lines fixed in NET-ADR-003. Each member crate opts in as
 # its layer is built through the v0.1.0 plan; unreferenced entries are inert.
