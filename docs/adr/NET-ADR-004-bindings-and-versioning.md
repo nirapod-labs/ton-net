@@ -79,6 +79,35 @@ Adopt the matrix-rust-sdk model, which fits a multi-registry reality best:
   guarantees are stable enough to promise, which for a wire-protocol library is a
   high bar (libsignal is still 0.x after years).
 
+### Release channels
+
+A milestone tag and a registry publish are separate acts, and this project keeps
+them separate.
+
+- **Every milestone is a git tag.** When a milestone's gate passes (see the
+  roadmap), it is recorded as an annotated tag. The tag shows the work and pins a
+  reproducible point; it does not by itself put a package on any registry.
+- **Registry publishing is gated on the trust boundary, not on every tag.** A read
+  is trust-minimized end to end only once block sync anchors it (v0.3.0). Before
+  that point a published package would carry a version string that implies more
+  assurance than the code delivers.
+  - v0.1.0 and v0.2.0, if published at all, reach their registries only as
+    pre-releases (`-alpha`), marked not for production, because reads are not yet
+    verified against a synced anchor.
+  - **v0.3.0 is the first ordinary registry release.** From v0.3.0 a read is
+    verified against a validator-signature-anchored block with only the pinned
+    init key-block trusted.
+  - v1.0.0 freezes the API and the proof, sync, and TVM guarantees.
+- **This composes with per-artifact versioning.** The pre-release channel maps onto
+  each registry's own convention: a crates.io `0.1.0-alpha.N`, an npm dist-tag
+  `alpha` on a `0.1.0-alpha.N` version, a PyPI `0.1.0aN`. The library version still
+  moves in lockstep across the Rust crates; the channel is an orthogonal signal.
+
+The type system already separates a `ServerReported` value from a verified one, so
+a caller cannot confuse them in code. The registry channel is the second honest
+signal, at the version-string level, that a build's verification promise is or is
+not yet real.
+
 ## Alternatives considered
 
 - **One unified version across everything (libsignal).** Rejected as the published
@@ -94,6 +123,11 @@ Adopt the matrix-rust-sdk model, which fits a multi-registry reality best:
 - **Build mobile first (it is the reputation payoff).** Rejected. Mobile is the
   heaviest CI and should follow a stable API, not precede it. Node first, browser
   second to harden the constraints, mobile after the API settles.
+- **Publish every milestone as an ordinary registry release.** Rejected. The
+  library's whole value is that it verifies rather than trusts, and an ordinary
+  release at v0.1.0 or v0.2.0 would ship a version whose reads are still server
+  trusted. Every milestone is still tagged in git; the registry release waits for
+  the trust boundary at v0.3.0.
 
 ## Consequences
 
@@ -108,6 +142,9 @@ Adopt the matrix-rust-sdk model, which fits a multi-registry reality best:
 - The `0.x` discipline sets expectations honestly: the API and the trust guarantees
   are not promised stable until they are, and v1.0.0 is the deliberate line where
   they are (see NET-ADR-002 and the roadmap).
+- The first ordinary registry release is v0.3.0, where a read is trust-minimized
+  end to end; v0.1.0 and v0.2.0 reach registries only as marked pre-releases, so a
+  version string never implies verification the code has not yet earned.
 
 ## Chain scope
 

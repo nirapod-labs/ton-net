@@ -26,6 +26,28 @@ libsignal, a comparable wire library, is still `0.x` after years; ton-net reache
 
 ---
 
+## Release model
+
+A milestone tag and a registry publish are two different acts (NET-ADR-004). Every
+milestone below is recorded as a git tag when its gate passes. Registry publishing
+is gated separately, on the trust boundary:
+
+| Milestone | git tag | registry (crates.io, npm, ...) |
+|---|---|---|
+| v0.1.0, v0.2.0 | yes | pre-release only (`-alpha`), not for production |
+| v0.3.0 through v0.9.0 | yes | ordinary release |
+| v1.0.0 | yes | ordinary release, API frozen |
+
+The reason is honesty at the version-string level. A read is trust-minimized end
+to end only once block sync anchors it at v0.3.0. Before that, a read is the
+server's unproven word: the API marks it with a `ServerReported` type so it cannot
+be mistaken for verified state in code, and the registry channel is the matching
+signal at the version level. v0.3.0 is therefore the first ordinary registry
+release; v0.1.0 and v0.2.0 reach a registry, if at all, only as marked
+pre-releases.
+
+---
+
 ## The path
 
 Each milestone lists what ships, which layer it exercises, and its exit gate.
@@ -36,13 +58,16 @@ The foundation and the first useful slice. TL codec over `tl-proto` with the
 official schemas; the ADNL-over-TCP handshake and stream framing; the liteserver
 query layer for reads; the config loader; the napi-rs Node binding.
 
-Reads are **not proof-verified yet** and are marked so in the API. This already
-does something no TypeScript library does today: talk to a liteserver directly
-from Node over ADNL, no HTTP indexer.
+Reads are **not proof-verified yet** and are marked so in the API with a
+`ServerReported` type. This already does something no TypeScript library does
+today: talk to a liteserver directly from Node over ADNL, no HTTP indexer.
+Published, if at all, only as a pre-release (`-alpha`), not for production,
+because a read here is still the server's unproven word.
 
 *Gate:* from Node, connect to a mainnet liteserver, call `getMasterchainInfo` and
 `getAccountState`, and get well-formed decoded results. The async-across-FFI
-design is proven on the easiest binding.
+design is proven on the easiest binding. Full plan:
+[docs/plan/v0.1.0.md](plan/v0.1.0.md).
 
 ### v0.2.0: Cell/BoC engine + proof engine
 
@@ -52,7 +77,9 @@ structures; the five `check_*_proof` routines.
 
 *Gate:* an account read is verified against a **caller-supplied trusted block
 hash** (sync comes next); a tampered proof is rejected; results match the
-reference node for a corpus of real accounts.
+reference node for a corpus of real accounts. Still a pre-release (`-alpha`):
+verification here needs a caller-supplied hash, so a read is not yet
+trust-minimized end to end.
 
 ### v0.3.0: Block-sync engine
 
@@ -63,7 +90,9 @@ caller-supplied hash.
 
 *Gate:* sync from the pinned init key-block to the current masterchain head across
 at least one validator-set rotation, matched against the reference node's proof
-for the same range. A full proven read needs nothing trusted but the anchor.
+for the same range. A full proven read needs nothing trusted but the anchor. This
+is the **first ordinary registry release** (NET-ADR-004): a read is now
+trust-minimized with only the pinned anchor.
 
 ### v0.4.0: Browser (wasm) binding
 
