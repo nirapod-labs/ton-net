@@ -1,0 +1,11 @@
+[package]
+name = "ton-net"
+description = "A direct client for the TON network: TL, ADNL, and liteserver over one Rust core."
+keywords = ["ton", "blockchain", "adnl", "liteserver", "client"]
+categories = ["network-programming", "cryptography::cryptocurrencies"]
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+authors.workspace = true

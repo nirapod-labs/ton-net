@@ -1,0 +1,13 @@
+[package]
+name = "ton-net-node"
+description = "Node.js binding for the ton-net TON client."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+publish = false
+
+[lib]
+crate-type = ["cdylib"]

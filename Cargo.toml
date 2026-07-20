@@ -1,0 +1,41 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/ton-net-tl",
+    "crates/ton-net-adnl",
+    "crates/ton-net-lite",
+    "crates/ton-net",
+    "bindings/node",
+]
+default-members = [
+    "crates/ton-net-tl",
+    "crates/ton-net-adnl",
+    "crates/ton-net-lite",
+    "crates/ton-net",
+]
+# The feasibility spike is a standalone project with its own lockfile.
+exclude = ["spikes"]
+
+[workspace.package]
+version = "0.1.0-alpha.1"
+edition = "2021"
+license = "Apache-2.0"
+repository = "https://github.com/nirapod-labs/ton-net"
+rust-version = "1.82"
+authors = ["The ton-net Authors"]
+
+[workspace.dependencies]
+# External crates on the lines fixed in NET-ADR-003. Each member crate opts in as
+# its layer is built through the v0.1.0 plan; unreferenced entries are inert.
+tl-proto = "0.5"
+curve25519-dalek = "4"
+sha2 = "0.10"
+aes = "0.8"
+ctr = "0.9"
+tokio = { version = "1", default-features = false }
+thiserror = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+napi = { version = "2", default-features = false }
+napi-derive = "2"
+napi-build = "2"
