@@ -85,9 +85,18 @@ jobs:
       - name: build addon
         working-directory: bindings/node
         run: npx napi build --platform
-      # The gate test reaches mainnet and skips if no liteserver is reachable.
+      # The gate test reaches mainnet and skips if no liteserver is reachable. It walks
+      # the chain either way; what the schedule adds is the walk from the block the config
+      # pins, which runs over every key block published since.
       - name: gate test
+        if: github.event_name != 'schedule'
         working-directory: bindings/node
+        run: node test.mjs
+      - name: gate test with the first sync
+        if: github.event_name == 'schedule'
+        working-directory: bindings/node
+        env:
+          TON_NET_COLD_SYNC: "1"
         run: node test.mjs
 
   spikes:

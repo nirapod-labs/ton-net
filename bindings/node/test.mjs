@@ -3,7 +3,12 @@
 // It proves the async design across the FFI boundary: the class factory returns a real
 // Promise, the reads resolve to the documented shapes, a verified read proves what it
 // returns, a proof checked against the wrong block is refused, and a bad input rejects.
+// It also carries an anchor out to JavaScript and back in, which is how a caller pays for
+// a chain walk once rather than once per process.
 // It reaches the network, so it runs in the network CI job, not the hermetic one.
+//
+// The walk from the block the config pins runs over every key block published since, so
+// it is behind TON_NET_COLD_SYNC and CI sets that on a schedule rather than per commit.
 
 import assert from "node:assert/strict";
 import binding from "./index.js";
@@ -115,7 +120,7 @@ async function main() {
   console.log(`masterchain seqno ${head.seqno}, shard ${head.shard}`);
 
   // A reported read: the server's word, with its proof unchecked alongside.
-  const reported = await client.account(ELECTOR);
+  const reported = await client.accountReported(ELECTOR);
   assert.equal(reported.value.status, "active", "the elector is deployed");
   assert.ok(
     Buffer.isBuffer(reported.value.code) && reported.value.code.length > 0,
@@ -134,7 +139,7 @@ async function main() {
     ["elector", ELECTOR],
     ["basechain", BASECHAIN],
   ]) {
-    const verified = await client.accountVerified(address, head);
+    const verified = await client.accountAt(address, head);
     assert.equal(verified.anchor.seqno, head.seqno, `${name} anchor seqno`);
     assert.ok(
       verified.anchor.rootHash.equals(head.rootHash),
@@ -228,19 +233,19 @@ async function main() {
   // A block id read back in is checked field by field: a short hash silently padded
   // would send a read at a block the caller did not mean.
   await assert.rejects(
-    client.accountVerified(ELECTOR, { ...head, rootHash: head.rootHash.subarray(0, 31) }),
+    client.accountAt(ELECTOR, { ...head, rootHash: head.rootHash.subarray(0, 31) }),
     /rootHash must be 32 bytes, got 31/,
     "a short root hash rejects",
   );
   await assert.rejects(
-    client.accountVerified(ELECTOR, { ...head, shard: "not-hex" }),
+    client.accountAt(ELECTOR, { ...head, shard: "not-hex" }),
     /shard is not a hex u64/,
     "a shard that is not hex rejects",
   );
 
   // A malformed address rejects rather than throwing synchronously or hanging.
   await assert.rejects(
-    client.account("not-a-real-address"),
+    client.accountReported("not-a-real-address"),
     /address/,
     "a bad address rejects",
   );
@@ -256,6 +261,24 @@ async function main() {
     compared === null || compared > 0,
     "no balance was compared against a second party in two passes",
   );
+
+  // The anchor out and back in, which is what makes a chain walk a once-per-caller cost
+  // rather than a once-per-process one.
+  try {
+    await anchorRoundTrip(config);
+  } catch (error) {
+    if (error instanceof TypeError || /toncenter|HTTP/.test(error.message)) {
+      console.log(`gate: skip anchor round trip (second party unreachable): ${error.message}`);
+    } else {
+      throw error;
+    }
+  }
+
+  if (process.env.TON_NET_COLD_SYNC === "1") {
+    await coldSync(config);
+  } else {
+    console.log("gate: skip cold sync (set TON_NET_COLD_SYNC=1 to run it)");
+  }
 
   console.log("gate: pass");
 }
@@ -307,7 +330,7 @@ async function againstASecondParty(client) {
   const proved = [];
   for (const { name, address } of SECOND_PARTY) {
     try {
-      proved.push(await client.accountVerified(address, anchor));
+      proved.push(await client.accountAt(address, anchor));
     } catch (error) {
       // A server that has not caught up cannot answer at this block at all. A proof that
       // fails to check out is a different thing entirely, and fails the gate.
@@ -347,6 +370,84 @@ async function againstASecondParty(client) {
     console.log(`${name} balance matches the second party: ${after.balance} nanotons`);
   }
   return compared;
+}
+
+// Carries the anchor across the boundary in both directions.
+//
+// The starting block comes from the second party rather than from the liteserver being
+// questioned, which is the case `connectFrom` exists for: a caller who trusts something
+// else. Reaching for the latest key block also keeps this cheap, because the walk from it
+// is a link or two instead of a year of them.
+async function anchorRoundTrip(config) {
+  const latest = await toncenter("blocks?workchain=-1&limit=1&sort=desc");
+  const keyBlockSeqno = latest.blocks[0].prev_key_block_seqno;
+  const found = await toncenter(`blocks?workchain=-1&seqno=${keyBlockSeqno}`);
+  const block = found.blocks[0];
+  const anchor = {
+    workchain: -1,
+    shard: "8000000000000000",
+    seqno: block.seqno,
+    rootHash: Buffer.from(block.root_hash, "base64"),
+    fileHash: Buffer.from(block.file_hash, "base64"),
+  };
+  assertBlockId(anchor, "second-party key block");
+  console.log(`second party names key block ${anchor.seqno}`);
+
+  const client = await TonClient.connectFrom(config, anchor);
+  assert.ok(client instanceof TonClient, "connectFrom() resolves to a TonClient");
+
+  // Syncing again from where that left off is the short case, and the report is what
+  // says so rather than a stopwatch.
+  const report = await client.sync();
+  assertBlockId(report.head, "synced head");
+  assert.ok(report.links > 0, "a sync checks at least one link");
+  assert.ok(report.links < 32, `a warm sync checked ${report.links} links`);
+  console.log(`warm sync: ${report.links} links over ${report.rounds} rounds`);
+
+  // The anchor comes back out, is a key block at or above the one handed in, and is not
+  // the head: what the client keeps is a block a later chain can continue from.
+  const kept = await client.anchor();
+  assertBlockId(kept, "anchor");
+  assert.ok(kept.seqno >= anchor.seqno, "the anchor did not go backwards");
+  assert.ok(kept.seqno <= report.head.seqno, "the anchor is at or behind the head");
+
+  // A proved read with nothing supplied: the block it rests on was derived, not given.
+  const account = await client.account(ELECTOR);
+  assert.equal(account.proof, undefined, "a proved read carries no loose proof");
+  assertDecimal(account.value.balance, "proved balance");
+  assert.ok(
+    account.anchor.seqno >= kept.seqno,
+    "the account was proved against a block at or past the anchor",
+  );
+  console.log(
+    `proved the elector at ${account.anchor.seqno}: ${account.value.balance} nanotons`,
+  );
+
+  // And the round trip: the anchor JavaScript just read goes back in, and the sync that
+  // follows is short because of it.
+  const resumed = await TonClient.connectFrom(config, kept);
+  const second = await resumed.sync();
+  assert.ok(
+    second.links <= report.links + 2,
+    `a resumed sync checked ${second.links} links against the first walk's ${report.links}`,
+  );
+  console.log(`resumed from the saved anchor: ${second.links} links`);
+}
+
+// The walk the config's own block implies, which is the expensive one.
+async function coldSync(config) {
+  const client = await TonClient.connect(config);
+  assert.equal(await client.anchor(), null, "a client trusts nothing before it syncs");
+  const started = Date.now();
+  const report = await client.sync();
+  const elapsed = ((Date.now() - started) / 1000).toFixed(1);
+  assert.ok(report.links > 100, `a first sync checked only ${report.links} links`);
+  assertBlockId(report.head, "cold head");
+  const kept = await client.anchor();
+  assertBlockId(kept, "cold anchor");
+  console.log(
+    `cold sync: ${report.links} links over ${report.rounds} rounds in ${elapsed}s`,
+  );
 }
 
 main().catch((error) => {

@@ -10,6 +10,15 @@
 //! proved against the block in `anchor`. The two are never the same shape, so a caller
 //! cannot mistake one for the other.
 //!
+//! What the block in `anchor` is worth depends on where it came from, and that is what
+//! `sync()` settles. It walks from the key block the config names to the network's
+//! current head, checking a validator signature set at every step, so `account()` proves
+//! against a block this client derived rather than one a server offered. The block it
+//! ends on comes back from `anchor()`; saving it and handing it to `connectFrom` is what
+//! makes a later run cheap. Nothing is stored here: a block identity is two buffers, and
+//! where it lives is the caller's decision, because whatever can write to it can choose
+//! what a later client believes.
+//!
 //! The one connection is held behind an async mutex, so overlapping calls from
 //! JavaScript run one after another over the single channel rather than corrupting it.
 #![warn(missing_docs)]
@@ -75,6 +84,18 @@ pub struct BlockId {
     pub root_hash: Buffer,
     /// The block file hash, 32 bytes.
     pub file_hash: Buffer,
+}
+
+/// What one sync reached and what it cost.
+#[napi(object)]
+pub struct SyncReport {
+    /// The head the walk proved. It is proved for the caller that asked and not kept:
+    /// what the client keeps is the last key block on the way, from `anchor()`.
+    pub head: BlockId,
+    /// How many links were checked, each one a validator signature set.
+    pub links: u32,
+    /// How many replies the server took to finish the chain.
+    pub rounds: u32,
 }
 
 /// An account, decoded.
@@ -195,6 +216,50 @@ impl TonClient {
         })
     }
 
+    /// Connects and starts the walk from a key block proven on an earlier run.
+    ///
+    /// `anchor` is this client's root of trust: everything it goes on to believe is
+    /// derived from that block, so it is worth exactly what the storage it came from is
+    /// worth. Anything that can write to where a caller keeps one can choose what this
+    /// client believes. The binding stores nothing and picks no location; a `BlockId` is
+    /// an object with two buffers, and where it lives is the caller's decision.
+    #[napi]
+    pub async fn connect_from(config: &Config, anchor: BlockId) -> napi::Result<TonClient> {
+        let network = config.inner.clone();
+        let start = block_id_ext(&anchor)?;
+        let client = ton_net::Client::connect_from(&network, &start)
+            .await
+            .map_err(to_js)?;
+        Ok(TonClient {
+            inner: Arc::new(Mutex::new(client)),
+        })
+    }
+
+    /// The key block this client's trust rests on, or null before it has synced.
+    ///
+    /// Save it and hand it to `connectFrom` on a later run to make that run's sync short.
+    #[napi]
+    pub async fn anchor(&self) -> Option<BlockId> {
+        let client = self.inner.lock().await;
+        client.anchor().map(block_id)
+    }
+
+    /// Walks the anchor forward to the network's current head.
+    ///
+    /// Without an anchor the walk starts at the config's init block, which is a first
+    /// sync and runs over every key block published since: minutes and tens of megabytes
+    /// against mainnet. With one it is a link or two.
+    #[napi]
+    pub async fn sync(&self) -> napi::Result<SyncReport> {
+        let mut client = self.inner.lock().await;
+        let report = client.sync().await.map_err(to_js)?;
+        Ok(SyncReport {
+            head: block_id(&report.head),
+            links: report.links as u32,
+            rounds: report.rounds as u32,
+        })
+    }
+
     /// Reads the liteserver's current masterchain head.
     #[napi]
     pub async fn masterchain_info(&self) -> napi::Result<ReportedMasterchainInfo> {
@@ -207,13 +272,33 @@ impl TonClient {
         })
     }
 
-    /// Reads and decodes an account at the current masterchain head.
+    /// Reads an account and proves it against a block this client established itself.
     ///
-    /// `address` is a raw `workchain:hex` or user-friendly base64 address. The result is
-    /// the server's word: the proof it sent comes back alongside, unchecked. To have that
-    /// proof checked, use `accountVerified`.
+    /// `address` is a raw `workchain:hex` or user-friendly base64 address. Walks the
+    /// chain to a current head, reads the account there, and checks the proofs against
+    /// it, so nothing in the result rests on a block the caller supplied. The first call
+    /// pays for the walk; save `anchor()` and pass it to `connectFrom` next time.
+    ///
+    /// Every call walks. A caller reading several accounts should `sync()` once and pass
+    /// that head to `accountAt` rather than pay for a walk per account.
     #[napi]
-    pub async fn account(&self, address: String) -> napi::Result<ReportedAccount> {
+    pub async fn account(&self, address: String) -> napi::Result<VerifiedAccount> {
+        let parsed = ton_net::Address::parse(&address).map_err(to_js)?;
+        let mut client = self.inner.lock().await;
+        let verified = client.account(&parsed).await.map_err(to_js)?;
+        Ok(VerifiedAccount {
+            anchor: block_id(verified.anchor()),
+            value: account(verified.into_value()),
+        })
+    }
+
+    /// Reads an account at the current masterchain head without checking anything.
+    ///
+    /// The result is the server's word: the proof it sent comes back alongside,
+    /// unchecked. It is named for what it is, because the proven read is the one a caller
+    /// lands on without choosing and this is the exception.
+    #[napi]
+    pub async fn account_reported(&self, address: String) -> napi::Result<ReportedAccount> {
         let parsed = ton_net::Address::parse(&address).map_err(to_js)?;
         let mut client = self.inner.lock().await;
         let reported = client.account_reported(&parsed).await.map_err(to_js)?;
@@ -224,7 +309,7 @@ impl TonClient {
         })
     }
 
-    /// Reads an account at a block the caller trusts, and proves it belongs to that block.
+    /// Reads an account at a block the caller names, and proves it belongs to that block.
     ///
     /// The proofs are checked against `trusted`'s root hash, and for an account outside
     /// the masterchain the shard block holding it is derived from the masterchain state
@@ -232,11 +317,13 @@ impl TonClient {
     /// rejects; there is no unproved fallback. An account the block's state does not hold
     /// comes back as `nonexistent`, which is a proved answer rather than a failure.
     ///
-    /// `trusted` is the one input taken on faith, and taking it from `masterchainInfo` on
-    /// this same client proves nothing: that only shows the server agrees with itself. It
-    /// has to come from somewhere the caller trusts independently.
+    /// `trusted` is taken on faith, so where it came from is the whole question. Taking it
+    /// from `masterchainInfo` on this same client proves nothing: that only shows the
+    /// server agrees with itself. The two sources that mean something are a block this
+    /// client proved, from `sync()` or `anchor()`, and a block the caller trusts
+    /// independently.
     #[napi]
-    pub async fn account_verified(
+    pub async fn account_at(
         &self,
         address: String,
         trusted: BlockId,
