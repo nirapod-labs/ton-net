@@ -47,12 +47,19 @@ pub enum BlockError {
     #[error("no merkle proof roots at the required hash")]
     ProofNotAnchored,
 
-    /// The proof prunes away the path to the account, so it says nothing about it.
+    /// The proof prunes away the part of the block that was being read.
     ///
     /// A server that returns this has not answered the question, which is different from
-    /// proving the account is not there.
-    #[error("the proof does not cover the account")]
+    /// proving the answer is nothing.
+    #[error("the proof does not cover what was read")]
     NotCovered,
+
+    /// The network configuration was read from a block that carries none.
+    ///
+    /// Only a key block holds the configuration in its body. This is what a proof chain
+    /// that tries to continue from an ordinary block fails as.
+    #[error("not a key block, so it carries no configuration")]
+    NotAKeyBlock,
 
     /// The account state does not match the hash the proof binds to the block.
     ///

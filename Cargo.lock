@@ -696,8 +696,10 @@ dependencies = [
 name = "ton-net-block"
 version = "0.2.0-alpha.1"
 dependencies = [
+ "sha2",
  "thiserror",
  "ton-net-cell",
+ "ton-net-tl",
 ]
 
 [[package]]

@@ -1,12 +1,13 @@
 //! TON block and account structures, decoded from cells, for ton-net.
 //!
 //! This crate turns the cells a liteserver returns into values a reader can use. It
-//! reads the account structure into an [`Account`], and walks the fragments of a block
-//! and a shard state that an account read and its proof depend on.
+//! reads the account structure into an [`Account`], walks the fragments of a block and a
+//! shard state that an account read and its proof depend on, and reads a block's
+//! [`BlockHeader`] and the [`ValidatorSet`] a key block names.
 //!
-//! It decodes only what a read needs. A shard state carries message queues, libraries
-//! and the network configuration, and a block carries its whole transaction set; none of
-//! that is read here.
+//! It decodes only what a read or a proof needs. A shard state carries message queues
+//! and libraries, and a block carries its whole transaction set; none of that is read
+//! here.
 //!
 //! # Trust
 //!
@@ -41,11 +42,13 @@ pub mod dict;
 mod error;
 pub mod proof;
 mod shard;
+pub mod validators;
 
 pub use account::{Account, AccountStatus};
-pub use block::Block;
+pub use block::{Block, BlockHeader};
 pub use coins::Coins;
 pub use dict::Lookup;
 pub use error::BlockError;
 pub use proof::{verify_account, AccountRead};
 pub use shard::{McStateExtra, ShardAccountEntry, ShardDescr, ShardState};
+pub use validators::{Validator, ValidatorSet};
