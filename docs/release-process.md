@@ -31,6 +31,16 @@ claiming to be the same library at different numbers.
    have done, whether any published version carried it, and what now refuses it.
 4. The measured numbers in the README still match. A sync benchmark that has
    drifted is a claim that has gone stale.
+5. `just test-snapshot` passes, and its output is read rather than only its exit
+   code. It reports how many of the bundled liteservers still answer and how far
+   the pinned block has fallen behind the head. Both decay with the network rather
+   than with a commit, and a published crate cannot be replaced, so a snapshot that
+   had already decayed on release day is a patch release rather than a fix.
+
+   Refreshing it means taking the current published mainnet configuration into
+   `crates/ton-net/src/mainnet.config.json`. That moves the default trust anchor,
+   so the walk from the new pinned block has to be run before the release, not
+   after: `just test-sync`.
 
 ## Cutting it
 

@@ -77,7 +77,13 @@ doc:
 
 # Reaches a live mainnet liteserver. Each test skips if its server is unreachable.
 test-live:
-    cargo test -- --ignored --skip cold_sync
+    cargo test -- --ignored --skip cold_sync --skip snapshot
+
+# How much of the bundled mainnet snapshot the network still recognises: how many of its
+# liteservers answer, and how far its pinned block has fallen behind. Dials every server,
+# so it takes about a minute.
+test-snapshot:
+    cargo test -p ton-net --test snapshot -- --ignored --nocapture
 
 # The full walk from the block the config pins. Minutes, and tens of megabytes.
 test-sync:

@@ -207,11 +207,18 @@ jobs:
       # unreachable, so liteserver rotation does not fail the build, but a real protocol
       # regression does.
       - name: network tests
-        run: cargo test -- --ignored --skip cold_sync
+        run: cargo test -- --ignored --skip cold_sync --skip snapshot
       # Only on the daily schedule: the full walk from the config's init block.
       - name: cold sync
         if: github.event_name == 'schedule'
         run: cargo test -- --ignored cold_sync
+      # Also daily, and deliberately not on a pull request. How much of the bundled
+      # config is left changes with the network rather than with a commit, so failing a
+      # contributor's branch over it would report somebody else's liteserver going down
+      # as their mistake.
+      - name: is the bundled config still current
+        if: github.event_name == 'schedule'
+        run: cargo test -p ton-net --test snapshot -- --ignored --nocapture
 
   node:
     name: node binding
