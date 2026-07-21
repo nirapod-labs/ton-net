@@ -19,6 +19,21 @@ gate: fmt-check lint licenses versions test doc
 versions:
     node scripts/check-versions.mjs
 
+# The sans-I/O core, on a target with no threads, no sockets and no clock. The
+# transport crates are expected to fail this until the browser transport lands.
+wasm:
+    cargo build --target wasm32-unknown-unknown -p ton-net-tl -p ton-net-cell -p ton-net-block
+
+# What the hot paths cost, over committed fixtures, so it runs offline.
+bench:
+    cargo bench -p ton-net-cell --bench cells
+    cargo bench -p ton-net-block --bench verify
+
+# Removes one check at a time and reruns the suite, which answers the question a
+# passing suite cannot: would a test notice. Slow, so it is a scheduled job in CI.
+mutants:
+    cargo mutants -p ton-net-cell -p ton-net-block --timeout 120
+
 versions-fix:
     node scripts/check-versions.mjs --fix
 

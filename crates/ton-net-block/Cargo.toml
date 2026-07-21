@@ -15,6 +15,10 @@ license.workspace = true
 repository.workspace = true
 rust-version.workspace = true
 
+[lib]
+# `cargo bench` would otherwise run the unit tests with criterion's flags.
+bench = false
+
 [dependencies]
 ton-net-cell.workspace = true
 # The block-proof wire types a chain is checked over, and the two messages a validator
@@ -31,5 +35,10 @@ thiserror.workspace = true
 [dev-dependencies]
 # The differential test compares this crate's acceptance rule against an audited
 # implementation. It does not ship, so the curve copy it pulls reaches no consumer.
+criterion.workspace = true
 ed25519-dalek = "3"
 rand_core = "0.9"
+
+[[bench]]
+name = "verify"
+harness = false
