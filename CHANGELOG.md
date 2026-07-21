@@ -34,6 +34,8 @@ Everything for 0.3.0. The heading moves when the release is cut.
   `accountVerified`, `accountState` and `verifyAccount`.
 - Validator signature checking in both of the forms mainnet uses, including the
   Simplex vote, whose candidate hash is now bound to the block a link claims.
+- `AdnlError::NoRandomness`. An operating system that will not supply randomness
+  used to end the calling process; it now fails the call that needed it.
 
 ### Fixed
 
@@ -72,6 +74,9 @@ them.
   no longer arrives as something softer than a proof failure.
 - A thrown error in the Node binding carries a stable code prefix a caller can
   branch on.
+- `Slice::load_bytes` refuses a byte count whose bit count overflows a `usize`.
+  The multiplication wrapped, the length check passed on the wrapped value, and
+  the allocation that followed was made against the count as given.
 
 ### Changed
 
@@ -79,6 +84,11 @@ them.
   passes the threshold, rather than verifying the rest of an honest set.
 - The bound on cell count is set by what a cell costs in memory rather than by
   what the format permits.
+- Every library crate refuses to panic on input. `unwrap`, `expect`, `panic`,
+  `unreachable`, `todo` and slice indexing are denied in each of them, so a
+  decoder handed bytes it cannot read returns an error rather than unwinding
+  through whatever embedded it. The exceptions are named in the source with the
+  argument for why the case cannot arise.
 
 ### Security
 

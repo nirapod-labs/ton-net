@@ -77,9 +77,28 @@ crates.io, npm, PyPI and pub.dev all support trusted publishing, where the
 registry accepts a short-lived OIDC token minted by the workflow and no long-lived
 secret exists to leak. Use it.
 
-Maven Central is the exception and has no OIDC path: it needs a GPG signing key
-and a portal token held as repository secrets. That is the one place a long-lived
-credential is unavoidable, and it arrives with the Kotlin binding rather than now.
+It does not cover the first release. A trusted publisher is configured on a crate
+or a package that already exists, and crates.io has no equivalent of PyPI's pending
+publisher, so the first version of each of the six crates and each of the nine npm
+packages is published by hand with a token. Only then can the registry side be
+configured. That makes the first release a different act from every one after it:
+
+1. Publish 0.3.0 by hand. Six crates in dependency order, then the per-platform
+   npm packages, then the main npm package.
+2. Add a trusted publisher on each: the repository, the release workflow's file
+   name, and the environment if the workflow uses one.
+3. Revoke the tokens used in step one. They have done their only job, and a token
+   that outlives its purpose is the thing trusted publishing exists to remove.
+
+From then on a release workflow mints its own token per run. It needs
+`id-token: write`, `rust-lang/crates-io-auth-action` for the crates side, and on
+the npm side a CLI new enough to speak OIDC, which also attaches provenance
+without being asked.
+
+Maven Central is the other exception and has no OIDC path at all: it needs a GPG
+signing key and a portal token held as repository secrets. That is the one place a
+long-lived credential stays unavoidable, and it arrives with the Kotlin binding
+rather than now.
 
 ## After it lands
 
