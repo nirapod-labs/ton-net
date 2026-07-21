@@ -16,30 +16,58 @@ on:
 env:
   CARGO_TERM_COLOR: always
 
+# Nothing here writes anything back. Stated rather than left to the repository
+# default, because the default is settable and a workflow that reads its rights off
+# a setting has none of its own.
+permissions:
+  contents: read
+
+# A push that lands while the previous one is still running makes the earlier
+# answer irrelevant, so it is cancelled rather than raced. Not on main: a run there
+# is what a merged commit is judged by.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+# A fork that enables Actions inherits the daily schedule, and the work it would do
+# there is a walk over public mainnet blocks that answers a question about this
+# repository. Each job names the repository so the schedule runs in one place, while
+# a push or a pull request from a fork still runs everything.
+#
 # The Node binding gets its own job as that layer lands in the v0.1.0 plan. The
 # hermetic gate covers the core crates; the network job runs the ignored tests that
 # reach a live liteserver; the spike job covers the standalone projects the gate
 # cannot see.
 jobs:
-  reuse:
-    name: license headers
+  conventions:
+    name: license headers and workflow pins
+    if: github.event_name != 'schedule' || github.repository == 'nirapod-labs/ton-net'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       # Every file carries a copyright holder and a license identifier, in its own
       # header where the format allows a comment and in REUSE.toml where it does not.
       # A convention this wide decays without a check, so this one fails the build.
-      - uses: fsfe/reuse-action@v5
+      - uses: fsfe/reuse-action@bb774aa972c2a89ff34781233d275075cbddf542 # v5
+      # A third-party action runs with this job's token, so a moved tag is somebody
+      # else's code arriving here without a commit. The same check covers the two
+      # settings that stay invisible until they matter: what a workflow may write, and
+      # whether a fork's schedule spends runners answering a question about this
+      # repository.
+      - name: workflows pinned and scoped
+        run: node scripts/check-workflows.mjs
 
   check:
     name: fmt, clippy, docs, tests
+    if: github.event_name != 'schedule' || github.repository == 'nirapod-labs/ton-net'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
         with:
+          toolchain: stable
           components: rustfmt, clippy
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
       - name: format
         run: cargo fmt --all -- --check
       - name: clippy
@@ -58,10 +86,14 @@ jobs:
     if: github.event_name == 'schedule' && github.repository == 'nirapod-labs/ton-net'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - uses: taiki-e/install-action@cargo-mutants
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - uses: taiki-e/install-action@a6b2e2dcd845ddd7f509ce4f3ed3d922b80cc5d9 # v2.84.0
+        with:
+          tool: cargo-mutants
       # Removes one check at a time and reruns the suite. A passing suite says the code
       # does what the tests ask; this says whether the tests would notice if it stopped.
       # That is the question worth asking about a library whose job is refusing things.
@@ -69,7 +101,7 @@ jobs:
       # .cargo/mutants.toml, each with the reason.
       - name: cell and proof crates
         run: cargo mutants -p ton-net-cell -p ton-net-block --timeout 120
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
         with:
           name: mutants
@@ -78,13 +110,15 @@ jobs:
 
   wasm:
     name: the core still builds for the browser
+    if: github.event_name != 'schedule' || github.repository == 'nirapod-labs/ton-net'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
         with:
+          toolchain: stable
           targets: wasm32-unknown-unknown
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
       # The browser binding is a later milestone, and by then the decision that
       # matters is already made: whether the protocol logic stayed free of the
       # runtime. These three crates are the sans-I/O core and must build with no
@@ -95,11 +129,14 @@ jobs:
 
   release-ready:
     name: versions and packaging
+    if: github.event_name != 'schedule' || github.repository == 'nirapod-labs/ton-net'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
       # One library version across two registries. release-plz moves the Cargo
       # side and napi moves the npm side, neither reads the other, so without this
       # they drift and two artifacts claim to be the same library at different
@@ -115,12 +152,17 @@ jobs:
 
   msrv:
     name: msrv 1.85 core, 1.88 binding
+    if: github.event_name != 'schedule' || github.repository == 'nirapod-labs/ton-net'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@1.85.0
-      - uses: dtolnay/rust-toolchain@1.88.0
-      - uses: Swatinem/rust-cache@v2
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
+        with:
+          toolchain: 1.85.0
+      - uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
+        with:
+          toolchain: 1.88.0
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
       # rust-toolchain.toml selects stable for any command that does not name a
       # toolchain, including here, so the floor is passed explicitly. Without the
       # +version this job would build on stable and report the floor as met.
@@ -133,11 +175,14 @@ jobs:
 
   network:
     name: network integration
+    if: github.event_name != 'schedule' || github.repository == 'nirapod-labs/ton-net'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
       # The ignored tests reach a live mainnet liteserver. Each skips if its server is
       # unreachable, so liteserver rotation does not fail the build, but a real protocol
       # regression does.
@@ -150,15 +195,17 @@ jobs:
 
   node:
     name: node binding
+    if: github.event_name != 'schedule' || github.repository == 'nirapod-labs/ton-net'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       # napi-rs 3.x needs a newer toolchain than the core floor; stable satisfies it.
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
         with:
+          toolchain: stable
           components: clippy
-      - uses: Swatinem/rust-cache@v2
-      - uses: actions/setup-node@v4
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
       - name: install
@@ -204,13 +251,15 @@ jobs:
 
   spikes:
     name: spike lint
+    if: github.event_name != 'schedule' || github.repository == 'nirapod-labs/ton-net'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
         with:
+          toolchain: stable
           components: rustfmt, clippy
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
       # Each spike is a standalone project with its own lockfile, excluded from the
       # workspace, so --all-targets above never reaches one. Unlinted they rot: every
       # clippy release adds lints, and the drift surfaces as a wall of unrelated

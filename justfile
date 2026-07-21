@@ -12,7 +12,12 @@ default:
     @just --list
 
 # Everything the hermetic CI gate runs. No network.
-gate: fmt-check lint licenses versions test doc
+gate: fmt-check lint licenses workflows versions test doc
+
+# A moved action tag is somebody else's code in this build. Also checks that a workflow
+# states what it may write and that a fork's schedule does not run it.
+workflows:
+    node scripts/check-workflows.mjs
 
 # The crates and the npm packages ship from one commit but publish through two
 # toolchains that do not read each other, so nothing but this keeps them in step.
