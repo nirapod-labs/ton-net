@@ -84,6 +84,31 @@ pub struct BlockIdExt {
     pub file_hash: [u8; 32],
 }
 
+impl From<ton_net_tl::lite::BlockIdExt> for BlockIdExt {
+    /// The sequence number is a height, so it becomes unsigned crossing into the domain.
+    fn from(wire: ton_net_tl::lite::BlockIdExt) -> BlockIdExt {
+        BlockIdExt {
+            workchain: wire.workchain,
+            shard: wire.shard,
+            seqno: wire.seqno as u32,
+            root_hash: wire.root_hash,
+            file_hash: wire.file_hash,
+        }
+    }
+}
+
+impl From<&BlockIdExt> for ton_net_tl::lite::BlockIdExt {
+    fn from(block: &BlockIdExt) -> ton_net_tl::lite::BlockIdExt {
+        ton_net_tl::lite::BlockIdExt {
+            workchain: block.workchain,
+            shard: block.shard,
+            seqno: block.seqno as i32,
+            root_hash: block.root_hash,
+            file_hash: block.file_hash,
+        }
+    }
+}
+
 impl BlockIdExt {
     /// Names a block by its five identifying parts.
     ///

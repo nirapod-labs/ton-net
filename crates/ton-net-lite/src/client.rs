@@ -73,7 +73,7 @@ impl<T: Transport> LiteClient<T> {
         let info: wire::MasterchainInfo = decode_answer(&answer)?;
         Ok(ServerReported::new(
             MasterchainInfo {
-                last: block_id(info.last),
+                last: info.last.into(),
                 state_root_hash: info.state_root_hash,
             },
             Vec::new(),
@@ -98,15 +98,15 @@ impl<T: Transport> LiteClient<T> {
         account: &wire::AccountId,
     ) -> Result<ServerReported<AccountState>, LiteError> {
         let request = wire::GetAccountState {
-            id: wire_block(block),
+            id: block.into(),
             account: account.clone(),
         };
         let answer = self.connection.query(&build_query(request)).await?;
         let state: wire::AccountState = decode_answer(&answer)?;
         Ok(ServerReported::new(
             AccountState {
-                block: block_id(state.id),
-                shard_block: block_id(state.shardblk),
+                block: state.id.into(),
+                shard_block: state.shardblk.into(),
                 shard_proof: state.shard_proof,
                 state: state.state,
             },
@@ -143,8 +143,8 @@ impl<T: Transport> LiteClient<T> {
         // nothing from letting the server choose for it.
         let request = wire::GetBlockProof {
             mode: (),
-            known_block: wire_block(known),
-            target_block: Some(wire_block(target)),
+            known_block: known.into(),
+            target_block: Some(target.into()),
         };
         let answer = self.connection.query(&build_query(request)).await?;
         decode_answer(&answer)
@@ -176,29 +176,6 @@ where
         });
     }
     Ok(deserialize::<R>(answer)?)
-}
-
-/// Maps a wire block id to the domain form; the sequence number is a height and becomes
-/// unsigned.
-fn block_id(wire: wire::BlockIdExt) -> BlockIdExt {
-    BlockIdExt {
-        workchain: wire.workchain,
-        shard: wire.shard,
-        seqno: wire.seqno as u32,
-        root_hash: wire.root_hash,
-        file_hash: wire.file_hash,
-    }
-}
-
-/// Maps a domain block id back to the wire form for a request.
-fn wire_block(block: &BlockIdExt) -> wire::BlockIdExt {
-    wire::BlockIdExt {
-        workchain: block.workchain,
-        shard: block.shard,
-        seqno: block.seqno as i32,
-        root_hash: block.root_hash,
-        file_hash: block.file_hash,
-    }
 }
 
 #[cfg(test)]
@@ -267,8 +244,8 @@ mod tests {
         };
         let body = serialize(wire::GetBlockProof {
             mode: (),
-            known_block: wire_block(&block),
-            target_block: Some(wire_block(&block)),
+            known_block: (&block).into(),
+            target_block: Some((&block).into()),
         });
 
         // Constructor id, then the mode word with bit 0 set for the target that
@@ -282,14 +259,14 @@ mod tests {
         // The envelope is the same one every other request travels in.
         let query = build_query(wire::GetBlockProof {
             mode: (),
-            known_block: wire_block(&block),
-            target_block: Some(wire_block(&block)),
+            known_block: (&block).into(),
+            target_block: Some((&block).into()),
         });
         assert_eq!(&hex(&query[..4]), "df068c79");
     }
 
     #[test]
-    fn block_id_maps_wire_to_domain() {
+    fn a_wire_block_id_maps_to_the_domain_form() {
         let wire = wire::BlockIdExt {
             workchain: -1,
             shard: 0x8000_0000_0000_0000,
@@ -297,7 +274,7 @@ mod tests {
             root_hash: [1; 32],
             file_hash: [2; 32],
         };
-        let domain = block_id(wire);
+        let domain: BlockIdExt = wire.into();
         assert_eq!(domain.workchain, -1);
         assert_eq!(domain.shard, 0x8000_0000_0000_0000);
         assert_eq!(domain.seqno, 42_u32);
