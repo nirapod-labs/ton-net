@@ -53,6 +53,13 @@ const MAX_PROOF_BYTES: usize = 1 << 20;
 /// spend a minute refusing them. Mainnet runs about a hundred masterchain validators.
 const MAX_SIGNATURES: usize = 1024;
 
+/// How far ahead of the local clock a proven block may be stamped before the clock, not
+/// the block, is treated as the thing that is wrong.
+///
+/// Wide enough for ordinary drift and for the seconds between a block being generated and
+/// being served, narrow enough that the freshness bound keeps meaning something.
+const MAX_CLOCK_SKEW: u64 = 300;
+
 /// Refuses a reply that is larger than anything the protocol produces, before any of it
 /// is checked.
 ///
@@ -185,15 +192,54 @@ pub(crate) fn fresh_enough(gen_utime: u32, limit_seconds: u32) -> Result<(), Err
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |since| since.as_secs());
-    // A local clock behind the block reads as an age of zero rather than as a wrap. A
-    // clock that wrong is a caller problem, and refusing a fresh block over it would be
-    // the wrong failure.
-    let age = now.saturating_sub(u64::from(gen_utime));
+    let stamped = u64::from(gen_utime);
+    // Validators do not sign blocks from the future, so a proven block well ahead of the
+    // local clock says the clock is behind, not that the block is early.
+    //
+    // That has to be reported rather than tolerated, because the subtraction below
+    // saturates: to a clock a year behind, every block from the last year reads as
+    // brand new and the bound stops applying at all. A little tolerance is still right,
+    // for ordinary drift and for the seconds between a block being generated and being
+    // served, but past that the honest answer is that this check cannot run rather than
+    // that it passed.
+    if stamped > now.saturating_add(MAX_CLOCK_SKEW) {
+        return Err(Error::ClockBehind {
+            by_seconds: stamped - now,
+            tolerated_seconds: MAX_CLOCK_SKEW,
+        });
+    }
+    let age = now.saturating_sub(stamped);
     if age > u64::from(limit_seconds) {
         return Err(Error::Stale {
             age_seconds: age,
             limit_seconds: u64::from(limit_seconds),
         });
+    }
+    Ok(())
+}
+
+/// Refuses to keep walking once the walk has outlasted the freshness bound.
+///
+/// The target was current when the walk began and the head the walk proves is at or
+/// before it, so a walk that has already run longer than the bound cannot end anywhere
+/// [`fresh_enough`] will accept. Saying so here turns a server that answers slowly
+/// forever into a named failure in about the time the caller allowed, where the round
+/// count alone bounds it at that count times the per-reply deadline: hours.
+///
+/// A zero bound refuses every head by design, so a walk under one is allowed its first
+/// reply and fails as stale, which is the failure the caller asked for.
+pub(crate) fn worth_continuing(
+    elapsed: std::time::Duration,
+    limit_seconds: u32,
+) -> Result<(), Error> {
+    if limit_seconds == 0 {
+        return Ok(());
+    }
+    let elapsed = elapsed.as_secs();
+    if elapsed > u64::from(limit_seconds) {
+        return Err(Error::Sync(format!(
+            "the walk has run {elapsed}s without finishing, longer than the {limit_seconds}s a head is allowed to be old"
+        )));
     }
     Ok(())
 }
@@ -240,10 +286,6 @@ mod tests {
         assert!(fresh_enough(now - 599, 600).is_ok());
         assert!(fresh_enough(now - 601, 600).is_err());
 
-        // A block stamped in the future is not stale, whatever else it is. Refusing it
-        // here would report the wrong failure for a clock that is merely behind.
-        assert!(fresh_enough(now + 10_000, 600).is_ok());
-
         match fresh_enough(now - 4_000, 600) {
             Err(Error::Stale {
                 age_seconds,
@@ -254,6 +296,60 @@ mod tests {
             }
             other => panic!("expected a stale head, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn a_clock_behind_the_chain_is_reported_rather_than_obeyed() {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("a clock after 1970")
+            .as_secs() as u32;
+
+        // Ordinary drift, and the seconds between a block being made and served.
+        assert!(fresh_enough(now + 60, 600).is_ok());
+
+        // Past that the block is not early, the clock is late, and saying so is the whole
+        // point: the age below saturates, so to a clock a year behind every block from
+        // the last year reads as brand new and the freshness bound stops applying. A
+        // server replaying a real, fully signed, year-old chain passes every other check
+        // in this library, so a bound that quietly switches itself off is worse than one
+        // that refuses and names the reason.
+        match fresh_enough(now + 10_000, 600) {
+            Err(Error::ClockBehind {
+                by_seconds,
+                tolerated_seconds,
+            }) => {
+                assert!((9_999..=10_001).contains(&by_seconds));
+                assert_eq!(tolerated_seconds, 300);
+            }
+            other => panic!("expected the clock to be reported, got {other:?}"),
+        }
+
+        // The bound the caller set does not enter into it: a wrong clock is not a stale
+        // head, and the remedies are different.
+        assert!(matches!(
+            fresh_enough(now + 10_000, u32::MAX),
+            Err(Error::ClockBehind { .. })
+        ));
+    }
+
+    #[test]
+    fn a_walk_that_outlasts_the_freshness_bound_stops() {
+        use std::time::Duration;
+
+        // Nothing the walk can reach after this will pass `fresh_enough`, since the head
+        // it proves is at or before a target that was current when it started. Saying so
+        // per round is what keeps a server that answers slowly forever from holding a
+        // read for the round count times the per-reply deadline.
+        assert!(worth_continuing(Duration::from_secs(599), 600).is_ok());
+        assert!(matches!(
+            worth_continuing(Duration::from_secs(601), 600),
+            Err(Error::Sync(_))
+        ));
+
+        // A zero bound refuses every head by design, so a walk under one is allowed to
+        // run and fail as stale, which is the failure that was asked for.
+        assert!(worth_continuing(Duration::from_secs(10_000), 0).is_ok());
     }
 
     #[test]

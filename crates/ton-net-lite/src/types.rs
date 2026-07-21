@@ -8,13 +8,15 @@
 
 /// A value a liteserver returned without a checked proof.
 ///
-/// In this release the client does not verify the Merkle proofs a liteserver sends, so
-/// every read is the server's unproven word. This wrapper keeps that fact in the type: a
-/// caller reaches the inner value through [`value`](Self::value) or
-/// [`into_value`](Self::into_value) and cannot mistake it for verified state.
+/// A `LiteClient` checks nothing, so everything it returns is the server's word and wears
+/// this wrapper to say so. A caller reaches the inner value through
+/// [`value`](Self::value) or [`into_value`](Self::into_value) and cannot mistake it for
+/// verified state.
 ///
-/// The raw proof bytes the server sent are kept by [`proof`](Self::proof) so a later
-/// release can check them without another round trip.
+/// The raw proof bytes the server sent are kept by [`proof`](Self::proof), so the layer
+/// above can check them without another round trip. That is what `ton-net-block` does,
+/// and it is why the `ton-net` facade can hand back a proved value while the calls here
+/// still hand back this one.
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct ServerReported<T> {
@@ -149,8 +151,9 @@ pub struct MasterchainInfo {
 
 /// An account's state as a liteserver reports it.
 ///
-/// The state is raw bag-of-cells bytes. This client does not parse the cell tree into a
-/// balance, code, and data, nor check the proofs the server sent alongside it.
+/// The state is raw bag-of-cells bytes. This crate neither reads the cell tree as a
+/// balance, code, and data nor checks the proofs that came with it; both happen a layer
+/// up, and the bytes are carried here so they can.
 ///
 /// Two proofs come back for one read, and they chain. The account-state proof, kept on
 /// the [`ServerReported`] wrapper, roots at [`shard_block`](Self::shard_block). The shard

@@ -119,9 +119,13 @@ impl Config {
     /// The block a client anchors its trust at before it has proved anything.
     ///
     /// This is the `validator.init_block` field of the TON config format, and it is the
-    /// single input a verified read rests on. A caller who wants a different root of
-    /// trust changes it here or hands their own block to
-    /// [`Client::connect_from`](crate::Client::connect_from).
+    /// only thing a verified read takes on trust from the chain's side of the world. A
+    /// caller who wants a different root of trust changes it here or hands their own
+    /// block to [`Client::connect_from`](crate::Client::connect_from).
+    ///
+    /// It is not the only trusted input. The other is the local clock, which is the one
+    /// thing separating a current block from a genuine old one replayed: see
+    /// [`max_head_age`](Self::max_head_age).
     #[must_use]
     pub fn init_block(&self) -> Option<&BlockIdExt> {
         self.init_block.as_ref()

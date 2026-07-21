@@ -28,6 +28,9 @@ const PROOF_TIMEOUT: Duration = Duration::from_secs(60);
 /// The workchain id of the masterchain, whose accounts need no shard proof.
 const MASTERCHAIN: i32 = -1;
 
+/// The masterchain's shard: an empty prefix, so the whole workchain in one shard.
+const MASTERCHAIN_SHARD: u64 = 0x8000_0000_0000_0000;
+
 /// A connection to a single TON liteserver.
 ///
 /// A `Client` owns one ADNL channel to one liteserver and serves reads over it.
@@ -147,10 +150,14 @@ impl Client {
             }
         };
 
-        // The head is the server's word about where the chain ends, used only as the
-        // target to ask for. Every block on the way to it is proved, including this one,
-        // so a server naming a block that does not exist fails the walk rather than
-        // steering it.
+        // The head is the server's word about where the chain ends, used as the target to
+        // ask for. Every block on the way to it is proved, this one included, and the
+        // walk is required below to actually arrive at it, so a server naming a block it
+        // cannot reach fails the walk rather than steering it somewhere shorter.
+        //
+        // What this does not settle is whether the head named is the network's. Nothing
+        // inside a proof says when it was served, so a server understating its own head
+        // is caught by the freshness bound and by nothing else.
         let target = self.masterchain_info().await?.into_value().last;
         // A server whose head is not ahead of what the client already trusts has nothing
         // to prove, and there is no way to establish that its block is current without a
@@ -162,10 +169,12 @@ impl Client {
             )));
         }
 
+        let started = std::time::Instant::now();
         let mut anchor = start.clone();
         let mut trusted_key_block = start;
         let mut walk = sync::Walk::new();
         loop {
+            sync::worth_continuing(started.elapsed(), self.max_head_age)?;
             let reply = within(PROOF_TIMEOUT, self.lite.block_proof(&anchor, &target)).await?;
             sync::within_bounds(&reply)?;
             walk.round(reply.steps.len())?;
@@ -184,6 +193,17 @@ impl Client {
             anchor = reached;
 
             if reply.complete {
+                // A chain is only finished if it ends where it was asked to end. Without
+                // this the server picks the head, since nothing below reads `complete`
+                // and the chain layer checks only that the run is internally consistent
+                // and starts where the client said. Stopping short of a target the same
+                // server named a moment ago is not something an honest one does.
+                if anchor != target {
+                    return Err(Error::Sync(format!(
+                        "the server called the chain complete at {} without reaching the {} it named",
+                        anchor.seqno, target.seqno
+                    )));
+                }
                 sync::fresh_enough(proven.gen_utime, self.max_head_age)?;
                 self.anchor = Some(trusted_key_block);
                 let (links, rounds) = walk.cost();
@@ -252,15 +272,20 @@ impl Client {
     /// Returns [`Error::Timeout`] if a query does not complete in time, [`Error::LiteServer`]
     /// if the server returns an error, [`Error::Decode`] if a response does not decode,
     /// [`Error::Cell`] if the account state does not read as an account, or
-    /// [`Error::Transport`] on a socket failure.
+    /// [`Error::Transport`] on a socket failure. Never [`Error::Proof`]: this call checks
+    /// no proof, so it has none to fail.
     pub async fn account_reported(
         &mut self,
         address: &Address,
     ) -> Result<ServerReported<Account>, Error> {
         let head = self.masterchain_info().await?;
         let reported = self.account_state(address, &head.value().last).await?;
-        // Decoding does not make the value any more believed, so it stays wrapped.
-        Ok(reported.try_map(|state| Account::decode(&state.state))?)
+        // Decoding does not make the value any more believed, so it stays wrapped. The
+        // failure is classified by hand rather than through `?`, because the conversion
+        // reads a block-structure failure as a proof failure and there is no proof here.
+        reported
+            .try_map(|state| Account::decode(&state.state))
+            .map_err(Error::decoding)
     }
 
     /// Reads an account's raw state and proofs at a given block.
@@ -308,8 +333,8 @@ impl Client {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::Proof`] if a proof does not check out or the account does not bind
-    /// to `trusted`, [`Error::Cell`] if the bytes are not cells, or [`Error::Timeout`],
+    /// Returns [`Error::Proof`] if `trusted` is not a masterchain block, if a proof does
+    /// not check out, or if the account does not bind to `trusted`, or [`Error::Timeout`],
     /// [`Error::LiteServer`], [`Error::Decode`], or [`Error::Transport`] as the read
     /// fails.
     pub async fn account_at(
@@ -317,6 +342,18 @@ impl Client {
         address: &Address,
         trusted: &BlockIdExt,
     ) -> Result<Verified<Account>, Error> {
+        // The whole chain of reasoning below hangs off a masterchain block: a shard read
+        // derives its shard block from the masterchain state, and a masterchain read
+        // takes this hash as the state's own. A shard block here would leave the second
+        // path checking a server's proof against a server's hash and calling the result
+        // verified. The chain layer refuses a non-masterchain block by name, and this is
+        // the other door into the same trust.
+        if trusted.workchain != MASTERCHAIN || trusted.shard != MASTERCHAIN_SHARD {
+            return Err(Error::Proof(format!(
+                "the trusted block is in workchain {}, and only a masterchain block anchors a read",
+                trusted.workchain
+            )));
+        }
         let reported = self.account_state(address, trusted).await?;
         let anchor = trusted.root_hash;
         let workchain = address.workchain();

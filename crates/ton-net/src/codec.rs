@@ -4,11 +4,19 @@
 //! here rather than pulled as dependencies, the same choice the feasibility spike made
 //! for CRC32: each is a handful of lines and carries no supply-chain weight.
 
-/// Decodes standard or URL-safe base64, ignoring `=` padding.
+/// Decodes standard or URL-safe base64, in its canonical form only.
 ///
 /// Accepts both alphabets (`+/` and `-_`) so it serves config keys, which are standard
 /// base64, and user-friendly addresses, which are URL-safe. Returns `None` on any
 /// character outside either alphabet.
+///
+/// One input decodes to one output and one output encodes to one input. That is a
+/// property worth spending a few lines on rather than a nicety: without it, appending a
+/// character to a 48-character address adds six bits, emits no byte, and yields the same
+/// address, so two different strings name one account and any caller keeping a list of
+/// addresses as strings can be walked past it. The three things that would break it are
+/// a length that is not a whole number of quanta, padding in the middle, and a final
+/// character with bits set that no output byte carries.
 pub(crate) fn base64_decode(input: &str) -> Option<Vec<u8>> {
     fn sextet(c: u8) -> Option<u32> {
         Some(match c {
@@ -21,19 +29,31 @@ pub(crate) fn base64_decode(input: &str) -> Option<Vec<u8>> {
         })
     }
 
-    let mut out = Vec::with_capacity(input.len() * 3 / 4);
+    let bytes = input.as_bytes();
+    if bytes.len() % 4 != 0 {
+        return None;
+    }
+    // At most two `=`, and only at the end.
+    let padding = bytes.iter().rev().take_while(|&&c| c == b'=').count();
+    if padding > 2 || bytes[..bytes.len() - padding].contains(&b'=') {
+        return None;
+    }
+
+    let mut out = Vec::with_capacity(bytes.len() * 3 / 4);
     let mut acc = 0u32;
     let mut bits = 0u32;
-    for &c in input.as_bytes() {
-        if c == b'=' {
-            break;
-        }
+    for &c in &bytes[..bytes.len() - padding] {
         acc = (acc << 6) | sextet(c)?;
         bits += 6;
         if bits >= 8 {
             bits -= 8;
             out.push((acc >> bits) as u8);
         }
+    }
+    // Whatever is left over belongs to no output byte, so an encoder would have left it
+    // clear. Anything set here is a second spelling of the same value.
+    if acc & ((1 << bits) - 1) != 0 {
+        return None;
     }
     Some(out)
 }

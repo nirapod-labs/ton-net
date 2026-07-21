@@ -72,18 +72,61 @@ pub enum Error {
         /// The bound that was exceeded, from [`crate::Config::max_head_age`].
         limit_seconds: u64,
     },
+
+    /// The local clock is far enough behind the chain that freshness cannot be judged.
+    ///
+    /// Validators do not sign blocks from the future, so a proven block well ahead of the
+    /// local clock places the fault on this side. It is reported rather than ignored
+    /// because the freshness check is what separates a current block from a genuine old
+    /// one replayed, and a clock this wrong silently switches it off. The remedy is a
+    /// correct clock, not another server.
+    #[error("the local clock is {by_seconds}s behind the chain, past the {tolerated_seconds}s tolerated")]
+    ClockBehind {
+        /// How far the proven block is ahead of the local clock.
+        by_seconds: u64,
+        /// The drift that is tolerated before this is reported.
+        tolerated_seconds: u64,
+    },
+
+    /// The session lost its place in the byte stream and cannot be used again.
+    ///
+    /// The ADNL ciphers are a counter the two ends advance in step, so a frame that only
+    /// half moved leaves this side unable to read anything further. Abandoning a call at
+    /// its deadline is one way to get here. A caller opens a new client; retrying on this
+    /// one fails the same way every time.
+    #[error("the connection lost its place and has to be reopened")]
+    ConnectionLost,
+}
+
+impl Error {
+    /// Classifies a block-structure failure from a read that checked nothing.
+    ///
+    /// The same [`BlockError`](ton_net_block::BlockError) means two different things
+    /// depending on which call produced it, and the difference is what a caller acts on.
+    /// Out of the proof engine it is a server that did not prove its answer, and the
+    /// conversion below says so. Out of `Client::account_reported` there was no proof to
+    /// fail, so the same failure is only bytes that did not read, and calling it a proof
+    /// failure would report a check that never ran.
+    pub(crate) fn decoding(error: ton_net_block::BlockError) -> Error {
+        Error::Cell(error.to_string())
+    }
 }
 
 impl From<ton_net_block::BlockError> for Error {
+    /// Every way the proof engine fails is a proof failure, bytes that are not cells
+    /// included.
+    ///
+    /// The tempting split is to call unparseable bytes a decode failure, on the reasoning
+    /// that they failed before any proof was in question. They did not: the bytes are the
+    /// server's proof, and the engine parses them with no precondition, so four bytes of
+    /// junk in a shard proof is a server failing to prove its answer in the cheapest way
+    /// available. A caller deciding whether to keep asking this server needs both to
+    /// arrive as the same kind of failure.
+    ///
+    /// A read that verified nothing must not use this. It has a classifier of its own, so
+    /// a failure out of one stays a failure to read bytes.
     fn from(error: ton_net_block::BlockError) -> Self {
-        use ton_net_block::BlockError;
-        match error {
-            // Bytes that are not cells at all failed before any proof was in question.
-            BlockError::Cell(cell) => Error::Cell(cell.to_string()),
-            // Everything else was reached while checking a proof, so it failed as one: a
-            // structure that does not read is a proof that does not check out.
-            other => Error::Proof(other.to_string()),
-        }
+        Error::Proof(error.to_string())
     }
 }
 
@@ -101,6 +144,10 @@ impl From<ton_net_adnl::AdnlError> for Error {
         match error {
             AdnlError::Transport(transport) => transport.into(),
             AdnlError::Handshake(_) => Error::Handshake,
+            // Kept apart from the rest because the remedy differs: this connection is
+            // finished and no retry on it will work, where a framing failure may be one
+            // bad answer.
+            AdnlError::Desynchronized => Error::ConnectionLost,
             // A framing, checksum, or malformed-message failure is a decode failure at
             // this layer.
             other => Error::Decode(other.to_string()),
@@ -139,6 +186,13 @@ mod tests {
             BlockError::WrongConstructor { expected: "block" },
             BlockError::Malformed("shard state"),
             BlockError::LabelTooLong,
+            // Bytes that are not cells belong on this list too. The engine parses the
+            // proof with no precondition, so four bytes of junk where a shard proof
+            // should be is a server failing to prove its answer in the cheapest way
+            // there is, and a caller weighing whether to keep asking this server has to
+            // see it alongside the rest.
+            BlockError::Cell(ton_net_cell::CellError::NotABagOfCells),
+            BlockError::Cell(ton_net_cell::CellError::Truncated),
         ] {
             let mapped = Error::from(failure.clone());
             assert!(
@@ -149,10 +203,19 @@ mod tests {
     }
 
     #[test]
-    fn bytes_that_are_not_cells_arrive_as_a_cell_failure() {
-        // This one failed before a proof was in question, so calling it a proof failure
-        // would point a caller at the wrong thing.
-        let mapped = Error::from(BlockError::Cell(ton_net_cell::CellError::NotABagOfCells));
-        assert!(matches!(mapped, Error::Cell(_)), "{mapped:?}");
+    fn a_read_that_checked_nothing_reports_no_proof_failure() {
+        // The mirror of the rule above. `account_reported` verifies nothing, so the same
+        // failure out of it is bytes that did not read, and calling it a proof failure
+        // would report a check that never ran.
+        for failure in [
+            BlockError::Malformed("account address"),
+            BlockError::Cell(ton_net_cell::CellError::NotABagOfCells),
+        ] {
+            let mapped = Error::decoding(failure.clone());
+            assert!(
+                matches!(mapped, Error::Cell(_)),
+                "{failure:?} became {mapped:?}"
+            );
+        }
     }
 }

@@ -20,8 +20,15 @@
 //! [`Client::sync`] is what closes that. It walks from the key block the config pins to
 //! the network's current head, checking a validator signature set at every step, and
 //! leaves the client holding a block it proved rather than one a server named. The block
-//! it starts from is the single input still taken on trust, and it comes from the file
-//! that already decides which network a client is on.
+//! it starts from is the one thing still taken on trust from the chain's side, and it
+//! comes from the file that already decides which network a client is on.
+//!
+//! The other trusted input is the local clock. A proof establishes that a block is real
+//! and was committed; it says nothing about when it was handed over, so a server
+//! replaying a genuine chain from last year passes every other check here. The clock is
+//! what catches that, which means a client whose clock is wrong has a weaker freshness
+//! guarantee than one whose clock is right. A clock far enough behind is reported rather
+//! than obeyed, so the check never silently stops running.
 //!
 //! [`Client::account`] reads against that block, so it is the read to reach for.
 //! [`Client::account_at`] proves against a block the caller names, and
