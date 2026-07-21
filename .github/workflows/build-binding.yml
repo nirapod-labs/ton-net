@@ -1,0 +1,140 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: 2026 Nirapod Labs
+
+# Builds the Node binding for every platform it publishes to.
+#
+# This does not publish. It produces the artifacts a release uploads and proves
+# every target still compiles, which is the part that breaks quietly: a
+# dependency raises its own floor, or a target loses a linker, and nothing says
+# so until a release is already half done.
+#
+# Each target builds natively on a runner of its own architecture. Cross
+# compiling works for some of these, and was measured, but it buys a slower
+# toolchain rather than a faster job: napi's cross toolchain ships gcc 4.8, which
+# warns on every modern rustc object it links. Native runners avoid the question.
+name: build binding
+
+on:
+  # Runs on a tag so a release has its artifacts, and weekly so a target that
+  # stops building is found in a quiet week rather than during a release.
+  push:
+    tags: ["v*"]
+  schedule:
+    - cron: "41 5 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-binding-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    # A fork has no reason to spend a weekly matrix on this.
+    if: github.repository == 'nirapod-labs/ton-net' || github.event_name == 'workflow_dispatch'
+    name: ${{ matrix.target }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: aarch64-apple-darwin
+            runner: macos-14
+          - target: x86_64-apple-darwin
+            runner: macos-14
+          - target: x86_64-unknown-linux-gnu
+            runner: ubuntu-latest
+          - target: x86_64-unknown-linux-musl
+            runner: ubuntu-latest
+            musl: true
+          - target: aarch64-unknown-linux-gnu
+            runner: ubuntu-24.04-arm
+          - target: aarch64-unknown-linux-musl
+            runner: ubuntu-24.04-arm
+            musl: true
+          - target: x86_64-pc-windows-msvc
+            runner: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # A musl target needs a linker the host does not carry by default. The
+      # crates here pull in no C, so the linker is all that is missing: no
+      # sysroot, no cross toolchain.
+      - name: musl linker
+        if: matrix.musl
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+
+      # Not `npm ci`. The optional dependencies name the per-platform packages,
+      # and npm refuses a clean install while they have no lockfile entries,
+      # which they cannot have until they are published. `npm install` skips an
+      # optional dependency it cannot resolve. This becomes `npm ci` once the
+      # first release puts those packages on the registry.
+      - name: install
+        working-directory: bindings/node
+        run: npm install
+
+      - name: build
+        working-directory: bindings/node
+        run: npx napi build --platform --release --target ${{ matrix.target }}
+
+      # The loader picks a binary by filename, so a build that produced the wrong
+      # one, or nothing, has to fail here rather than at somebody's install.
+      - name: artifact exists
+        shell: bash
+        working-directory: bindings/node
+        run: |
+          count=$(ls -1 *.node 2>/dev/null | wc -l)
+          if [ "$count" != "1" ]; then
+            echo "expected one .node, found $count"
+            ls -la
+            exit 1
+          fi
+          ls -la *.node
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: binding-${{ matrix.target }}
+          path: bindings/node/*.node
+          if-no-files-found: error
+          retention-days: 7
+
+  # The binaries are only worth something if one of them loads and answers. This
+  # runs the gate test on the artifact the matrix produced rather than on a
+  # freshly built one, so what is checked is what would be published.
+  smoke:
+    name: the built binary works
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/download-artifact@v4
+        with:
+          name: binding-x86_64-unknown-linux-gnu
+          path: bindings/node
+      # Not `npm ci`. The optional dependencies name the per-platform packages,
+      # and npm refuses a clean install while they have no lockfile entries,
+      # which they cannot have until they are published. `npm install` skips an
+      # optional dependency it cannot resolve. This becomes `npm ci` once the
+      # first release puts those packages on the registry.
+      - name: install
+        working-directory: bindings/node
+        run: npm install
+      # Reaches a live liteserver and skips if none answers, the same way the
+      # rest of the network tests do.
+      - name: gate test
+        working-directory: bindings/node
+        run: node test.mjs

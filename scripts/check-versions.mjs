@@ -95,6 +95,30 @@ if (existsSync(platforms)) {
   }
 }
 
+// A lockfile carries the version twice, at its root and on its own root package
+// entry. It is not published, but npm refuses `npm ci` when it disagrees with the
+// manifest, so a stale one turns into a failing install rather than a wrong one.
+// This one had sat three versions behind before anything noticed.
+const lockfile = join(root, "bindings", "node", "package-lock.json");
+if (existsSync(lockfile)) {
+  const label = relative(root, lockfile);
+  const lock = JSON.parse(readFileSync(lockfile, "utf8"));
+  let touched = false;
+  reconcile(label, lock.version, () => {
+    lock.version = version;
+    touched = true;
+  });
+  if (lock.packages?.[""]) {
+    reconcile(`${label} (root package)`, lock.packages[""].version, () => {
+      lock.packages[""].version = version;
+      touched = true;
+    });
+  }
+  if (touched) {
+    writeFileSync(lockfile, `${JSON.stringify(lock, null, 2)}\n`);
+  }
+}
+
 for (const path of nodeManifests) {
   const label = relative(root, path);
   const manifest = JSON.parse(readFileSync(path, "utf8"));
