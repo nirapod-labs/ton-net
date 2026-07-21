@@ -210,6 +210,18 @@ impl ValidatorSet {
         self.total_weight
     }
 
+    /// Whether `weight` is more than two thirds of this set's weight.
+    ///
+    /// Strictly greater, in integer arithmetic, with no rounding and no floating point
+    /// anywhere near it. That is not fastidiousness: the thinnest link on the real chain
+    /// from the block the mainnet config pins to today carries 66.6712% of its set,
+    /// **0.0046 percentage points** above the threshold, and a comparison done in `f64`
+    /// at that margin is a coin toss.
+    #[must_use]
+    pub fn carries(&self, weight: u64) -> bool {
+        u128::from(weight) * 3 > u128::from(self.total_weight) * 2
+    }
+
     /// How many validators may sign a masterchain block in this round.
     #[must_use]
     pub fn len(&self) -> usize {
@@ -257,4 +269,65 @@ pub fn short_id(public_key: &[u8; 32]) -> [u8; 32] {
     hasher.update(PUB_ED25519.to_le_bytes());
     hasher.update(public_key);
     hasher.finalize().into()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A set with a chosen weight and nothing else, for testing the threshold alone.
+    ///
+    /// The rule is arithmetic over one number, and the boundary is where an off-by-one
+    /// hides. A set read from a real block fixes that number at whatever the round
+    /// happened to weigh, which cannot reach the cases below.
+    fn weighing(total_weight: u64) -> ValidatorSet {
+        ValidatorSet {
+            utime_since: 0,
+            utime_until: 0,
+            total: 1,
+            main: 1,
+            members: Vec::new(),
+            total_weight,
+        }
+    }
+
+    #[test]
+    fn exactly_two_thirds_does_not_carry_and_one_more_does() {
+        // A weight divisible by three puts the threshold on an exact integer, which is
+        // the case a rule written with `>=` would pass and this one must refuse.
+        let set = weighing(300);
+        assert!(!set.carries(200));
+        assert!(set.carries(201));
+
+        // And where it does not divide, the smallest carrying weight is the first
+        // integer above two thirds rather than the rounding of it.
+        let set = weighing(100);
+        assert!(!set.carries(66));
+        assert!(set.carries(67));
+    }
+
+    #[test]
+    fn nothing_carries_and_everything_does() {
+        let set = weighing(1_000);
+        assert!(!set.carries(0));
+        assert!(set.carries(1_000));
+        assert!(!set.carries(666));
+        assert!(set.carries(667));
+    }
+
+    #[test]
+    fn a_weight_near_the_top_of_its_type_does_not_wrap() {
+        // Three times a weight overflows a u64 well before the weight itself does. In
+        //64-bit arithmetic the multiplication would wrap and a set of nothing would
+        // carry everything.
+        let set = weighing(u64::MAX);
+        assert!(!set.carries(u64::MAX / 2));
+        assert!(set.carries(u64::MAX));
+        assert!(!set.carries(0));
+
+        // Two thirds of the largest weight there is, exactly at the boundary.
+        let boundary = ((2 * u128::from(u64::MAX)) / 3) as u64;
+        assert!(!set.carries(boundary));
+        assert!(set.carries(boundary + 1));
+    }
 }

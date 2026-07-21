@@ -54,6 +54,36 @@ pub enum BlockError {
     #[error("the proof does not cover what was read")]
     NotCovered,
 
+    /// A proof chain does not connect the blocks it claims to.
+    ///
+    /// The server chooses the route a proof takes, so a run of links that skips a block,
+    /// doubles back, leaves the masterchain, or ends somewhere other than it says is a
+    /// well-formed answer that proves nothing.
+    #[error("the proof chain {0}")]
+    ChainBroken(&'static str),
+
+    /// A proof chain carries a backward link, which this release does not check.
+    ///
+    /// A backward link exists so a client whose known block is not a key block can reach
+    /// the last key block before it. An anchor that is always a key block never needs
+    /// one, so rather than being read and half-checked it is refused by name.
+    #[error("the proof chain has a backward link, which this release does not verify")]
+    BackwardLink,
+
+    /// A signature set is of a form this release does not know.
+    #[error("a signature set of a form this release does not know")]
+    UnknownSignedForm,
+
+    /// The valid signatures on a link do not carry more than two thirds of the weight of
+    /// the set that had to sign it.
+    #[error("signatures carry {carried} of {total}, short of two thirds")]
+    NotEnoughWeight {
+        /// The weight of the valid signatures from distinct members of the set.
+        carried: u64,
+        /// The weight of the whole set, which is what two thirds is measured against.
+        total: u64,
+    },
+
     /// The network configuration was read from a block that carries none.
     ///
     /// Only a key block holds the configuration in its body. This is what a proof chain

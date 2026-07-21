@@ -177,6 +177,17 @@ pub enum SignatureSet {
     },
 }
 
+impl SignatureSet {
+    /// The signatures the set carries, whichever form it takes.
+    #[must_use]
+    pub fn signatures(&self) -> &[Signature] {
+        match self {
+            SignatureSet::Ordinary { signatures, .. }
+            | SignatureSet::Simplex { signatures, .. } => signatures,
+        }
+    }
+}
+
 /// A `liteServer.BlockLink`: one step of a block proof chain.
 ///
 /// A [`Forward`](Self::Forward) step goes from a key block to a later block and is

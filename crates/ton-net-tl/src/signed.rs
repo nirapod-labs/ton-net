@@ -91,6 +91,63 @@ pub enum Vote {
     },
 }
 
+/// A `consensus.CandidateHashData`, read only for the block the candidate is for.
+///
+/// This closes the gap the Simplex form opens. The older form signs a block identity
+/// outright, so a valid signature is already a statement about a particular block. A
+/// Simplex signature covers a vote naming a candidate by hash, which on its own says
+/// nothing about which block that candidate was: a set of real signatures lifted from
+/// one block and attached to a link claiming another would verify. The candidate bytes
+/// travel with the set precisely so a client can read the block out of them, and a link
+/// is worth nothing until that block is required to be the one the link claims.
+///
+/// Both constructors open with the block identity and this reads no further, so it
+/// deliberately implements no writer. The bytes after the identity are covered by the
+/// hash the vote signs, so reading them would add nothing to what the signature already
+/// binds; which block the bytes name is the whole question, and it is answered here.
+#[derive(TlRead, Debug, Clone, PartialEq, Eq)]
+#[tl(boxed)]
+#[non_exhaustive]
+pub enum CandidateBlock {
+    /// `consensus.candidateHashDataOrdinary`, a candidate carrying a block.
+    #[tl(id = 0xe8f9bcdc)]
+    Ordinary {
+        /// The block the candidate proposes.
+        block: crate::lite::BlockIdExt,
+    },
+    /// `consensus.candidateHashDataEmpty`, a candidate for a slot with no block.
+    #[tl(id = 0x72b4d933)]
+    Empty {
+        /// The block the candidate proposes.
+        block: crate::lite::BlockIdExt,
+    },
+}
+
+impl CandidateBlock {
+    /// The block identity the candidate names, whichever form it takes.
+    #[must_use]
+    pub fn block(&self) -> &crate::lite::BlockIdExt {
+        match self {
+            CandidateBlock::Ordinary { block } | CandidateBlock::Empty { block } => block,
+        }
+    }
+
+    /// Reads the identity out of the head of a serialized candidate.
+    ///
+    /// The bytes a signature set carries are a whole `consensus.CandidateHashData`, and
+    /// this reads its opening. Trailing bytes are expected and are not an error, which
+    /// is why this exists rather than a plain [`crate::deserialize`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::TlError::UnknownConstructor`] if the bytes are some other
+    /// candidate form, or [`crate::TlError::UnexpectedEof`] if they end before the
+    /// identity does.
+    pub fn read_prefix(bytes: &[u8]) -> crate::TlResult<CandidateBlock> {
+        <CandidateBlock as TlRead>::read_from(&mut &bytes[..])
+    }
+}
+
 /// A `consensus.dataToSign`: the envelope every Simplex signature covers.
 ///
 /// A vote is never signed on its own. It is placed here beside the session id and the

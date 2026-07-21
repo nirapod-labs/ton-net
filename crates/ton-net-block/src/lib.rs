@@ -37,6 +37,7 @@
 
 mod account;
 mod block;
+pub mod chain;
 mod coins;
 pub mod dict;
 mod error;
@@ -47,6 +48,7 @@ pub mod validators;
 
 pub use account::{Account, AccountStatus};
 pub use block::{Block, BlockHeader};
+pub use chain::{verify_chain, ProvenBlock};
 pub use coins::Coins;
 pub use dict::Lookup;
 pub use error::BlockError;

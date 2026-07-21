@@ -14,7 +14,7 @@ use ton_net_block::{dict, Block, BlockError, Lookup, ValidatorSet};
 use ton_net_tl::{deserialize, lite};
 
 /// One forward link from the block the mainnet config pins.
-const ORDINARY: &str = include_str!("fixtures/one-link-ordinary.hex");
+const ORDINARY: &str = include_str!("fixtures/chain.hex");
 
 /// One forward link across the block where mainnet changed its signed form.
 const SIMPLEX: &str = include_str!("fixtures/one-link-simplex.hex");

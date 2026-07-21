@@ -13,6 +13,7 @@ use std::time::Duration;
 use ton_net_adnl::{AdnlConnection, TcpTransport};
 use ton_net_tl::{lite as wire, serialize};
 
+use sync_spike::block;
 use sync_spike::tl::{self, BlockIdExt, Link, Reader};
 
 const LITESERVERS: &[(&str, &str)] = &[
@@ -108,4 +109,43 @@ async fn main() {
         std::fs::write(&path, hex(&answer)).expect("write the fixture");
         println!("           written to {path}");
     }
+
+    // A chain rather than a step, because the rules above a single link only exist over
+    // several: each one starting where the last ended, every block between the ends
+    // being a key block, and the whole run reaching the target. It has to cross a
+    // validator-set rotation as well, or the set is never actually rechosen.
+    let raw = std::fs::read("captured/chain-round-1.tl").expect("the round-one capture");
+    let round = Reader::partial_block_proof(&raw).expect("it decodes");
+    let known = round.steps.first().expect("a first step").from().clone();
+    let target = round.steps[2].to().clone();
+
+    let envelope = serialize(wire::Query {
+        data: tl::get_block_proof(&known, &target),
+    });
+    let answer = tokio::time::timeout(Duration::from_secs(45), connection.query(&envelope))
+        .await
+        .expect("the query times out")
+        .expect("the query fails");
+    let proof = Reader::partial_block_proof(&answer).expect("the answer decodes");
+
+    let mut rounds = Vec::new();
+    for step in &proof.steps {
+        if let Link::Forward(l) = step {
+            let set = block::validator_set(&l.config_proof, &l.from.root_hash)
+                .expect("the config proof yields a set");
+            rounds.push(set.utime_since);
+        }
+    }
+    let rotations = rounds.windows(2).filter(|w| w[0] != w[1]).count();
+    println!(
+        "     chain: {} steps, {} B, {} -> {}, complete {}, {rotations} rotations crossed",
+        proof.steps.len(),
+        answer.len(),
+        proof.from.seqno,
+        proof.to.seqno,
+        proof.complete,
+    );
+
+    std::fs::write("captured/chain.hex", hex(&answer)).expect("write the fixture");
+    println!("           written to captured/chain.hex");
 }
