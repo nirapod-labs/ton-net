@@ -1,0 +1,38 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: 2026 Nirapod Labs
+
+[workspace]
+# One changelog for the library, not one per crate. The crates share a version and
+# are released together, so six near-identical files would say the same thing six
+# times and none of them would be the one a reader is looking for.
+changelog_path = "./CHANGELOG.md"
+
+# The changelog is written rather than generated, and this was tried both ways
+# before deciding. Generated from commit subjects it reads "check a block proof
+# chain", which tells a reader upgrading a client nothing about whether they were
+# exposed to anything. The entries that earn their place here say that three
+# proof-verification failures composed into a server that could hand over forged
+# state as verified, and no commit subject carries that. Generation also inserts a
+# section above whatever is already written for the pending version, which has to
+# be untangled by hand every release.
+#
+# release-plz still decides the version, opens the release pull request, tags and
+# publishes. The changelog entry is written into that pull request before it
+# merges, which is the same review step either way.
+changelog_update = false
+
+# Matches the tags already on this repository.
+git_tag_name = "v{{ version }}"
+git_release_enable = true
+
+# Refuses a release whose public API changed in a way the version bump does not
+# admit. For a library whose whole value is a verification guarantee, an accidental
+# breaking change is worse than a late release.
+semver_check = true
+
+# Dependency bumps arrive through their own pull requests, from dependabot, where
+# they can be reviewed as the changes they are. Folding them into a release makes
+# the release diff something other than the release.
+dependencies_update = false
+
+pr_branch_prefix = "release/"

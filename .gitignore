@@ -3,6 +3,10 @@ target/
 node_modules/
 *.node
 
+# `release-plz generate-schema` writes the configuration schema here. It is a
+# reference for editing release-plz.toml, not part of the project.
+.schema/
+
 # napi-rs generates the loader and the type definitions from the Rust binding, and
 # both are tracked. The definitions are the published TypeScript API and the doc
 # comments a caller reads in an editor, so leaving them untracked would put the
