@@ -1,19 +1,73 @@
 {
   "name": "ton-net",
   "version": "0.2.0-alpha.1",
-  "description": "Node.js binding for the ton-net TON client",
+  "description": "A direct TON network client: ADNL over TCP, liteserver reads, and Merkle-proof verification, with no HTTP indexer in the path.",
+  "keywords": [
+    "ton",
+    "blockchain",
+    "adnl",
+    "liteserver",
+    "merkle-proof"
+  ],
   "license": "Apache-2.0",
-  "repository": "https://github.com/nirapod-labs/ton-net",
-  "private": true,
+  "author": "Nirapod Labs",
+  "homepage": "https://github.com/nirapod-labs/ton-net#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/nirapod-labs/ton-net.git",
+    "directory": "bindings/node"
+  },
+  "bugs": {
+    "url": "https://github.com/nirapod-labs/ton-net/issues"
+  },
   "main": "index.js",
   "types": "index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./index.d.ts",
+      "require": "./index.js",
+      "import": "./index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "index.js",
+    "index.d.ts",
+    "README.md",
+    "LICENSE",
+    "NOTICE"
+  ],
+  "engines": {
+    "node": ">= 18.17.0"
+  },
+  "optionalDependencies": {
+    "@ton-net/core-darwin-arm64": "0.2.0-alpha.1",
+    "@ton-net/core-darwin-x64": "0.2.0-alpha.1",
+    "@ton-net/core-linux-arm64-gnu": "0.2.0-alpha.1",
+    "@ton-net/core-linux-arm64-musl": "0.2.0-alpha.1",
+    "@ton-net/core-linux-x64-gnu": "0.2.0-alpha.1",
+    "@ton-net/core-linux-x64-musl": "0.2.0-alpha.1",
+    "@ton-net/core-win32-x64-msvc": "0.2.0-alpha.1"
+  },
   "napi": {
-    "binaryName": "ton-net"
+    "binaryName": "ton-net",
+    "packageName": "@ton-net/core",
+    "targets": [
+      "aarch64-apple-darwin",
+      "x86_64-apple-darwin",
+      "x86_64-unknown-linux-gnu",
+      "x86_64-unknown-linux-musl",
+      "aarch64-unknown-linux-gnu",
+      "aarch64-unknown-linux-musl",
+      "x86_64-pc-windows-msvc"
+    ]
   },
   "scripts": {
     "build": "napi build --platform --release",
     "build:debug": "napi build --platform",
-    "test": "node test.mjs"
+    "test": "node test.mjs",
+    "check-package": "node scripts/check-package.mjs",
+    "prepack": "node scripts/stage-licenses.mjs"
   },
   "devDependencies": {
     "@napi-rs/cli": "^3.0.0"

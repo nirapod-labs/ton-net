@@ -114,6 +114,18 @@ jobs:
       - name: build addon
         working-directory: bindings/node
         run: npx napi build --platform
+      # The loader and the type definitions are generated from the Rust binding and
+      # tracked, because the definitions are the published JavaScript API and the doc
+      # comments a caller reads in an editor. Regenerating them here and refusing a
+      # diff is what keeps the committed surface the one that actually ships.
+      - name: generated surface is current
+        working-directory: bindings/node
+        run: git diff --exit-code -- index.js index.d.ts
+      # An npm package cannot be replaced once published, only deprecated, so a
+      # tarball missing its license or shipping the Rust sources is permanent.
+      - name: packages are publishable
+        working-directory: bindings/node
+        run: npm run check-package
       # The gate test reaches mainnet and skips if no liteserver is reachable. It walks
       # the chain either way; what the schedule adds is the walk from the block the config
       # pins, which runs over every key block published since.

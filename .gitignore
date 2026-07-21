@@ -2,6 +2,17 @@ target/
 .DS_Store
 node_modules/
 *.node
-# napi-rs generates these from the Rust binding at build time.
-bindings/node/index.js
-bindings/node/index.d.ts
+
+# napi-rs generates the loader and the type definitions from the Rust binding, and
+# both are tracked. The definitions are the published TypeScript API and the doc
+# comments a caller reads in an editor, so leaving them untracked would put the
+# whole JavaScript surface outside review. CI regenerates and fails on a diff.
+
+# The license and the notice are copied into every publishable package before the
+# tarball is built, because Apache-2.0 requires a redistribution to carry them and
+# an npm consumer never sees the repository root. The originals live there; these
+# are copies.
+bindings/node/LICENSE
+bindings/node/NOTICE
+bindings/node/npm/*/LICENSE
+bindings/node/npm/*/NOTICE

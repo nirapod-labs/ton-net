@@ -18,6 +18,7 @@ path = [
     "SECURITY.md",
     "docs/**",
     ".github/PULL_REQUEST_TEMPLATE.md",
+    "bindings/node/README.md",
     "bindings/node/package.json",
     "spikes/*/README.md",
     "spikes/sync-feasibility/.gitignore",
@@ -39,6 +40,20 @@ SPDX-License-Identifier = "CC-BY-4.0"
 # so they are this project's output even though nobody typed them.
 [[annotations]]
 path = ["Cargo.lock", "bindings/node/package-lock.json", "spikes/*/Cargo.lock"]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2026 Nirapod Labs"
+SPDX-License-Identifier = "Apache-2.0"
+
+# napi-rs writes the loader, the type definitions and the per-platform manifests
+# from the Rust binding and the napi config. They are tracked because the type
+# definitions are the published JavaScript API, and a header cannot be added to
+# them without being overwritten on the next build.
+[[annotations]]
+path = [
+    "bindings/node/index.js",
+    "bindings/node/index.d.ts",
+    "bindings/node/npm/**",
+]
 precedence = "aggregate"
 SPDX-FileCopyrightText = "2026 Nirapod Labs"
 SPDX-License-Identifier = "Apache-2.0"
