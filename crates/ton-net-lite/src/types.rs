@@ -46,6 +46,26 @@ impl<T> ServerReported<T> {
     pub fn proof(&self) -> &[u8] {
         &self.proof
     }
+
+    /// Replaces the value with something read out of it, keeping the proof bytes.
+    ///
+    /// Decoding a reported value leaves it just as unproven as it was, so the wrapper
+    /// travels with it rather than being unwrapped and forgotten. The proof bytes stay
+    /// attached for whatever checks them later.
+    ///
+    /// # Errors
+    ///
+    /// Returns whatever `read` returns, unchanged.
+    pub fn try_map<U, E>(
+        self,
+        read: impl FnOnce(&T) -> Result<U, E>,
+    ) -> Result<ServerReported<U>, E> {
+        let value = read(&self.value)?;
+        Ok(ServerReported {
+            value,
+            proof: self.proof,
+        })
+    }
 }
 
 /// A full block identifier: the id and its shard coordinates plus hashes.

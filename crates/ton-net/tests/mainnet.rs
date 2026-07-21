@@ -4,7 +4,7 @@
 //! them with `--ignored`. They use only the public facade and each skips if no
 //! liteserver is reachable, so liteserver rotation does not fail the build.
 
-use ton_net::{Address, Client, Config};
+use ton_net::{Address, Client, Config, Error};
 
 // Address of a system contract that is always active on mainnet.
 const ELECTOR: &str = "-1:3333333333333333333333333333333333333333333333333333333333333333";
@@ -67,16 +67,13 @@ async fn reads_accounts_in_both_workchains() {
     for (name, address) in [("elector", ELECTOR), ("config", CONFIG_CONTRACT)] {
         let parsed = Address::parse(address).expect("valid address");
         let account = client.account(&parsed).await.expect("account read");
-        assert_eq!(
-            account.value().block.workchain,
-            -1,
-            "read at a masterchain block"
-        );
+        assert!(account.value().is_active(), "{name} is deployed");
         assert!(
-            !account.value().state.is_empty(),
-            "{name} has a nonempty state"
+            account.value().balance.nanotons() > 0,
+            "{name} holds a balance"
         );
-        eprintln!("{name} state bytes: {}", account.value().state.len());
+        assert!(account.value().code().is_some(), "{name} has code");
+        eprintln!("{name} balance: {}", account.value().balance);
     }
 
     // A basechain account: the read must complete and decode even if the account is empty.
@@ -85,9 +82,113 @@ async fn reads_accounts_in_both_workchains() {
         .account(&basechain)
         .await
         .expect("basechain account read");
-    eprintln!(
-        "basechain account state bytes: {}",
-        account.value().state.len()
+    eprintln!("basechain account balance: {}", account.value().balance);
+}
+
+#[tokio::test]
+#[ignore = "hits a live mainnet liteserver; run with --ignored in the network job"]
+async fn verifies_live_accounts_in_both_workchains() {
+    let Some(mut client) = connect().await else {
+        return;
+    };
+
+    // The anchor here is the server's own head, so this test says nothing about whether
+    // the server is honest: it exercises the machinery against live data. The check that
+    // the machinery lands on hashes a second party published is hermetic, over captured
+    // bytes, in ton-net-block.
+    let trusted = client
+        .masterchain_info()
+        .await
+        .expect("masterchain_info")
+        .into_value()
+        .last;
+
+    for (name, address) in [
+        ("elector", ELECTOR),
+        ("config", CONFIG_CONTRACT),
+        ("basechain", BASECHAIN),
+    ] {
+        let parsed = Address::parse(address).expect("valid address");
+        let verified = client
+            .account_verified(&parsed, &trusted)
+            .await
+            .unwrap_or_else(|e| panic!("{name} did not verify: {e}"));
+
+        assert_eq!(verified.anchor().seqno, trusted.seqno);
+        eprintln!(
+            "{name} verified at seqno {}: balance {}",
+            trusted.seqno,
+            verified.value().balance
+        );
+    }
+}
+
+#[tokio::test]
+#[ignore = "hits a live mainnet liteserver; run with --ignored in the network job"]
+async fn a_block_the_server_does_not_know_is_refused_before_any_proof() {
+    let Some(mut client) = connect().await else {
+        return;
+    };
+
+    let mut unknown = client
+        .masterchain_info()
+        .await
+        .expect("masterchain_info")
+        .into_value()
+        .last;
+    unknown.root_hash[0] ^= 1;
+
+    // A verified read is made at the block it is checked against, so the two cannot drift
+    // apart by accident. A caller who invents a block never reaches the proof engine: the
+    // server has no such block to read at.
+    let parsed = Address::parse(ELECTOR).expect("valid address");
+    match client.account_verified(&parsed, &unknown).await {
+        Err(Error::LiteServer { .. }) => {}
+        Err(other) => panic!("expected the server to refuse the block, got {other}"),
+        Ok(_) => panic!("a read succeeded at a block that does not exist"),
+    }
+}
+
+#[tokio::test]
+#[ignore = "hits a live mainnet liteserver; run with --ignored in the network job"]
+async fn live_proof_bytes_are_refused_against_the_wrong_block() {
+    use ton_net_block::{proof, AccountRead};
+
+    let Some(mut client) = connect().await else {
+        return;
+    };
+
+    let head = client
+        .masterchain_info()
+        .await
+        .expect("masterchain_info")
+        .into_value()
+        .last;
+    let parsed = Address::parse(ELECTOR).expect("valid address");
+    let reported = client
+        .account_state(&parsed, &head)
+        .await
+        .expect("account state");
+    let state = reported.value();
+
+    // Genuine bytes, read at a real block. Against that block's hash they check out.
+    let good = AccountRead::masterchain(
+        &head.root_hash,
+        parsed.account_id(),
+        reported.proof(),
+        &state.state,
+    );
+    proof::verify_account(&good).expect("a live read verifies against the block it was read at");
+
+    // The same bytes against any other hash prove nothing. Driving the engine directly is
+    // the only way to reach this case, because the client reads at the block it checks
+    // against; today's mainnet bytes have to fail it just as the pinned ones do.
+    let mut wrong = head.root_hash;
+    wrong[0] ^= 1;
+    let bad = AccountRead::masterchain(&wrong, parsed.account_id(), reported.proof(), &state.state);
+    assert!(
+        proof::verify_account(&bad).is_err(),
+        "live proof bytes verified against a block they say nothing about"
     );
 }
 

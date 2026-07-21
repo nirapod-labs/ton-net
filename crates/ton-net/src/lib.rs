@@ -6,22 +6,38 @@
 //!
 //! # Verification status
 //!
-//! In this release reads are **not** proof-verified. A liteserver's answer is returned
-//! as a [`ServerReported`] value, the server's unproven word. Proof verification and
-//! block sync arrive in later releases; until then a [`ServerReported`] must not be
-//! treated as verified chain state.
+//! Every read says in its type whether it was proved.
+//!
+//! A [`ServerReported`] value is the liteserver's word, returned without checking the
+//! proofs that came with it. A [`Verified`] value was checked: its Merkle proofs were
+//! recomputed against a block hash the caller supplied, and the account was bound to that
+//! block's state. There is no way to turn the first into the second.
+//!
+//! What [`Verified`] does not settle is where the block hash came from. Passing
+//! [`Client::account_verified`] a head read from the same liteserver shows only that the
+//! server agrees with itself, which a server making things up can also manage. Producing
+//! an anchor from a single pinned key block is block sync, which this release does not do,
+//! so a read is not yet trust-minimized end to end.
 //!
 //! # Example
 //!
 //! ```no_run
-//! use ton_net::{Client, Config};
+//! use ton_net::{Address, Client, Config};
 //!
 //! # async fn run() -> Result<(), ton_net::Error> {
 //! let config = Config::mainnet();
 //! let mut client = Client::connect(&config).await?;
 //!
-//! let info = client.masterchain_info().await?;
-//! println!("masterchain seqno: {}", info.value().last.seqno);
+//! // The server's word.
+//! let reported = client.account(&Address::parse("-1:3333333333333333333333333333333333333333333333333333333333333333")?).await?;
+//! println!("reported balance: {}", reported.value().balance);
+//!
+//! // Proved, relative to a block the caller vouches for.
+//! # let trusted = client.masterchain_info().await?.into_value().last;
+//! let account = client
+//!     .account_verified(&Address::parse("-1:3333333333333333333333333333333333333333333333333333333333333333")?, &trusted)
+//!     .await?;
+//! println!("proved balance: {}", account.value().balance);
 //! # Ok(())
 //! # }
 //! ```
@@ -34,11 +50,19 @@ mod client;
 mod codec;
 mod config;
 mod error;
+mod verified;
 
 pub use address::Address;
 pub use client::Client;
 pub use config::Config;
 pub use error::Error;
+pub use verified::Verified;
 
 /// The read response types, defined in ton-net-lite and surfaced here.
 pub use ton_net_lite::{AccountState, BlockIdExt, MasterchainInfo, ServerReported};
+
+/// The decoded chain structures, defined in ton-net-block and surfaced here.
+pub use ton_net_block::{Account, AccountStatus, Coins};
+
+/// The cell types a decoded account carries, defined in ton-net-cell and surfaced here.
+pub use ton_net_cell::{Cell, CellType};

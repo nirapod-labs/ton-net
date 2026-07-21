@@ -493,6 +493,8 @@ dependencies = [
  "thiserror",
  "tokio",
  "ton-net-adnl",
+ "ton-net-block",
+ "ton-net-cell",
  "ton-net-lite",
 ]
 
@@ -508,6 +510,22 @@ dependencies = [
  "thiserror",
  "tokio",
  "ton-net-tl",
+]
+
+[[package]]
+name = "ton-net-block"
+version = "0.1.0-alpha.1"
+dependencies = [
+ "thiserror",
+ "ton-net-cell",
+]
+
+[[package]]
+name = "ton-net-cell"
+version = "0.1.0-alpha.1"
+dependencies = [
+ "sha2",
+ "thiserror",
 ]
 
 [[package]]

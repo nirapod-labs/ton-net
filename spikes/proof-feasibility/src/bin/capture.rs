@@ -36,7 +36,18 @@ async fn main() {
     };
 
     let parsed = Address::parse(&address).expect("valid address");
-    let reported = client.account(&parsed).await.expect("account read");
+    let head = client
+        .masterchain_info()
+        .await
+        .expect("masterchain head")
+        .into_value()
+        .last;
+    // The raw read: a fixture needs the bytes as the server sent them, not a decode of
+    // them, so the proofs it carries can be checked later.
+    let reported = client
+        .account_state(&parsed, &head)
+        .await
+        .expect("account read");
     let read = reported.value();
 
     println!("# {address}");

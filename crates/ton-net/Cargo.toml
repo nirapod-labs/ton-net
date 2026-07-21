@@ -13,6 +13,8 @@ authors.workspace = true
 [dependencies]
 ton-net-lite.workspace = true
 ton-net-adnl.workspace = true
+ton-net-block.workspace = true
+ton-net-cell.workspace = true
 serde = { workspace = true }
 serde_json.workspace = true
 thiserror.workspace = true
@@ -21,3 +23,6 @@ tokio = { workspace = true, features = ["time"] }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["rt", "macros", "time", "test-util"] }
+# Already a dependency; listed again so the network tests can drive the proof engine
+# directly, which is the only way to check a proof against a block it was not read at.
+ton-net-block.workspace = true

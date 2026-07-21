@@ -47,13 +47,24 @@ async function main() {
   const elector =
     "-1:3333333333333333333333333333333333333333333333333333333333333333";
   const account = await client.account(elector);
-  assert.equal(account.value.workchain, -1, "account block workchain");
-  assert.equal(typeof account.value.shard, "string", "shard is a string");
+  assert.equal(account.value.status, "active", "the elector is deployed");
   assert.ok(
-    Buffer.isBuffer(account.value.state) && account.value.state.length > 0,
-    "the elector has a nonempty state Buffer",
+    Buffer.isBuffer(account.value.code) && account.value.code.length > 0,
+    "an active account has code",
   );
-  console.log(`elector state bytes ${account.value.state.length}`);
+  assert.ok(Buffer.isBuffer(account.proof), "the unchecked proof comes back");
+
+  // Amounts cross as decimal strings. A balance past 2^53 has to survive the trip
+  // digit for digit, which is the whole reason it is not a number.
+  assert.equal(typeof account.value.balance, "string", "balance is a string");
+  assert.match(account.value.balance, /^\d+$/, "balance is decimal digits");
+  assert.equal(
+    BigInt(account.value.balance).toString(),
+    account.value.balance,
+    "the balance round-trips through BigInt without losing a digit",
+  );
+  assert.ok(BigInt(account.value.balance) > 0n, "the elector holds a balance");
+  console.log(`elector balance ${account.value.balance} nanotons`);
 
   // A malformed address rejects rather than throwing synchronously or hanging.
   await assert.rejects(

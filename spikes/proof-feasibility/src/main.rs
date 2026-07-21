@@ -238,8 +238,17 @@ async fn main() {
     };
 
     let address = Address::parse(CONFIG_CONTRACT).expect("valid address");
-    let reported = client.account(&address).await.expect("account read");
-    let block = reported.value().block.clone();
+    let block = client
+        .masterchain_info()
+        .await
+        .expect("masterchain head")
+        .into_value()
+        .last;
+    // The raw bytes, so this spike hashes what the server sent rather than a decode of it.
+    let reported = client
+        .account_state(&address, &block)
+        .await
+        .expect("account read");
     let state = reported.value().state.clone();
     let proof = reported.proof().to_vec();
 

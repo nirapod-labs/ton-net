@@ -39,6 +39,30 @@ pub enum Error {
     /// A config could not be parsed.
     #[error("config: {0}")]
     Config(String),
+
+    /// A cell, a bag of cells, or a structure built from them could not be read.
+    #[error("cell: {0}")]
+    Cell(String),
+
+    /// A proof did not check out, or the account did not bind to the trusted block.
+    ///
+    /// A read that fails this way returns no value at all. There is no partial result and
+    /// no unproven fallback: a verified read either proves what it returns or fails.
+    #[error("proof: {0}")]
+    Proof(String),
+}
+
+impl From<ton_net_block::BlockError> for Error {
+    fn from(error: ton_net_block::BlockError) -> Self {
+        use ton_net_block::BlockError;
+        match error {
+            // Bytes that are not cells at all failed before any proof was in question.
+            BlockError::Cell(cell) => Error::Cell(cell.to_string()),
+            // Everything else was reached while checking a proof, so it failed as one: a
+            // structure that does not read is a proof that does not check out.
+            other => Error::Proof(other.to_string()),
+        }
+    }
 }
 
 impl From<ton_net_adnl::TransportError> for Error {
@@ -71,5 +95,42 @@ impl From<ton_net_lite::LiteError> for Error {
             LiteError::Decode(decode) => Error::Decode(decode.to_string()),
             other => Error::Decode(other.to_string()),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Error;
+    use ton_net_block::BlockError;
+
+    #[test]
+    fn a_failed_proof_never_arrives_as_something_softer() {
+        // Every way a proof can fail has to reach the caller as a proof failure. Any of
+        // these landing in `Decode` or `Cell` would read as bad bytes rather than as a
+        // server that did not prove its answer.
+        for failure in [
+            BlockError::NotAMerkleProof,
+            BlockError::ProofInconsistent,
+            BlockError::ProofNotAnchored,
+            BlockError::NotCovered,
+            BlockError::NotBound,
+            BlockError::WrongConstructor { expected: "block" },
+            BlockError::Malformed("shard state"),
+            BlockError::LabelTooLong,
+        ] {
+            let mapped = Error::from(failure.clone());
+            assert!(
+                matches!(mapped, Error::Proof(_)),
+                "{failure:?} became {mapped:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn bytes_that_are_not_cells_arrive_as_a_cell_failure() {
+        // This one failed before a proof was in question, so calling it a proof failure
+        // would point a caller at the wrong thing.
+        let mapped = Error::from(BlockError::Cell(ton_net_cell::CellError::NotABagOfCells));
+        assert!(matches!(mapped, Error::Cell(_)), "{mapped:?}");
     }
 }

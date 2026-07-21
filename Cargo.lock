@@ -673,6 +673,8 @@ dependencies = [
  "thiserror",
  "tokio",
  "ton-net-adnl",
+ "ton-net-block",
+ "ton-net-cell",
  "ton-net-lite",
 ]
 
