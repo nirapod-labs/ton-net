@@ -11,11 +11,20 @@ const MAGIC: [u8; 4] = [0xb5, 0xee, 0x9c, 0x72];
 /// The most data bits a cell may hold.
 const MAX_BITS: u16 = 1023;
 
+/// The most references a cell may hold.
+const MAX_REFS: usize = 4;
+
 /// The most cells [`parse_boc`] will read from one bag.
 ///
 /// A bag arrives from a liteserver, which is not trusted, so a declared cell count is
 /// checked against this before anything is allocated for it.
-pub const MAX_CELLS: usize = 1 << 20;
+///
+/// The number comes from what a cell costs rather than from what the format allows. A
+/// parsed cell is about 250 bytes of live heap and the smallest one on the wire is two,
+/// so without a bound of this shape a bag expands by two orders of magnitude on the way
+/// in. Real proofs run 35 to 58 wire bytes per cell, which leaves this three orders of
+/// magnitude above anything the chain produces.
+pub const MAX_CELLS: usize = 1 << 17;
 
 /// The longest chain of references [`parse_boc`] will read.
 ///
@@ -106,14 +115,28 @@ fn bit_len(d2: u8, data: &[u8]) -> Result<u16, CellError> {
     let last = *data
         .last()
         .ok_or(CellError::Malformed("partial byte with no data"))?;
-    if last == 0 {
+    // Both bytes that carry no data, 0x00 and 0x80, are refused. A 0x80 tail describes a
+    // byte-aligned cell the long way round, and accepting it would leave a byte of pure
+    // padding inside `data` for the hash to cover, so this crate and TON would disagree
+    // about the identity of a cell they both accepted.
+    if last & 0x7f == 0 {
         return Err(CellError::Malformed("partial byte has no completion bit"));
     }
     Ok(full * 8 + (7 - last.trailing_zeros() as u16))
 }
 
-/// Determines a cell's kind, and checks an exotic cell is long enough to be read.
-fn classify(exotic: bool, data: &[u8], level_mask: u8) -> Result<CellType, CellError> {
+/// Determines a cell's kind, and holds an exotic cell to the shape that kind must have.
+///
+/// Every exotic kind has a fixed reference count, and a pruned branch a fixed body length
+/// as well. The checks belong here, at the parse boundary, because a cell that reaches
+/// [`Cell::from_parts`] is hashed, and a hash computed over a shape the cell model does
+/// not define is a value no other implementation agrees with.
+fn classify(
+    exotic: bool,
+    data: &[u8],
+    level_mask: u8,
+    ref_count: usize,
+) -> Result<CellType, CellError> {
     if !exotic {
         return Ok(CellType::Ordinary);
     }
@@ -122,6 +145,22 @@ fn classify(exotic: bool, data: &[u8], level_mask: u8) -> Result<CellType, CellE
         .ok_or(CellError::Malformed("exotic cell has no type byte"))?;
     let cell_type =
         CellType::from_tag(tag).ok_or(CellError::Malformed("unknown exotic cell type"))?;
+
+    let expected_refs = match cell_type {
+        CellType::Ordinary => return Ok(cell_type),
+        CellType::PrunedBranch | CellType::LibraryReference => 0,
+        CellType::MerkleProof => 1,
+        CellType::MerkleUpdate => 2,
+    };
+    if ref_count != expected_refs {
+        // A pruned branch is the one that matters. Its hash is computed from the hash it
+        // stands in for and never from its children, so a pruned branch allowed to carry
+        // children would hash the same whatever hangs beneath it: an attacker-chosen
+        // collision on the value this crate calls a cell's identity.
+        return Err(CellError::Malformed(
+            "exotic cell has the wrong number of references",
+        ));
+    }
 
     if cell_type == CellType::PrunedBranch {
         // A pruned branch carries its level mask twice, in the descriptor and in the
@@ -136,12 +175,19 @@ fn classify(exotic: bool, data: &[u8], level_mask: u8) -> Result<CellType, CellE
                 "pruned branch mask disagrees with its descriptor",
             ));
         }
-        // A pruned branch stores one hash and one depth per marked level, after its type
-        // and mask bytes. Checking the length here keeps every later read in range.
+        // A pruned branch stands in for a subtree at some level, so it has to have one.
+        // At level zero it stores no hash at all and answers with its own, which is a
+        // shape that stands in for nothing.
+        if stored == 0 {
+            return Err(CellError::Malformed("pruned branch has no level"));
+        }
+        // One hash and one depth per marked level, after the type and mask bytes, and
+        // nothing else: an exact length leaves no trailing bytes to carry a second
+        // meaning past the ones the reads below index.
         let levels = stored.count_ones() as usize;
-        if data.len() < 2 + levels * 34 {
+        if data.len() != 2 + levels * 34 {
             return Err(CellError::Malformed(
-                "pruned branch is too short for its level mask",
+                "pruned branch length disagrees with its level mask",
             ));
         }
     }
@@ -261,7 +307,12 @@ pub fn parse_boc(bytes: &[u8]) -> Result<Vec<Cell>, CellError> {
         if d1 & 16 != 0 {
             return Err(CellError::Malformed("cell stores its hashes inline"));
         }
+        // The field is three bits wide and the cell model allows four references, so the
+        // top three values describe a cell no TON implementation will build.
         let ref_count = usize::from(d1 & 7);
+        if ref_count > MAX_REFS {
+            return Err(CellError::Malformed("cell has more than four references"));
+        }
         let exotic = d1 & 8 != 0;
         let level_mask = d1 >> 5;
 
@@ -270,7 +321,7 @@ pub fn parse_boc(bytes: &[u8]) -> Result<Vec<Cell>, CellError> {
         if bits > MAX_BITS {
             return Err(CellError::Malformed("cell holds more than 1023 bits"));
         }
-        let cell_type = classify(exotic, &data, level_mask)?;
+        let cell_type = classify(exotic, &data, level_mask, ref_count)?;
 
         let mut refs = Vec::with_capacity(ref_count);
         for _ in 0..ref_count {
@@ -590,7 +641,7 @@ mod tests {
     }
 
     #[test]
-    fn rejects_a_pruned_branch_too_short_for_its_mask() {
+    fn rejects_a_pruned_branch_whose_length_disagrees_with_its_mask() {
         // Exotic, pruned, a mask marking one level, but no room for a hash and depth.
         let bag = [
             0xb5, 0xee, 0x9c, 0x72, 0x01, 0x01, 0x01, 0x01, 0x00, 0x04, 0x00, 0x28, 0x04, 0x01,
@@ -599,8 +650,74 @@ mod tests {
         assert_eq!(
             parse_boc(&bag),
             Err(CellError::Malformed(
-                "pruned branch is too short for its level mask"
+                "pruned branch length disagrees with its level mask"
             ))
+        );
+
+        // One level's worth of hash and depth, and one byte more. A trailing byte is
+        // hashed like any other, so a length that is merely sufficient would let one
+        // pruned branch carry a second meaning past the reads that index it.
+        let mut body = vec![0x01, 0x01];
+        body.extend_from_slice(&[0x11; 32]);
+        body.extend_from_slice(&[0x00, 0x01]);
+        body.push(0xde);
+        let mut bag = vec![0xb5, 0xee, 0x9c, 0x72, 0x01, 0x01, 0x01, 0x01, 0x00];
+        bag.push((2 + body.len()) as u8);
+        bag.push(0x00);
+        bag.push(0x28);
+        bag.push((body.len() * 2) as u8);
+        bag.extend_from_slice(&body);
+        assert_eq!(
+            parse_boc(&bag),
+            Err(CellError::Malformed(
+                "pruned branch length disagrees with its level mask"
+            ))
+        );
+    }
+
+    #[test]
+    fn a_pruned_branch_may_not_carry_references() {
+        // A pruned branch answers with the hash of the subtree it replaced and never
+        // hashes its own children, so one allowed to carry a child would hash the same
+        // whatever hangs beneath it. Two bags differing only in that subtree would share
+        // an identity, which is the one thing a cell hash exists to prevent.
+        let bag = [
+            0xb5, 0xee, 0x9c, 0x72, 0x01, 0x01, 0x02, 0x01, 0x00, 0x08, 0x00, // header
+            0x29, 0x04, 0x01, 0x01, 0x01, // pruned, one reference, to cell 1
+            0x00, 0x02, 0xab, // the cell it must not be allowed to carry
+        ];
+        assert_eq!(
+            parse_boc(&bag),
+            Err(CellError::Malformed(
+                "exotic cell has the wrong number of references"
+            ))
+        );
+    }
+
+    #[test]
+    fn a_pruned_branch_stands_in_for_something() {
+        // A mask of zero stores no hash, so the cell answers every level with its own and
+        // stands in for nothing. TON's builder does not produce the shape.
+        let bag = [
+            0xb5, 0xee, 0x9c, 0x72, 0x01, 0x01, 0x01, 0x01, 0x00, 0x04, 0x00, 0x08, 0x04, 0x01,
+            0x00,
+        ];
+        assert_eq!(
+            parse_boc(&bag),
+            Err(CellError::Malformed("pruned branch has no level"))
+        );
+    }
+
+    #[test]
+    fn rejects_a_cell_claiming_more_references_than_the_model_allows() {
+        // The field is three bits wide, so it can say five through seven. Refused before
+        // the indices are read, since the count is what sizes that read.
+        let bag = [
+            0xb5, 0xee, 0x9c, 0x72, 0x01, 0x01, 0x01, 0x01, 0x00, 0x02, 0x00, 0x05, 0x00,
+        ];
+        assert_eq!(
+            parse_boc(&bag),
+            Err(CellError::Malformed("cell has more than four references"))
         );
     }
 
@@ -614,5 +731,27 @@ mod tests {
         assert_eq!(bit_len(0x00, &[]).unwrap(), 0);
         // A partial byte with no completion bit cannot be read.
         assert!(bit_len(0x01, &[0x00]).is_err());
+        // Nor one whose completion bit is the only bit it has: the byte carries no data,
+        // so this describes a byte-aligned cell the long way round.
+        assert!(bit_len(0x03, &[0xab, 0x80]).is_err());
+    }
+
+    #[test]
+    fn a_byte_aligned_cell_has_one_encoding_and_one_hash() {
+        // The same eight bits written both ways. The overlong form keeps a byte of pure
+        // padding in the cell's data, which this crate would hash and TON would not, so
+        // the two implementations would disagree about a cell they both accepted.
+        let canonical = [
+            0xb5, 0xee, 0x9c, 0x72, 0x01, 0x01, 0x01, 0x01, 0x00, 0x03, 0x00, 0x00, 0x02, 0xab,
+        ];
+        let overlong = [
+            0xb5, 0xee, 0x9c, 0x72, 0x01, 0x01, 0x01, 0x01, 0x00, 0x04, 0x00, 0x00, 0x03, 0xab,
+            0x80,
+        ];
+        assert!(parse_boc(&canonical).is_ok());
+        assert_eq!(
+            parse_boc(&overlong),
+            Err(CellError::Malformed("partial byte has no completion bit"))
+        );
     }
 }
