@@ -1,0 +1,11 @@
+# Canonical spelling for the identity that maintains this repository.
+#
+# A squash merge records the GitHub profile display name rather than the local git
+# config, so a merged pull request can land under a different spelling of the same
+# person than a local commit does. These entries collapse those spellings.
+#
+# Every mapping here stays within one identity. Mapping one identity onto another
+# would misstate who wrote the code, so it is never done.
+
+athexweb3 <athexweb3@gmail.com> Athex Web3 <athexweb3@gmail.com>
+athexweb3 <athexweb3@gmail.com> <athexweb3@users.noreply.github.com>

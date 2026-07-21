@@ -139,6 +139,12 @@ Two things, and they are the whole list:
 
 ## License
 
-Apache-2.0 (permissive, unlike the C++ reference's LGPL), so any project, in any
-language, can embed it without a copyleft obligation. See [LICENSE](LICENSE) and
+Apache-2.0. Copyright 2026 Nirapod Labs; maintained by athexweb3.
+
+Permissive, unlike the C++ reference's LGPL, so any project, in any language, can
+embed it without a copyleft obligation. See [LICENSE](LICENSE) and
 [NOTICE](NOTICE).
+
+Contributions are accepted under the same license, certified with a
+[Developer Certificate of Origin](https://developercertificate.org/) sign-off.
+See [CONTRIBUTING.md](CONTRIBUTING.md).
