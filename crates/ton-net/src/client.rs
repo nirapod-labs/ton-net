@@ -5,15 +5,25 @@ use std::future::Future;
 use std::time::Duration;
 
 use ton_net_adnl::TcpTransport;
-use ton_net_block::{proof, Account, AccountRead};
+use ton_net_block::{proof, verify_chain, Account, AccountRead};
 use ton_net_lite::{
-    AccountId, AccountState, BlockIdExt, LiteClient, LiteError, MasterchainInfo, ServerReported,
+    AccountId, AccountState, BlockIdExt, BlockLink, LiteClient, LiteError, MasterchainInfo,
+    PartialBlockProof, ServerReported,
 };
 
+use crate::sync::{self, SyncReport};
 use crate::{Address, Config, Error, Verified};
 
 /// The deadline for one read, after which the call returns [`Error::Timeout`].
 const CALL_TIMEOUT: Duration = Duration::from_secs(15);
+
+/// The deadline for one block-proof reply, which is a different size of thing.
+///
+/// An account read is a few kilobytes. One round of a proof chain is closer to seven
+/// hundred, because every link in it carries a configuration proof exposing a validator
+/// set of several hundred entries. Holding both to the same deadline means either
+/// refusing an honest proof on a slow link or letting a dead read hang.
+const PROOF_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// The workchain id of the masterchain, whose accounts need no shard proof.
 const MASTERCHAIN: i32 = -1;
@@ -32,13 +42,20 @@ const MASTERCHAIN: i32 = -1;
 /// client for real concurrency.
 pub struct Client {
     lite: LiteClient<TcpTransport>,
+    /// The key block trust rests on. `None` until a sync has established one.
+    anchor: Option<BlockIdExt>,
+    /// The block a cold sync starts walking from, as the config named it.
+    init_block: Option<BlockIdExt>,
+    /// How far behind the local clock a proven head may be.
+    max_head_age: u32,
 }
 
 impl Client {
     /// Connects to a liteserver from the config and completes the ADNL handshake.
     ///
     /// Tries the config's liteservers in turn until one connects and completes a
-    /// handshake.
+    /// handshake. Nothing is proved yet: the client has no anchor until
+    /// [`sync`](Self::sync) establishes one.
     ///
     /// # Errors
     ///
@@ -55,11 +72,135 @@ impl Client {
                 }
             };
             match LiteClient::connect(transport, &server.key).await {
-                Ok(lite) => return Ok(Client { lite }),
+                Ok(lite) => {
+                    return Ok(Client {
+                        lite,
+                        anchor: None,
+                        init_block: config.init_block().cloned(),
+                        max_head_age: config.max_head_age(),
+                    })
+                }
                 Err(e) => last_error = Some(e.into()),
             }
         }
         Err(last_error.unwrap_or_else(|| Error::Config("config has no liteservers".to_string())))
+    }
+
+    /// Connects and starts the walk from a block the caller already trusts.
+    ///
+    /// `anchor` must be a masterchain key block. It is the client's root of trust:
+    /// everything the client goes on to believe is derived from it, so it is worth
+    /// exactly what the storage it came from is worth. Anything that can write to where
+    /// a caller keeps one can choose what this client believes.
+    ///
+    /// A block from a previous run's [`anchor`](Self::anchor) makes this sync short,
+    /// which is the whole reason the anchor is handed back.
+    ///
+    /// # Errors
+    ///
+    /// As [`connect`](Self::connect), plus [`Error::Sync`] if the server cannot prove a
+    /// chain from `anchor`, and [`Error::Stale`] if what it leads to is too old.
+    pub async fn connect_from(config: &Config, anchor: &BlockIdExt) -> Result<Client, Error> {
+        let mut client = Client::connect(config).await?;
+        client.anchor = Some(anchor.clone());
+        client.sync().await?;
+        Ok(client)
+    }
+
+    /// The key block the client's trust currently rests on, if a sync has run.
+    ///
+    /// Saving this and handing it to [`connect_from`](Self::connect_from) on a later run
+    /// makes that run's sync short. It is a public block identity and holds no secret,
+    /// but it is a root of trust, so where it is kept is a decision the caller's own
+    /// threat model makes. This library stores nothing and picks no location.
+    #[must_use]
+    pub fn anchor(&self) -> Option<&BlockIdExt> {
+        self.anchor.as_ref()
+    }
+
+    /// Walks the anchor forward to the network's current head.
+    ///
+    /// Without an anchor the walk starts at the config's init block, which is a first
+    /// sync and costs a run over every key block published since that block: about a
+    /// couple of minutes and fifty megabytes against mainnet in July 2026. With one it is
+    /// a few links.
+    ///
+    /// The head in the returned [`SyncReport`] is proved and then the client forgets it.
+    /// What the client keeps is the last key block on the way, because that is the only
+    /// kind of block a later chain can continue from. Read [`anchor`](Self::anchor) after
+    /// this to save it.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::Config`] if there is neither an anchor nor an init block,
+    /// [`Error::Sync`] if the proof chain does not check out or the server will not
+    /// finish it, [`Error::Stale`] if the head it leads to is older than the config's
+    /// freshness bound, or the transport errors.
+    pub async fn sync(&mut self) -> Result<SyncReport, Error> {
+        let start = match (&self.anchor, &self.init_block) {
+            (Some(anchor), _) => anchor.clone(),
+            (None, Some(init)) => init.clone(),
+            (None, None) => {
+                return Err(Error::Config(
+                    "config names no init block to start a sync from".to_string(),
+                ))
+            }
+        };
+
+        // The head is the server's word about where the chain ends, used only as the
+        // target to ask for. Every block on the way to it is proved, including this one,
+        // so a server naming a block that does not exist fails the walk rather than
+        // steering it.
+        let target = self.masterchain_info().await?.into_value().last;
+        // A server whose head is not ahead of what the client already trusts has nothing
+        // to prove, and there is no way to establish that its block is current without a
+        // chain to it. That is a refusal rather than a quiet success at the old block.
+        if target.seqno <= start.seqno {
+            return Err(Error::Sync(format!(
+                "the server's head at {} is not ahead of the trusted block at {}",
+                target.seqno, start.seqno
+            )));
+        }
+
+        let mut anchor = start.clone();
+        let mut trusted_key_block = start;
+        let mut walk = sync::Walk::new();
+        loop {
+            let reply = within(PROOF_TIMEOUT, self.lite.block_proof(&anchor, &target)).await?;
+            sync::within_bounds(&reply)?;
+            walk.round(reply.steps.len())?;
+
+            let proven = verify_chain(&(&anchor).into(), &reply)
+                .map_err(|failure| Error::Sync(failure.to_string()))?;
+            let reached = BlockIdExt::from(proven.id);
+            sync::advanced(&anchor, &reached)?;
+
+            // Every link's key-block flag was checked against the destination's own
+            // header, so after the chain checks out the flag is proved rather than
+            // claimed and the last key block in the run can be taken from it.
+            if let Some(key_block) = last_key_block(&reply) {
+                trusted_key_block = key_block;
+            }
+            anchor = reached;
+
+            if reply.complete {
+                sync::fresh_enough(proven.gen_utime, self.max_head_age)?;
+                self.anchor = Some(trusted_key_block);
+                let (links, rounds) = walk.cost();
+                return Ok(SyncReport {
+                    head: anchor,
+                    links,
+                    rounds,
+                });
+            }
+            // An unfinished chain has to be continued from where it stopped, and only a
+            // key block carries the validator set that makes the next step checkable.
+            if !proven.key_block {
+                return Err(Error::Sync(
+                    "an unfinished chain stopped at a block no chain can continue from".to_string(),
+                ));
+            }
+        }
     }
 
     /// Reads the liteserver's current masterchain head.
@@ -179,9 +320,32 @@ impl fmt::Debug for Client {
     }
 }
 
-/// Runs one liteserver call under the deadline, mapping its error into [`Error`].
+/// The last block in a checked chain that a later chain can continue from.
+///
+/// Only safe to read after [`verify_chain`] has returned, because that is what ties each
+/// link's key-block flag to the destination block's own header.
+fn last_key_block(reply: &PartialBlockProof) -> Option<BlockIdExt> {
+    reply.steps.iter().rev().find_map(|step| match step {
+        BlockLink::Forward {
+            to_key_block: true,
+            to,
+            ..
+        } => Some(to.clone().into()),
+        _ => None,
+    })
+}
+
+/// Runs one liteserver read under the ordinary deadline.
 async fn bounded<T>(call: impl Future<Output = Result<T, LiteError>>) -> Result<T, Error> {
-    match tokio::time::timeout(CALL_TIMEOUT, call).await {
+    within(CALL_TIMEOUT, call).await
+}
+
+/// Runs one liteserver call under a given deadline, mapping its error into [`Error`].
+async fn within<T>(
+    deadline: Duration,
+    call: impl Future<Output = Result<T, LiteError>>,
+) -> Result<T, Error> {
+    match tokio::time::timeout(deadline, call).await {
         Ok(result) => result.map_err(Error::from),
         Err(_elapsed) => Err(Error::Timeout),
     }

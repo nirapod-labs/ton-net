@@ -4,6 +4,8 @@
 //! them with `--ignored`. They use only the public facade and each skips if no
 //! liteserver is reachable, so liteserver rotation does not fail the build.
 
+use std::time::Instant;
+
 use ton_net::{AccountRead, Address, Client, Config, Error};
 
 // Address of a system contract that is always active on mainnet.
@@ -219,4 +221,120 @@ async fn connect_rotates_past_a_dead_liteserver() {
         "rotated past a dead server; seqno {}",
         head.value().last.seqno
     );
+}
+
+// The milestone's gate, and the one test here that cannot be made fast. It walks every
+// key block the network has published since the block the config pins, which was 1242 of
+// them and 52 MB in July 2026, so it runs on a schedule rather than on every commit. Its
+// name carries `cold_sync` so the per-commit run can skip it by that.
+#[tokio::test]
+#[ignore = "walks every key block since the config's init block; minutes and tens of megabytes"]
+async fn a_cold_sync_from_the_config_reaches_a_head_a_warm_one_then_reaches_cheaply() {
+    let config = Config::mainnet();
+    let init = config
+        .init_block()
+        .expect("the bundled config names an init block");
+    let Some(mut client) = connect().await else {
+        return;
+    };
+    assert!(
+        client.anchor().is_none(),
+        "a client trusts nothing before it has synced"
+    );
+
+    let started = Instant::now();
+    let cold = match client.sync().await {
+        Ok(report) => report,
+        // A server that drops a connection part way through a two minute walk is ordinary
+        // and must not turn the build red. A chain that does not check out is the thing
+        // this test exists to catch, so it fails rather than skipping.
+        Err(e @ (Error::Transport(_) | Error::Timeout)) => {
+            eprintln!("skipping: the liteserver went away mid-walk: {e}");
+            return;
+        }
+        Err(e) => panic!("the cold sync did not check out: {e}"),
+    };
+    let cold_elapsed = started.elapsed();
+
+    // Reaching a head at all is the point: the client now trusts a block it derived from
+    // the config's, with a validator signature set checked at every step in between.
+    assert!(cold.head.seqno > init.seqno);
+    assert_eq!(cold.head.workchain, -1);
+    assert!(cold.links > 0 && cold.rounds > 0);
+    eprintln!(
+        "cold sync: {} links over {} rounds in {:.1?}, {} -> {}",
+        cold.links, cold.rounds, cold_elapsed, init.seqno, cold.head.seqno
+    );
+
+    // What the client kept is a key block behind the head, never the head itself, so the
+    // next walk has something a chain can continue from.
+    let anchor = client
+        .anchor()
+        .expect("a synced client has an anchor")
+        .clone();
+    assert!(anchor.seqno > init.seqno);
+    assert!(anchor.seqno <= cold.head.seqno);
+
+    // The saved anchor is the whole reason it is handed back: the second run pays a few
+    // links instead of the whole history.
+    let started = Instant::now();
+    let mut warm = match Client::connect_from(&config, &anchor).await {
+        Ok(client) => client,
+        Err(e) => panic!("a warm sync from the anchor the cold one produced failed: {e}"),
+    };
+    let warm_elapsed = started.elapsed();
+    let warm_report = warm.sync().await.expect("a second warm sync");
+    eprintln!(
+        "warm sync: connect_from in {warm_elapsed:.1?}, then {} links over {} rounds",
+        warm_report.links, warm_report.rounds
+    );
+    assert!(
+        warm_report.links * 20 < cold.links,
+        "a warm sync cost {} links against the cold sync's {}",
+        warm_report.links,
+        cold.links
+    );
+
+    // The freshness bound is the one thing standing between a client and a server that
+    // proves a real block from last year, and nothing inside a proof can establish it. A
+    // bound of zero refuses every head there is, which is the only way to reach the check
+    // against a live network where an honest head is seconds old. Run from the anchor, so
+    // it costs a warm sync rather than another walk.
+    let strict = Config::mainnet().with_max_head_age(0);
+    match Client::connect_from(&strict, &anchor).await {
+        Err(Error::Stale {
+            age_seconds,
+            limit_seconds,
+        }) => {
+            assert_eq!(limit_seconds, 0);
+            eprintln!("refused a head {age_seconds}s old against a zero bound");
+        }
+        Err(e) => panic!("expected a stale head, got {e}"),
+        Ok(_) => panic!("a bound of zero accepted a head"),
+    }
+}
+
+#[tokio::test]
+#[ignore = "hits a live mainnet liteserver; run with --ignored in the network job"]
+async fn a_sync_from_a_block_that_is_not_on_the_chain_is_refused() {
+    let config = Config::mainnet();
+    let Some(mut client) = connect().await else {
+        return;
+    };
+    let head = client
+        .masterchain_info()
+        .await
+        .expect("masterchain_info")
+        .into_value()
+        .last;
+
+    // A real, current masterchain block with one bit of its root hash flipped. It names
+    // nothing the network ever committed, so no server can prove a chain from it.
+    let mut invented = head.clone();
+    invented.root_hash[0] ^= 0x01;
+    match Client::connect_from(&config, &invented).await {
+        Err(Error::Sync(_) | Error::LiteServer { .. }) => {}
+        Err(other) => panic!("expected a sync failure, got {other}"),
+        Ok(_) => panic!("a block the chain does not contain was accepted as an anchor"),
+    }
 }

@@ -50,6 +50,28 @@ pub enum Error {
     /// no unproven fallback: a verified read either proves what it returns or fails.
     #[error("proof: {0}")]
     Proof(String),
+
+    /// A block proof chain did not establish a block to trust.
+    ///
+    /// Separate from [`Proof`](Self::Proof) because the two fail at different stages. A
+    /// proof failure means a server's answer did not match a block the client already
+    /// trusts; a sync failure means the client never established that block at all, and
+    /// retrying against another server is a reasonable response to one and not the other.
+    #[error("sync: {0}")]
+    Sync(String),
+
+    /// The newest block the server could prove is older than the freshness bound.
+    ///
+    /// The one failure here where the server may be honest and merely behind. A liteserver
+    /// can serve a real, fully proved block that is simply old, and nothing inside a proof
+    /// says when it was served.
+    #[error("the proven head is {age_seconds}s old, past the {limit_seconds}s bound")]
+    Stale {
+        /// How far behind the local clock the proven head is.
+        age_seconds: u64,
+        /// The bound that was exceeded, from [`crate::Config::max_head_age`].
+        limit_seconds: u64,
+    },
 }
 
 impl From<ton_net_block::BlockError> for Error {

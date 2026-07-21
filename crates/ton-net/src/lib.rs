@@ -13,11 +13,15 @@
 //! recomputed against a block hash the caller supplied, and the account was bound to that
 //! block's state. There is no way to turn the first into the second.
 //!
-//! What [`Verified`] does not settle is where the block hash came from. Passing
-//! [`Client::account_verified`] a head read from the same liteserver shows only that the
-//! server agrees with itself, which a server making things up can also manage. Producing
-//! an anchor from a single pinned key block is block sync, which this release does not do,
-//! so a read is not yet trust-minimized end to end.
+//! What [`Verified`] does not settle on its own is where the block hash came from.
+//! Passing [`Client::account_verified`] a head read from the same liteserver shows only
+//! that the server agrees with itself, which a server making things up can also manage.
+//!
+//! [`Client::sync`] is what closes that. It walks from the key block the config pins to
+//! the network's current head, checking a validator signature set at every step, and
+//! leaves the client holding a block it proved rather than one a server named. The block
+//! it starts from is the single input still taken on trust, and it comes from the file
+//! that already decides which network a client is on.
 //!
 //! # Example
 //!
@@ -51,6 +55,7 @@ mod codec;
 mod config;
 mod error;
 mod proof;
+mod sync;
 mod verified;
 
 pub use address::Address;
@@ -58,6 +63,7 @@ pub use client::Client;
 pub use config::Config;
 pub use error::Error;
 pub use proof::verify_account;
+pub use sync::SyncReport;
 pub use verified::Verified;
 
 /// The read response types, defined in ton-net-lite and surfaced here.
