@@ -15,7 +15,9 @@ path = [
     "LICENSE",
     "NOTICE",
     "README.md",
+    "SECURITY.md",
     "docs/**",
+    ".github/PULL_REQUEST_TEMPLATE.md",
     "bindings/node/package.json",
     "spikes/*/README.md",
     "spikes/sync-feasibility/.gitignore",
@@ -23,6 +25,15 @@ path = [
 precedence = "aggregate"
 SPDX-FileCopyrightText = "2026 Nirapod Labs"
 SPDX-License-Identifier = "Apache-2.0"
+
+# The code of conduct is the Contributor Covenant, adapted only where it asks to
+# be (the contact address). It is somebody else's text under its own license, so
+# it keeps its own attribution rather than being swept into this project's.
+[[annotations]]
+path = ["CODE_OF_CONDUCT.md"]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "Coraline Ada Ehmke"
+SPDX-License-Identifier = "CC-BY-4.0"
 
 # Lockfiles are resolved from the manifests in this repository by the toolchain,
 # so they are this project's output even though nobody typed them.
