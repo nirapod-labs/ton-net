@@ -21,7 +21,7 @@ default-members = [
 exclude = ["spikes"]
 
 [workspace.package]
-version = "0.1.0-alpha.1"
+version = "0.2.0-alpha.1"
 edition = "2021"
 license = "Apache-2.0"
 repository = "https://github.com/nirapod-labs/ton-net"
@@ -30,12 +30,12 @@ authors = ["The ton-net Authors"]
 
 [workspace.dependencies]
 # Internal crates, referenced by path in the workspace and by version once published.
-ton-net-tl = { path = "crates/ton-net-tl", version = "0.1.0-alpha.1" }
-ton-net-cell = { path = "crates/ton-net-cell", version = "0.1.0-alpha.1" }
-ton-net-block = { path = "crates/ton-net-block", version = "0.1.0-alpha.1" }
-ton-net-adnl = { path = "crates/ton-net-adnl", version = "0.1.0-alpha.1" }
-ton-net-lite = { path = "crates/ton-net-lite", version = "0.1.0-alpha.1" }
-ton-net = { path = "crates/ton-net", version = "0.1.0-alpha.1" }
+ton-net-tl = { path = "crates/ton-net-tl", version = "0.2.0-alpha.1" }
+ton-net-cell = { path = "crates/ton-net-cell", version = "0.2.0-alpha.1" }
+ton-net-block = { path = "crates/ton-net-block", version = "0.2.0-alpha.1" }
+ton-net-adnl = { path = "crates/ton-net-adnl", version = "0.2.0-alpha.1" }
+ton-net-lite = { path = "crates/ton-net-lite", version = "0.2.0-alpha.1" }
+ton-net = { path = "crates/ton-net", version = "0.2.0-alpha.1" }
 
 # External crates on the lines fixed in NET-ADR-003. Each member crate opts in as
 # its layer is built through the v0.1.0 plan; unreferenced entries are inert.

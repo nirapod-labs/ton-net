@@ -666,7 +666,7 @@ dependencies = [
 
 [[package]]
 name = "ton-net"
-version = "0.1.0-alpha.1"
+version = "0.2.0-alpha.1"
 dependencies = [
  "serde",
  "serde_json",
@@ -680,7 +680,7 @@ dependencies = [
 
 [[package]]
 name = "ton-net-adnl"
-version = "0.1.0-alpha.1"
+version = "0.2.0-alpha.1"
 dependencies = [
  "aes",
  "ctr",
@@ -694,7 +694,7 @@ dependencies = [
 
 [[package]]
 name = "ton-net-block"
-version = "0.1.0-alpha.1"
+version = "0.2.0-alpha.1"
 dependencies = [
  "thiserror",
  "ton-net-cell",
@@ -702,7 +702,7 @@ dependencies = [
 
 [[package]]
 name = "ton-net-cell"
-version = "0.1.0-alpha.1"
+version = "0.2.0-alpha.1"
 dependencies = [
  "sha2",
  "thiserror",
@@ -710,7 +710,7 @@ dependencies = [
 
 [[package]]
 name = "ton-net-lite"
-version = "0.1.0-alpha.1"
+version = "0.2.0-alpha.1"
 dependencies = [
  "thiserror",
  "tokio",
@@ -720,7 +720,7 @@ dependencies = [
 
 [[package]]
 name = "ton-net-node"
-version = "0.1.0-alpha.1"
+version = "0.2.0-alpha.1"
 dependencies = [
  "napi",
  "napi-build",
@@ -731,7 +731,7 @@ dependencies = [
 
 [[package]]
 name = "ton-net-tl"
-version = "0.1.0-alpha.1"
+version = "0.2.0-alpha.1"
 dependencies = [
  "tl-proto",
 ]
