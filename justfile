@@ -12,7 +12,20 @@ default:
     @just --list
 
 # Everything the hermetic CI gate runs. No network.
-gate: fmt-check lint licenses test doc
+gate: fmt-check lint licenses versions test doc
+
+# The crates and the npm packages ship from one commit but publish through two
+# toolchains that do not read each other, so nothing but this keeps them in step.
+versions:
+    node scripts/check-versions.mjs
+
+versions-fix:
+    node scripts/check-versions.mjs --fix
+
+# What crates.io would accept. Cargo resolves the inter-crate dependencies through
+# a temporary local registry, so this works before the first crate is published.
+publish-check:
+    cargo publish --dry-run --workspace
 
 # Rewrite what can be rewritten.
 fmt:

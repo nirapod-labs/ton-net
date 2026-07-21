@@ -4,6 +4,11 @@
 [package]
 name = "ton-net-adnl"
 description = "ADNL transport for the ton-net TON client."
+keywords = ["ton", "adnl", "transport", "blockchain", "p2p"]
+categories = ["network-programming", "cryptography::cryptocurrencies"]
+readme = "README.md"
+documentation = "https://docs.rs/ton-net-adnl"
+homepage = "https://github.com/nirapod-labs/ton-net"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

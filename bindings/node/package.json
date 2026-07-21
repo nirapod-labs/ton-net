@@ -1,6 +1,6 @@
 {
   "name": "ton-net",
-  "version": "0.2.0-alpha.1",
+  "version": "0.3.0",
   "description": "A direct TON network client: ADNL over TCP, liteserver reads, and Merkle-proof verification, with no HTTP indexer in the path.",
   "keywords": [
     "ton",
@@ -41,13 +41,13 @@
     "node": ">= 18.17.0"
   },
   "optionalDependencies": {
-    "@ton-net/core-darwin-arm64": "0.2.0-alpha.1",
-    "@ton-net/core-darwin-x64": "0.2.0-alpha.1",
-    "@ton-net/core-linux-arm64-gnu": "0.2.0-alpha.1",
-    "@ton-net/core-linux-arm64-musl": "0.2.0-alpha.1",
-    "@ton-net/core-linux-x64-gnu": "0.2.0-alpha.1",
-    "@ton-net/core-linux-x64-musl": "0.2.0-alpha.1",
-    "@ton-net/core-win32-x64-msvc": "0.2.0-alpha.1"
+    "@ton-net/core-darwin-arm64": "0.3.0",
+    "@ton-net/core-darwin-x64": "0.3.0",
+    "@ton-net/core-linux-arm64-gnu": "0.3.0",
+    "@ton-net/core-linux-arm64-musl": "0.3.0",
+    "@ton-net/core-linux-x64-gnu": "0.3.0",
+    "@ton-net/core-linux-x64-musl": "0.3.0",
+    "@ton-net/core-win32-x64-msvc": "0.3.0"
   },
   "napi": {
     "binaryName": "ton-net",

@@ -4,6 +4,11 @@
 [package]
 name = "ton-net-tl"
 description = "TL codec for the ton-net TON client."
+keywords = ["ton", "tl", "codec", "serialization", "blockchain"]
+categories = ["encoding", "parser-implementations"]
+readme = "README.md"
+documentation = "https://docs.rs/ton-net-tl"
+homepage = "https://github.com/nirapod-labs/ton-net"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

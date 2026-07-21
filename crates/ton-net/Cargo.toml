@@ -4,6 +4,9 @@
 [package]
 name = "ton-net"
 description = "A direct client for the TON network: TL, ADNL, and liteserver over one Rust core."
+readme = "README.md"
+documentation = "https://docs.rs/ton-net"
+homepage = "https://github.com/nirapod-labs/ton-net"
 keywords = ["ton", "blockchain", "adnl", "liteserver", "client"]
 categories = ["network-programming", "cryptography::cryptocurrencies"]
 version.workspace = true

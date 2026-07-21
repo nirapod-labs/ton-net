@@ -4,6 +4,11 @@
 [package]
 name = "ton-net-lite"
 description = "Liteserver read client for the ton-net TON client."
+keywords = ["ton", "liteserver", "client", "adnl", "blockchain"]
+categories = ["network-programming", "cryptography::cryptocurrencies"]
+readme = "README.md"
+documentation = "https://docs.rs/ton-net-lite"
+homepage = "https://github.com/nirapod-labs/ton-net"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

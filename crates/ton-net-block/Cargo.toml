@@ -4,6 +4,11 @@
 [package]
 name = "ton-net-block"
 description = "TON block and account structures, decoded from cells, for the ton-net TON client."
+keywords = ["ton", "blockchain", "merkle-proof", "tlb", "block"]
+categories = ["cryptography::cryptocurrencies", "parser-implementations"]
+readme = "README.md"
+documentation = "https://docs.rs/ton-net-block"
+homepage = "https://github.com/nirapod-labs/ton-net"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

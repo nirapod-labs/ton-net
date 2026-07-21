@@ -51,6 +51,26 @@ jobs:
       - name: tests
         run: cargo test
 
+  release-ready:
+    name: versions and packaging
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      # One library version across two registries. release-plz moves the Cargo
+      # side and napi moves the npm side, neither reads the other, so without this
+      # they drift and two artifacts claim to be the same library at different
+      # numbers.
+      - name: one version everywhere
+        run: node scripts/check-versions.mjs
+      # What crates.io would accept, including the metadata it requires and the
+      # files each package would carry. Cargo resolves the inter-crate
+      # dependencies through a temporary local registry, so this runs before the
+      # first crate is published rather than only after.
+      - name: crates would publish
+        run: cargo publish --dry-run --workspace
+
   msrv:
     name: msrv 1.85 core, 1.88 binding
     runs-on: ubuntu-latest

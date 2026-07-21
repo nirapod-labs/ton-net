@@ -1,6 +1,6 @@
 {
   "name": "@ton-net/core-linux-arm64-musl",
-  "version": "0.2.0-alpha.1",
+  "version": "0.3.0",
   "cpu": [
     "arm64"
   ],
