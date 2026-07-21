@@ -113,6 +113,42 @@ impl<T: Transport> LiteClient<T> {
             state.proof,
         ))
     }
+
+    /// Asks the server to prove a chain from a block the caller trusts to a later one.
+    ///
+    /// The answer is a run of links, each one a step the caller has to check. It comes
+    /// back as the wire type rather than a domain twin: unlike a read, nothing here is
+    /// a value to be consumed, and every field is evidence for a verifier to weigh.
+    /// Re-shaping it would mean two definitions of the same bytes and no reader served
+    /// by either.
+    ///
+    /// The server chooses the route, and may stop short of `target`; when it does,
+    /// [`complete`](wire::PartialBlockProof::complete) is false and the caller asks
+    /// again from where the answer ended. **None of it is checked here.** A run of
+    /// links that connects nothing, or ends somewhere else entirely, is a well-formed
+    /// answer to this call.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LiteError::LiteServer`] if the server returns an error, [`LiteError::Decode`]
+    /// if the answer does not decode, or [`LiteError::Adnl`] on a transport or framing
+    /// failure.
+    pub async fn block_proof(
+        &mut self,
+        known: &BlockIdExt,
+        target: &BlockIdExt,
+    ) -> Result<wire::PartialBlockProof, LiteError> {
+        // The request can leave the target out and let the server pick one, which is
+        // not offered: a client walking towards a head it has already chosen gains
+        // nothing from letting the server choose for it.
+        let request = wire::GetBlockProof {
+            mode: (),
+            known_block: wire_block(known),
+            target_block: Some(wire_block(target)),
+        };
+        let answer = self.connection.query(&build_query(request)).await?;
+        decode_answer(&answer)
+    }
 }
 
 /// Wraps a liteserver request in a `liteServer.query` envelope, ready to be an ADNL
@@ -218,6 +254,38 @@ mod tests {
     fn decode_answer_rejects_bytes_that_are_neither() {
         let result: Result<wire::MasterchainInfo, _> = decode_answer(&[0xde, 0xad, 0xbe, 0xef]);
         assert!(matches!(result, Err(LiteError::Decode(_))));
+    }
+
+    #[test]
+    fn build_query_lays_out_a_block_proof_request_the_way_mainnet_took_it() {
+        let block = BlockIdExt {
+            workchain: -1,
+            shard: 0x8000_0000_0000_0000,
+            seqno: 46_894_135,
+            root_hash: [0x11; 32],
+            file_hash: [0x22; 32],
+        };
+        let body = serialize(wire::GetBlockProof {
+            mode: (),
+            known_block: wire_block(&block),
+            target_block: Some(wire_block(&block)),
+        });
+
+        // Constructor id, then the mode word with bit 0 set for the target that
+        // follows, then two 80-byte block ids. This is the layout the feasibility
+        // spike built by hand and a mainnet liteserver answered.
+        assert_eq!(&body[..4], [0x44, 0x9c, 0xea, 0x8a]);
+        assert_eq!(&body[4..8], [1, 0, 0, 0]);
+        assert_eq!(body.len(), 4 + 4 + 80 + 80);
+        assert_eq!(&body[8..88], &body[88..]);
+
+        // The envelope is the same one every other request travels in.
+        let query = build_query(wire::GetBlockProof {
+            mode: (),
+            known_block: wire_block(&block),
+            target_block: Some(wire_block(&block)),
+        });
+        assert_eq!(&hex(&query[..4]), "df068c79");
     }
 
     #[test]
