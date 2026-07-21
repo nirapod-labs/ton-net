@@ -151,10 +151,11 @@ pub fn verify_merkle_proof<'a>(
 
     // The depth is hashed into the parent alongside the hash, so a proof that disagrees
     // with its own content here is malformed even though the hashes matched.
-    let depth = data
+    let depth: [u8; 2] = data
         .get(MERKLE_DEPTH..MERKLE_DEPTH + 2)
+        .and_then(|bytes| bytes.try_into().ok())
         .ok_or(BlockError::Malformed("merkle proof without a depth"))?;
-    if u16::from_be_bytes([depth[0], depth[1]]) != content.depth() {
+    if u16::from_be_bytes(depth) != content.depth() {
         return Err(BlockError::ProofInconsistent);
     }
 

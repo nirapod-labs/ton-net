@@ -78,7 +78,10 @@ pub fn verify_chain(
         proven = Some(verify_link(step, from)?);
     }
 
-    let last = proven.expect("the run is not empty");
+    // The empty case is refused above, so the loop ran at least once. Saying so by
+    // repeating that refusal rather than by asserting it keeps a later edit to the guard
+    // from turning this into a panic inside a verifier.
+    let last = proven.ok_or(BlockError::ChainBroken("has no steps"))?;
     if last.id != proof.to {
         return Err(BlockError::ChainBroken("ends somewhere other than it says"));
     }

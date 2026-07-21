@@ -152,10 +152,13 @@ fn read_hash(data: &[u8], at: usize) -> Result<[u8; 32], CellError> {
 
 /// Reads a big-endian depth out of `data` at `at`.
 fn read_depth(data: &[u8], at: usize) -> Result<u16, CellError> {
-    let slice = data.get(at..at + 2).ok_or(CellError::Malformed(
-        "exotic cell is too short for its depth",
-    ))?;
-    Ok(u16::from_be_bytes([slice[0], slice[1]]))
+    let bytes: [u8; 2] = data
+        .get(at..at + 2)
+        .and_then(|slice| slice.try_into().ok())
+        .ok_or(CellError::Malformed(
+            "exotic cell is too short for its depth",
+        ))?;
+    Ok(u16::from_be_bytes(bytes))
 }
 
 impl Cell {
@@ -277,10 +280,18 @@ impl Cell {
     ///
     /// Levels above the cell's own answer with its topmost hash.
     #[must_use]
+    // A cell is built with at least one hash and the index is clamped to the last, so
+    // this cannot be out of range. It is indexed rather than reached through `get`
+    // because the alternative is a fallback value, and the only value available is a
+    // zero hash: a cell that answered with one would compare equal to every other cell
+    // that failed the same way, which is a worse outcome than the panic being avoided.
+    #[expect(
+        clippy::indexing_slicing,
+        reason = "clamped to the last hash, and a cell always has one"
+    )]
     pub fn hash_at(&self, level: u8) -> &[u8; 32] {
         let index = hash_index(self.inner.level_mask, level);
         let last = self.inner.hashes.len().saturating_sub(1);
-        // The index is in range by construction; the clamp keeps this total.
         &self.inner.hashes[index.min(last)]
     }
 
@@ -295,7 +306,9 @@ impl Cell {
     pub fn depth_at(&self, level: u8) -> u16 {
         let index = hash_index(self.inner.level_mask, level);
         let last = self.inner.depths.len().saturating_sub(1);
-        self.inner.depths[index.min(last)]
+        // A depth is stored alongside every hash, so this is in range for the same
+        // reason [`Cell::hash_at`] is, and zero is a depth a leaf really has.
+        self.inner.depths.get(index.min(last)).copied().unwrap_or(0)
     }
 
     /// A cursor that reads typed values from the cell's bits and references.

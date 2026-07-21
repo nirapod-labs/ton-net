@@ -82,8 +82,10 @@ impl Address {
 
     fn parse_user_friendly(s: &str) -> Result<Address, Error> {
         // tag (1) ++ workchain (1) ++ account id (32) ++ crc16 (2)
-        let raw = base64_decode(s)
-            .filter(|bytes| bytes.len() == 36)
+        // Held as an array rather than a length-checked vector, so every field below is a
+        // constant range the compiler settles rather than a bound taken on trust.
+        let raw: [u8; 36] = base64_decode(s)
+            .and_then(|bytes| <[u8; 36]>::try_from(bytes).ok())
             .ok_or_else(|| Error::Address(format!("not a 36-byte user-friendly address: `{s}`")))?;
 
         let stored = [raw[34], raw[35]];

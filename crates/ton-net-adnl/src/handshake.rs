@@ -98,6 +98,10 @@ pub fn client_handshake(
     let scalar = {
         let full = Sha512::digest(secrets.key_seed);
         let mut scalar = [0u8; 32];
+        #[expect(
+            clippy::indexing_slicing,
+            reason = "the first half of a 64-byte digest"
+        )]
         scalar.copy_from_slice(&full[..32]);
         scalar
     };
@@ -128,10 +132,10 @@ pub fn client_handshake(
     iv[..4].copy_from_slice(&checksum[..4]);
     iv[4..].copy_from_slice(&shared[20..]);
 
+    // Taking the key and iv as arrays rather than slices settles their lengths in the
+    // type, so the constructor has nothing left to check and cannot fail.
     let mut encrypted = secrets.params;
-    Aes256Ctr::new_from_slices(&key, &iv)
-        .expect("32-byte key and 16-byte iv")
-        .apply_keystream(&mut encrypted);
+    Aes256Ctr::new((&key).into(), (&iv).into()).apply_keystream(&mut encrypted);
 
     let mut packet = [0u8; 256];
     packet[..32].copy_from_slice(&server_key_id);

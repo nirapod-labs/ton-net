@@ -49,9 +49,11 @@ impl Config {
     /// longer a first sync takes, so refreshing this snapshot belongs to cutting a
     /// release rather than to housekeeping.
     #[must_use]
+    // Whether the checked-in snapshot parses is settled before a caller ever runs, and a
+    // test in this module holds it there. Returning a Result would put a failure no
+    // caller can cause, and none can act on, into the first call most programs make.
+    #[expect(clippy::expect_used, reason = "a checked-in file, held by a test")]
     pub fn mainnet() -> Config {
-        // The bundled snapshot is checked in and parsed at build of the caller; it is
-        // valid by construction and covered by a test.
         Config::from_json(include_str!("mainnet.config.json"))
             .expect("the bundled mainnet config parses")
     }

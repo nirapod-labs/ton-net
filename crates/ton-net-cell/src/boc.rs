@@ -67,9 +67,12 @@ fn byte_width(value: u64) -> usize {
 }
 
 /// Appends the low `width` bytes of `value`, big-endian.
+///
+/// A width past the eight bytes a `u64` holds asks for a number wider than the value,
+/// which no caller here does; writing all eight is what keeps this total.
 fn push_be(out: &mut Vec<u8>, value: u64, width: usize) {
     let bytes = value.to_be_bytes();
-    out.extend_from_slice(&bytes[8 - width..]);
+    out.extend(bytes.into_iter().skip(bytes.len().saturating_sub(width)));
 }
 
 /// A reader that returns an error rather than reading past the end.
@@ -87,7 +90,7 @@ impl<'a> Reader<'a> {
     }
 
     fn byte(&mut self) -> Result<u8, CellError> {
-        self.take(1).map(|b| b[0])
+        self.take(1)?.first().copied().ok_or(CellError::Truncated)
     }
 
     fn uint(&mut self, n: usize) -> Result<u64, CellError> {
@@ -246,7 +249,7 @@ pub fn parse_boc(bytes: &[u8]) -> Result<Vec<Cell>, CellError> {
     if has_checksum {
         let split = bytes.len().checked_sub(4).ok_or(CellError::Truncated)?;
         let (body, tail) = bytes.split_at(split);
-        let stored = u32::from_le_bytes([tail[0], tail[1], tail[2], tail[3]]);
+        let stored = u32::from_le_bytes(tail.try_into().map_err(|_| CellError::Truncated)?);
         if crc32c(body) != stored {
             return Err(CellError::Checksum);
         }
@@ -346,22 +349,23 @@ pub fn parse_boc(bytes: &[u8]) -> Result<Vec<Cell>, CellError> {
     }
 
     // References point forward, so a descending pass meets every child before its parent.
-    let mut depth = vec![0usize; count];
-    for index in (0..count).rev() {
+    // Depths accumulate in that same descending order, so position k holds cell
+    // `count-1-k`, which is the convention the build below reads its children by.
+    let mut depth: Vec<usize> = Vec::with_capacity(count);
+    for raw_cell in raw.iter().rev() {
         let mut deepest = 0usize;
-        for &target in &raw[index].refs {
-            deepest = deepest.max(depth.get(target).copied().unwrap_or(0) + 1);
+        for &target in &raw_cell.refs {
+            deepest = deepest.max(depth.get(count - 1 - target).copied().unwrap_or(0) + 1);
         }
         if deepest > MAX_DEPTH {
             return Err(CellError::TooDeep { limit: MAX_DEPTH });
         }
-        depth[index] = deepest;
+        depth.push(deepest);
     }
 
     // Built in the same descending order. Position k in `built` holds cell `count-1-k`.
     let mut built: Vec<Cell> = Vec::with_capacity(count);
-    for index in (0..count).rev() {
-        let raw_cell = &raw[index];
+    for raw_cell in raw.iter().rev() {
         let mut refs = Vec::with_capacity(raw_cell.refs.len());
         for &target in &raw_cell.refs {
             let child = built

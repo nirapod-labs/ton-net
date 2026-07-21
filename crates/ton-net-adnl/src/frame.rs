@@ -73,6 +73,13 @@ impl SessionCiphers {
     /// `rx` takes params[0..32] as its key and params[64..80] as its iv; `tx` takes
     /// params[32..64] and params[80..96]. The server derives the mirror image from the
     /// same parameters, so the two sides' keystreams line up.
+    // Every range here is a constant inside a fixed-length array, so the key and iv
+    // lengths the constructor checks are settled before it is called and it cannot fail.
+    // The alternative is an error path for a case the type already rules out.
+    #[expect(
+        clippy::expect_used,
+        reason = "constant ranges of a fixed-length array"
+    )]
     pub(crate) fn from_params(params: &[u8; 160]) -> Self {
         Self {
             rx: Aes256Ctr::new_from_slices(&params[0..32], &params[64..80])
@@ -135,12 +142,17 @@ impl SessionCiphers {
             return Err(FrameError::BodyTooShort);
         }
         self.rx.apply_keystream(body);
-        let end = body.len() - 32;
-        let checksum = sha256(&[&body[..32], &body[32..end]]);
-        if body[end..] != checksum[..] {
+        // A frame is nonce, payload, checksum. The length check above is what makes both
+        // splits succeed; taking them by name rather than by offset is what keeps a frame
+        // shorter than its parts from reaching a slice index.
+        let (nonce, rest) = body.split_at_checked(32).ok_or(FrameError::BodyTooShort)?;
+        let (payload, stored) = rest
+            .split_at_checked(rest.len().saturating_sub(32))
+            .ok_or(FrameError::BodyTooShort)?;
+        if stored != sha256(&[nonce, payload]) {
             return Err(FrameError::Checksum);
         }
-        Ok(body[32..end].to_vec())
+        Ok(payload.to_vec())
     }
 }
 

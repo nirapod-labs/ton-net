@@ -82,8 +82,13 @@ pub fn verify(public_key: &[u8; 32], message: &[u8], signature: &[u8]) -> bool {
     let Ok(signature) = <[u8; 64]>::try_from(signature) else {
         return false;
     };
-    let r_bytes: [u8; 32] = signature[..32].try_into().expect("32 bytes");
-    let s_bytes: [u8; 32] = signature[32..].try_into().expect("32 bytes");
+    // The two halves of a 64-byte signature: R, then S.
+    let (Some(r_bytes), Some(s_bytes)) =
+        (signature.first_chunk::<32>(), signature.last_chunk::<32>())
+    else {
+        return false;
+    };
+    let (r_bytes, s_bytes) = (*r_bytes, *s_bytes);
 
     let Some(a) = canonical_point(public_key) else {
         return false;

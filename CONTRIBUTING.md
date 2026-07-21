@@ -52,6 +52,24 @@ usual run with `--skip cold_sync`.
 The Node binding lives in `bindings/node` and builds with `npx napi build
 --platform`. Its gate test is `node test.mjs`.
 
+## The library does not panic
+
+Every library crate denies `unwrap`, `expect`, `panic`, `unreachable`, `todo` and
+slice indexing. Bytes reach these crates from a liteserver nobody vouches for, and
+a panic in a decoder ends the process that embedded the library, so a failure has
+to come back as an error a caller can handle.
+
+Clippy exempts a test, where an unwrap is the assertion. In library code, reach for
+`get`, `first_chunk`, `split_at_checked`, a slice pattern, or an error variant. When
+the compiler already knows the case cannot happen, say so with `#[expect(..., reason
+= "...")]` and a comment giving the argument; an audited exemption is a fine outcome,
+an unexplained one is not.
+
+Arithmetic is not in the set. Every count these formats carry is bounded before it
+is used and each subtraction sits within a few lines of its guard, so denying it
+would bury the real bounds under `checked_sub`. That makes an overflow the reviewer's
+job: when a length comes off the wire, check it before it is multiplied.
+
 ## Tests
 
 A test name is a sentence saying what must hold, not a label for what it calls:

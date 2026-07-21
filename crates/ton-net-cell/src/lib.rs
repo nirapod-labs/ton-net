@@ -1,6 +1,21 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileCopyrightText: 2026 Nirapod Labs
 
+// A library that decodes bytes from a peer it does not trust must fail by returning, not
+// by unwinding: a panic in a decoder is a denial of service in whatever process embedded
+// it. The lints sit on the library because a test is the opposite case, where an unwrap
+// is the assertion. Arithmetic is deliberately not in the set: every count these formats
+// carry is bounded before it is used, and each subtraction sits within a few lines of the
+// guard that makes it safe, so denying it would bury the real bounds under checked_sub.
+#![deny(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::unreachable,
+    clippy::todo,
+    clippy::indexing_slicing
+)]
+
 //! The TON cell model and bag-of-cells codec for ton-net.
 //!
 //! A [`Cell`] is TON's universal container: up to 1023 bits of data and up to four

@@ -7,8 +7,14 @@ use crate::cell::Cell;
 use crate::error::CellError;
 
 /// Reads the bit at `index` of `data`, most significant bit first.
+///
+/// Every caller has already held `index` under the cell's bit length, which is what puts
+/// it inside `data`. Reading past the end answers false rather than panicking, so a
+/// caller that loses its bound returns a wrong value instead of unwinding through a
+/// decoder.
 fn bit_at(data: &[u8], index: usize) -> bool {
-    (data[index / 8] >> (7 - (index % 8))) & 1 == 1
+    data.get(index / 8)
+        .is_some_and(|byte| (byte >> (7 - (index % 8))) & 1 == 1)
 }
 
 /// A cursor that reads typed values out of one cell.
@@ -193,7 +199,15 @@ impl<'a> Slice<'a> {
     ///
     /// Returns [`CellError::NotEnoughBits`] if the slice has fewer than `n` bytes left.
     pub fn load_bytes(&mut self, n: usize) -> Result<Vec<u8>, CellError> {
-        let start = self.advance(n * 8)?;
+        // A byte count whose bit count does not fit a usize asks for more than any cell
+        // holds. Without this the multiplication wraps to a small number, the length
+        // check below passes on the wrapped value, and the allocation that follows is
+        // made against the unwrapped one.
+        let requested = n.checked_mul(8).ok_or(CellError::NotEnoughBits {
+            requested: usize::MAX,
+            available: self.remaining_bits(),
+        })?;
+        let start = self.advance(requested)?;
         let data = self.cell.data();
         let mut out = Vec::with_capacity(n);
         for byte in 0..n {
@@ -373,6 +387,22 @@ mod tests {
             Err(CellError::TooWide {
                 requested: 129,
                 width: 128,
+            })
+        );
+    }
+
+    #[test]
+    fn a_byte_count_too_large_to_measure_in_bits_is_refused() {
+        let roots = parse_boc(&ONE_CELL).unwrap();
+
+        // The length check is in bits, so a byte count near the top of a usize has to be
+        // multiplied before it can be checked. Wrapped, that product is small, the check
+        // passes, and the allocation that follows is made against the count as given.
+        assert_eq!(
+            roots[0].parse().load_bytes(usize::MAX / 4),
+            Err(CellError::NotEnoughBits {
+                requested: usize::MAX,
+                available: 8,
             })
         );
     }

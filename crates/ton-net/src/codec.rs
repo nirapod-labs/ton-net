@@ -38,14 +38,15 @@ pub(crate) fn base64_decode(input: &str) -> Option<Vec<u8>> {
     }
     // At most two `=`, and only at the end.
     let padding = bytes.iter().rev().take_while(|&&c| c == b'=').count();
-    if padding > 2 || bytes[..bytes.len() - padding].contains(&b'=') {
+    let body = bytes.get(..bytes.len() - padding)?;
+    if padding > 2 || body.contains(&b'=') {
         return None;
     }
 
     let mut out = Vec::with_capacity(bytes.len() * 3 / 4);
     let mut acc = 0u32;
     let mut bits = 0u32;
-    for &c in &bytes[..bytes.len() - padding] {
+    for &c in body {
         acc = (acc << 6) | sextet(c)?;
         bits += 6;
         if bits >= 8 {
@@ -99,7 +100,8 @@ pub(crate) fn decode_hex(input: &str) -> Option<Vec<u8>> {
     }
     let mut out = Vec::with_capacity(bytes.len() / 2);
     for pair in bytes.chunks_exact(2) {
-        out.push((nibble(pair[0])? << 4) | nibble(pair[1])?);
+        let [high, low] = pair else { return None };
+        out.push((nibble(*high)? << 4) | nibble(*low)?);
     }
     Some(out)
 }

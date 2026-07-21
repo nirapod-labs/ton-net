@@ -175,7 +175,11 @@ impl ValidatorSet {
         members.sort_unstable_by_key(|(short_id, _)| *short_id);
         // A key counted twice would be paid twice towards a threshold, so a repeat is a
         // refusal rather than something to deduplicate.
-        if members.windows(2).any(|pair| pair[0].0 == pair[1].0) {
+        if members
+            .iter()
+            .zip(members.iter().skip(1))
+            .any(|(left, right)| left.0 == right.0)
+        {
             return Err(BlockError::Malformed(
                 "a validator set that names the same key twice",
             ));
@@ -201,7 +205,8 @@ impl ValidatorSet {
         self.members
             .binary_search_by(|(id, _)| id.cmp(short_id))
             .ok()
-            .map(|at| &self.members[at].1)
+            .and_then(|at| self.members.get(at))
+            .map(|(_, validator)| validator)
     }
 
     /// The sum of the weights of the validators in this set, and nothing else.
@@ -257,7 +262,10 @@ fn read_validator(s: &mut Slice<'_>) -> Result<Validator, BlockError> {
             expected: "an ed25519 public key",
         });
     }
-    let public_key: [u8; 32] = s.load_bytes(32)?.try_into().expect("32 bytes");
+    let public_key: [u8; 32] = s
+        .load_bytes(32)?
+        .try_into()
+        .map_err(|_| BlockError::Malformed("an ed25519 public key that is not 32 bytes"))?;
     let weight = s.load_uint(64)?;
     Ok(Validator { public_key, weight })
 }

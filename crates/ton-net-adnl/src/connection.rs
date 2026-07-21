@@ -70,6 +70,14 @@ pub enum AdnlError {
     #[error("no answer to the query")]
     NoAnswer,
 
+    /// The operating system would not supply randomness.
+    ///
+    /// Every session key and every frame nonce is drawn fresh, so there is no session to
+    /// open and no query to send without one. Nothing weaker can stand in, and a library
+    /// has no standing to end the caller's process over it, so the failure is returned.
+    #[error("the operating system supplied no randomness")]
+    NoRandomness,
+
     /// A frame stopped partway, so this side no longer knows where the stream is.
     ///
     /// The session cannot recover: the ciphers count in step with the server and there is
@@ -94,8 +102,8 @@ impl<T: Transport> AdnlConnection<T> {
     /// [`AdnlError::Transport`] if the packet cannot be sent.
     pub async fn connect(mut transport: T, server_key: &[u8; 32]) -> Result<Self, AdnlError> {
         let secrets = HandshakeSecrets {
-            key_seed: random(),
-            params: random(),
+            key_seed: random()?,
+            params: random()?,
         };
         let handshake = client_handshake(server_key, &secrets)?;
         transport.write_all(&handshake.packet).await?;
@@ -130,12 +138,12 @@ impl<T: Transport> AdnlConnection<T> {
     /// [`AdnlError::Malformed`] if nothing that arrived decoded as an ADNL message, or
     /// [`AdnlError::NoAnswer`] if no matching answer arrives within the frame budget.
     pub async fn query(&mut self, query: &[u8]) -> Result<Vec<u8>, AdnlError> {
-        let query_id: [u8; 32] = random();
+        let query_id: [u8; 32] = random()?;
         let message = serialize(adnl::Message::Query {
             query_id,
             query: query.to_vec(),
         });
-        let nonce: [u8; 32] = random();
+        let nonce: [u8; 32] = random()?;
         self.send(&nonce, &message).await?;
 
         let mut undecodable = 0usize;
@@ -207,8 +215,8 @@ impl<T: Transport> AdnlConnection<T> {
 ///
 /// This is the crate's only draw from the OS, kept at the I/O edge so the protocol core
 /// stays a pure function of its inputs.
-fn random<const N: usize>() -> [u8; N] {
+fn random<const N: usize>() -> Result<[u8; N], AdnlError> {
     let mut bytes = [0u8; N];
-    getrandom::fill(&mut bytes).expect("operating system rng");
-    bytes
+    getrandom::fill(&mut bytes).map_err(|_| AdnlError::NoRandomness)?;
+    Ok(bytes)
 }

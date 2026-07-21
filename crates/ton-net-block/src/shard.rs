@@ -321,8 +321,16 @@ fn find_shard(root: &Cell, account_id: &[u8; 32]) -> Result<Lookup<ShardDescr>, 
             // bt_leaf: this shard covers the account.
             return ShardDescr::load(&mut slice).map(Lookup::Found);
         }
-        // bt_fork: the address bit at this depth chooses the half.
-        let branch = usize::from((account_id[depth / 8] >> (7 - depth % 8)) & 1 == 1);
+        // bt_fork: the address bit at this depth chooses the half. The split limit keeps
+        // the walk inside the account id, and running out of address bits would mean that
+        // limit had been raised past what an address can steer.
+        let byte = account_id
+            .get(depth / 8)
+            .copied()
+            .ok_or(BlockError::Malformed(
+                "shard tree deeper than an account id can steer",
+            ))?;
+        let branch = usize::from((byte >> (7 - depth % 8)) & 1 == 1);
         node = node
             .reference(branch)
             .ok_or(BlockError::Malformed("shard tree fork without both halves"))?
