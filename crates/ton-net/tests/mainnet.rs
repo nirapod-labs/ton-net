@@ -4,7 +4,7 @@
 //! them with `--ignored`. They use only the public facade and each skips if no
 //! liteserver is reachable, so liteserver rotation does not fail the build.
 
-use ton_net::{Address, Client, Config, Error};
+use ton_net::{AccountRead, Address, Client, Config, Error};
 
 // Address of a system contract that is always active on mainnet.
 const ELECTOR: &str = "-1:3333333333333333333333333333333333333333333333333333333333333333";
@@ -152,8 +152,6 @@ async fn a_block_the_server_does_not_know_is_refused_before_any_proof() {
 #[tokio::test]
 #[ignore = "hits a live mainnet liteserver; run with --ignored in the network job"]
 async fn live_proof_bytes_are_refused_against_the_wrong_block() {
-    use ton_net_block::{proof, AccountRead};
-
     let Some(mut client) = connect().await else {
         return;
     };
@@ -178,18 +176,19 @@ async fn live_proof_bytes_are_refused_against_the_wrong_block() {
         reported.proof(),
         &state.state,
     );
-    proof::verify_account(&good).expect("a live read verifies against the block it was read at");
+    ton_net::verify_account(&good).expect("a live read verifies against the block it was read at");
 
-    // The same bytes against any other hash prove nothing. Driving the engine directly is
-    // the only way to reach this case, because the client reads at the block it checks
-    // against; today's mainnet bytes have to fail it just as the pinned ones do.
+    // The same bytes against any other hash prove nothing. Checking the bytes separately
+    // is the only way to reach this case, because a verified read is made at the block it
+    // is checked against; today's mainnet bytes have to fail it just as the pinned ones do.
     let mut wrong = head.root_hash;
     wrong[0] ^= 1;
     let bad = AccountRead::masterchain(&wrong, parsed.account_id(), reported.proof(), &state.state);
-    assert!(
-        proof::verify_account(&bad).is_err(),
-        "live proof bytes verified against a block they say nothing about"
-    );
+    match ton_net::verify_account(&bad) {
+        Err(Error::Proof(_)) => {}
+        Err(other) => panic!("expected a proof failure, got {other}"),
+        Ok(_) => panic!("live proof bytes verified against a block they say nothing about"),
+    }
 }
 
 #[tokio::test]

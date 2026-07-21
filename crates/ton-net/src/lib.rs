@@ -50,19 +50,21 @@ mod client;
 mod codec;
 mod config;
 mod error;
+mod proof;
 mod verified;
 
 pub use address::Address;
 pub use client::Client;
 pub use config::Config;
 pub use error::Error;
+pub use proof::verify_account;
 pub use verified::Verified;
 
 /// The read response types, defined in ton-net-lite and surfaced here.
 pub use ton_net_lite::{AccountState, BlockIdExt, MasterchainInfo, ServerReported};
 
 /// The decoded chain structures, defined in ton-net-block and surfaced here.
-pub use ton_net_block::{Account, AccountStatus, Coins};
+pub use ton_net_block::{Account, AccountRead, AccountStatus, Coins};
 
 /// The cell types a decoded account carries, defined in ton-net-cell and surfaced here.
 pub use ton_net_cell::{Cell, CellType};

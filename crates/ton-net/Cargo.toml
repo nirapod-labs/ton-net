@@ -23,6 +23,3 @@ tokio = { workspace = true, features = ["time"] }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["rt", "macros", "time", "test-util"] }
-# Already a dependency; listed again so the network tests can drive the proof engine
-# directly, which is the only way to check a proof against a block it was not read at.
-ton-net-block.workspace = true
