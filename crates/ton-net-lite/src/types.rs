@@ -84,6 +84,34 @@ pub struct BlockIdExt {
     pub file_hash: [u8; 32],
 }
 
+impl BlockIdExt {
+    /// Names a block by its five identifying parts.
+    ///
+    /// Reads hand these back, so a caller rarely builds one. The case that needs this is
+    /// the one a verified read is for: an anchor block the caller learned somewhere other
+    /// than from the server about to be checked. Without a way to name that block there
+    /// is no way to check anything against it, and asking the server for its own anchor
+    /// proves only that the server agrees with itself.
+    ///
+    /// For a masterchain block, `workchain` is `-1` and `shard` is `0x8000_0000_0000_0000`.
+    #[must_use]
+    pub fn new(
+        workchain: i32,
+        shard: u64,
+        seqno: u32,
+        root_hash: [u8; 32],
+        file_hash: [u8; 32],
+    ) -> BlockIdExt {
+        BlockIdExt {
+            workchain,
+            shard,
+            seqno,
+            root_hash,
+            file_hash,
+        }
+    }
+}
+
 /// A masterchain head as a liteserver reports it.
 #[derive(Debug, Clone)]
 #[non_exhaustive]
