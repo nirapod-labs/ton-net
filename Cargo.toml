@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
     "crates/ton-net-tl",
+    "crates/ton-net-cell",
     "crates/ton-net-adnl",
     "crates/ton-net-lite",
     "crates/ton-net",
@@ -9,6 +10,7 @@ members = [
 ]
 default-members = [
     "crates/ton-net-tl",
+    "crates/ton-net-cell",
     "crates/ton-net-adnl",
     "crates/ton-net-lite",
     "crates/ton-net",
@@ -27,6 +29,7 @@ authors = ["The ton-net Authors"]
 [workspace.dependencies]
 # Internal crates, referenced by path in the workspace and by version once published.
 ton-net-tl = { path = "crates/ton-net-tl", version = "0.1.0-alpha.1" }
+ton-net-cell = { path = "crates/ton-net-cell", version = "0.1.0-alpha.1" }
 ton-net-adnl = { path = "crates/ton-net-adnl", version = "0.1.0-alpha.1" }
 ton-net-lite = { path = "crates/ton-net-lite", version = "0.1.0-alpha.1" }
 ton-net = { path = "crates/ton-net", version = "0.1.0-alpha.1" }
