@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-FileCopyrightText: 2026 Nirapod Labs
+
 //! A reading cursor over a cell's bits and references.
 
 use crate::cell::Cell;

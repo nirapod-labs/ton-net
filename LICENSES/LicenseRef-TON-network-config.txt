@@ -1,0 +1,14 @@
+TON network configuration
+
+crates/ton-net/src/mainnet.config.json is the TON mainnet network configuration
+published by the TON Foundation at https://ton.org/global.config.json. It is
+carried here unchanged so a client has a default network to start from.
+
+The file holds liteserver addresses, their Ed25519 public keys, and the identity
+of one block. The TON Foundation publishes it without a license statement, so no
+terms are reproduced here and none are inferred. Nirapod Labs claims no copyright
+over it.
+
+It is included as reference network data, not as part of the work this repository
+licenses under Apache-2.0. A user who does not wish to rely on it can supply their
+own configuration; see the crate documentation for `Config`.

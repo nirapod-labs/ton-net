@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-FileCopyrightText: 2026 Nirapod Labs
+
 //! A network test of the read client against a live mainnet liteserver.
 //!
 //! `#[ignore]` so the hermetic suite never reaches the network; the network CI job runs

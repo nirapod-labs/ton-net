@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-FileCopyrightText: 2026 Nirapod Labs
+
 // Gate test: exercise the whole binding from Node against live mainnet.
 //
 // It proves the async design across the FFI boundary: the class factory returns a real

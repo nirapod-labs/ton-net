@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-FileCopyrightText: 2026 Nirapod Labs
+
 //! The messages a validator signature covers.
 //!
 //! A signature in a [`crate::lite::SignatureSet`] is 64 bytes and a signer id. It says

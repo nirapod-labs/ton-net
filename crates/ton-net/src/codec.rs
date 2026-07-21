@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-FileCopyrightText: 2026 Nirapod Labs
+
 //! Small self-contained encoders: base64, CRC16, and hex.
 //!
 //! These are the few primitives the config and address parsers need. They are written

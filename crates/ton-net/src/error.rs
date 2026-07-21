@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-FileCopyrightText: 2026 Nirapod Labs
+
 //! The facade error type and the mappings from the lower crates into it.
 
 /// The error type for every fallible operation in this crate.

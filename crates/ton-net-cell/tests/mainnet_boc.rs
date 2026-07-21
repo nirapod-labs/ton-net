@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-FileCopyrightText: 2026 Nirapod Labs
+
 //! Parsing a bag of cells TON produced, not one this crate wrote.
 //!
 //! The fixture is the proof a mainnet liteserver returned for the config contract at

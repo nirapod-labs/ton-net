@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-FileCopyrightText: 2026 Nirapod Labs
+
 //! Liteserver query and response TL types.
 //!
 //! These are the `liteServer.*` requests and responses the client reads, plus the

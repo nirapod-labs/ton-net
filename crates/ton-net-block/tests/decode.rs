@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-FileCopyrightText: 2026 Nirapod Labs
+
 //! Decoding accounts and walking a proof, against bytes TON produced.
 //!
 //! The fixtures are account states and a proof a mainnet liteserver returned, captured

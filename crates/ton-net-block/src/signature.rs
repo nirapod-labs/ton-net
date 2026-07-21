@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-FileCopyrightText: 2026 Nirapod Labs
+
 //! Ed25519 verification, and the two messages a TON validator signature covers.
 //!
 //! # The acceptance rule

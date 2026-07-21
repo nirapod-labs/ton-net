@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-FileCopyrightText: 2026 Nirapod Labs
+
 //! Verifying account reads against a trusted block hash, and refusing tampered ones.
 //!
 //! The fixtures are whole `getAccountState` answers a mainnet liteserver returned,

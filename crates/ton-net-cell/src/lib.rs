@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-FileCopyrightText: 2026 Nirapod Labs
+
 //! The TON cell model and bag-of-cells codec for ton-net.
 //!
 //! A [`Cell`] is TON's universal container: up to 1023 bits of data and up to four

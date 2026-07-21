@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-FileCopyrightText: 2026 Nirapod Labs
+
 //! The domain response types and the unverified-read wrapper.
 //!
 //! These are the cleaned-up forms of the liteserver wire types: a reader sees a block

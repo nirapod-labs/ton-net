@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-FileCopyrightText: 2026 Nirapod Labs
+
 //! ADNL transport for ton-net: the encrypted link to a liteserver.
 //!
 //! ADNL is the transport TON nodes speak. This crate opens and runs a liteserver

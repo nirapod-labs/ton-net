@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-FileCopyrightText: 2026 Nirapod Labs
+
 //! A block, read for its header, its configuration, and the state it leaves behind.
 
 use ton_net_cell::{Cell, CellType, Slice};

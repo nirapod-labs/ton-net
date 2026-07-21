@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-FileCopyrightText: 2026 Nirapod Labs
+
 //! The ADNL handshake: opening an encrypted session with a liteserver.
 //!
 //! The client sends one 256-byte packet and, from that moment, both sides share the

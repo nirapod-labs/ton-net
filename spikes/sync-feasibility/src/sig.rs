@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-FileCopyrightText: 2026 Nirapod Labs
+
 //! Ed25519 verification and the weight rule, on the crates already in the tree.
 //!
 //! NET-ADR-003 keeps one copy of each crypto crate and rejects `ed25519-dalek` as a

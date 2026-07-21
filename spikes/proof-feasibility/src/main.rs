@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-FileCopyrightText: 2026 Nirapod Labs
+
 //! Proof-engine feasibility spike for ton-net v0.2.0.
 //!
 //! The riskiest piece of v0.2.0 is cell hashing: a Merkle proof is believed only

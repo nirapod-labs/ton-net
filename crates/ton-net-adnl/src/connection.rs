@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-FileCopyrightText: 2026 Nirapod Labs
+
 //! The async connection driver: a liteserver session over a transport.
 //!
 //! [`AdnlConnection`] is the one async object in this crate. It draws the per-session

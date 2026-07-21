@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-FileCopyrightText: 2026 Nirapod Labs
+
 //! TON block and account structures, decoded from cells, for ton-net.
 //!
 //! This crate turns the cells a liteserver returns into values a reader can use. It

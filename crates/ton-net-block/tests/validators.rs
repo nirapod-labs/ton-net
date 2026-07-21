@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-FileCopyrightText: 2026 Nirapod Labs
+
 //! The block header and the validator set, read from captured mainnet proofs.
 //!
 //! The fixtures are whole `liteServer.getBlockProof` answers, each one forward link, so

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-FileCopyrightText: 2026 Nirapod Labs
+
 //! The block header and the validator set, decoded from the cells a link carries.
 //!
 //! Two walks. The destination proof gives the header, which says whether the block is

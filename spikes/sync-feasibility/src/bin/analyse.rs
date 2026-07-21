@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-FileCopyrightText: 2026 Nirapod Labs
+
 //! Works out what a Simplex signature set actually signs, from captured bytes.
 //!
 //! Ed25519 verification is an exact oracle: a wrong guess at the message produces zero

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-FileCopyrightText: 2026 Nirapod Labs
+
 //! Block-sync feasibility spike.
 //!
 //! Answers the questions the v0.3.0 plan cannot answer by reading, against live

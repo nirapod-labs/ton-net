@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-FileCopyrightText: 2026 Nirapod Labs
+
 //! The client: one ADNL channel to one liteserver, with reads over it.
 
 use std::fmt;

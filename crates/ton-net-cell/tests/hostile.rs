@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-FileCopyrightText: 2026 Nirapod Labs
+
 //! Arbitrary and corrupted bytes, which every input to this crate might be.
 //!
 //! A bag of cells arrives from a liteserver nobody vouches for, so the parser's whole job

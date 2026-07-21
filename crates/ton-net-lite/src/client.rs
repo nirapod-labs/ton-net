@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-FileCopyrightText: 2026 Nirapod Labs
+
 //! The liteserver read client and its query and decode helpers.
 
 use ton_net_adnl::{AdnlConnection, Transport};

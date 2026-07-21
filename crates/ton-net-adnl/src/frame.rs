@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-FileCopyrightText: 2026 Nirapod Labs
+
 //! ADNL stream framing: sealing and opening one frame.
 //!
 //! Once the handshake is done, each direction of the session is an AES-256-CTR stream

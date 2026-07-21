@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-FileCopyrightText: 2026 Nirapod Labs
+
 //! Node.js binding for the ton-net TON client.
 //!
 //! This crate wraps the `ton-net` facade with napi-rs. Reads cross the FFI boundary as

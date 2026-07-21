@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-FileCopyrightText: 2026 Nirapod Labs
+
 //! Captures everything one account read returns, to pin as a test fixture.
 //!
 //! The cell and block crates are tested against bytes TON produced rather than bytes

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-FileCopyrightText: 2026 Nirapod Labs
+
 //! The validator set a key block names, read from its configuration.
 //!
 //! This is where a light client most easily goes subtly wrong, so what the reference

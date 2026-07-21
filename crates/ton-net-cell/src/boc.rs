@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-FileCopyrightText: 2026 Nirapod Labs
+
 //! The bag of cells: the serialized form of a cell graph.
 
 use std::collections::{HashMap, HashSet};

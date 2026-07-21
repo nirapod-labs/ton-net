@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-FileCopyrightText: 2026 Nirapod Labs
+
 //! Fixed public-API vectors for the ADNL handshake and framing.
 //!
 //! These pin the exact bytes the public functions produce for fixed inputs, so any

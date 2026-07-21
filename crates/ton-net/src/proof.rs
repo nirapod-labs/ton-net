@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-FileCopyrightText: 2026 Nirapod Labs
+
 //! Checking a read that was fetched separately from the check.
 
 use ton_net_block::{proof, AccountRead};

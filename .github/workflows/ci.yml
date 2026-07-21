@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: 2026 Nirapod Labs
+
 name: ci
 
 on:
@@ -18,6 +21,16 @@ env:
 # reach a live liteserver; the spike job covers the standalone projects the gate
 # cannot see.
 jobs:
+  reuse:
+    name: license headers
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Every file carries a copyright holder and a license identifier, in its own
+      # header where the format allows a comment and in REUSE.toml where it does not.
+      # A convention this wide decays without a check, so this one fails the build.
+      - uses: fsfe/reuse-action@v5
+
   check:
     name: fmt, clippy, docs, tests
     runs-on: ubuntu-latest

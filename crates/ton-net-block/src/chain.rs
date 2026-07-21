@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-FileCopyrightText: 2026 Nirapod Labs
+
 //! Checking a block proof chain, one link at a time.
 //!
 //! A liteserver answers `getBlockProof` with a run of links connecting a block the

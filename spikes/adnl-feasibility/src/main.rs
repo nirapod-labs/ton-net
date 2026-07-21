@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-FileCopyrightText: 2026 Nirapod Labs
+
 // Standalone spike: complete an ADNL-over-TCP handshake with a TON mainnet
 // liteserver and issue one liteServer.getMasterchainInfo query, constructing
 // every byte directly instead of through an ADNL library. It builds the same

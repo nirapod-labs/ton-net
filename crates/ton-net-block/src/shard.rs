@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-FileCopyrightText: 2026 Nirapod Labs
+
 //! The shard state, walked as far as one account or one shard binding.
 
 use ton_net_cell::{Cell, Slice};

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-FileCopyrightText: 2026 Nirapod Labs
+
 //! Walking the anchor forward, and the bounds that keep a server from deciding how far.
 //!
 //! The loop is short, because the protocol puts the routing on the server: ask for a

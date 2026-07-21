@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-FileCopyrightText: 2026 Nirapod Labs
+
 //! TON account addresses: parsing the raw and user-friendly forms.
 
 use crate::codec::{base64_decode, crc16, decode_hex};

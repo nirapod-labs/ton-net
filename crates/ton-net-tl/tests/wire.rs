@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-FileCopyrightText: 2026 Nirapod Labs
+
 //! Wire-format tests for ton-net-tl.
 //!
 //! Three kinds of check: every boxed type's constructor id equals the CRC32 of its

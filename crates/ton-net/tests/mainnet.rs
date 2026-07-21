@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-FileCopyrightText: 2026 Nirapod Labs
+
 //! Network tests of the whole facade against live mainnet.
 //!
 //! `#[ignore]` so the hermetic suite never reaches the network; the network CI job runs

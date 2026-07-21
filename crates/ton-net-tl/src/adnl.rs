@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-FileCopyrightText: 2026 Nirapod Labs
+
 //! ADNL message-envelope TL types.
 //!
 //! These are the outer envelope an ADNL frame carries. A client sends a

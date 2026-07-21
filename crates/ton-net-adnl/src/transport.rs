@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-FileCopyrightText: 2026 Nirapod Labs
+
 //! The transport seam and its native TCP implementation.
 //!
 //! The ADNL protocol logic is sans-I/O: it produces bytes to send and consumes bytes

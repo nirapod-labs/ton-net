@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-FileCopyrightText: 2026 Nirapod Labs
+
 //! The error type for decoding block and account structures.
 
 /// A failure decoding a TON block or account structure from cells.

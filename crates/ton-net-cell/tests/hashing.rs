@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-FileCopyrightText: 2026 Nirapod Labs
+
 //! Cell hashing, measured against hashes TON produced.
 //!
 //! The level rule for exotic cells is the piece a proof engine gets subtly wrong, so

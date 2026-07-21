@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-FileCopyrightText: 2026 Nirapod Labs
+
 //! ton-net: a direct client for the TON network.
 //!
 //! This crate connects to a TON liteserver over ADNL and reads chain state without an

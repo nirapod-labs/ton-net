@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-FileCopyrightText: 2026 Nirapod Labs
+
 //! Checking an account read against a block hash the caller trusts.
 //!
 //! A liteserver's answer is worth what its proof is worth. This module turns one trusted

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-FileCopyrightText: 2026 Nirapod Labs
+
 //! The wrapper that marks a value as proven against a block.
 
 use ton_net_lite::BlockIdExt;

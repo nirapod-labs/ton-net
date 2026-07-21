@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-FileCopyrightText: 2026 Nirapod Labs
+
 //! The block-proof wire types, read by hand.
 //!
 //! Hand-rolled on purpose. The point of the spike is to pin the layout against real

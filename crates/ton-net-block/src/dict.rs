@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-FileCopyrightText: 2026 Nirapod Labs
+
 //! Looking one key up in a TON dictionary.
 //!
 //! A TON dictionary is a binary radix tree over fixed-width keys. Each edge carries a

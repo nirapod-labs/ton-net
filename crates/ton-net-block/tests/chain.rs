@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-FileCopyrightText: 2026 Nirapod Labs
+
 //! A real mainnet proof chain, verified end to end, and the ways it can be broken.
 //!
 //! The fixture is a whole `liteServer.getBlockProof` answer: three forward links from

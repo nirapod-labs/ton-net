@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-FileCopyrightText: 2026 Nirapod Labs
+
 //! An account, decoded from the state cell a liteserver returns.
 
 use ton_net_cell::{parse_boc, Cell, Slice};

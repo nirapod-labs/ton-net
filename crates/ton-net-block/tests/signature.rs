@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-FileCopyrightText: 2026 Nirapod Labs
+
 //! What this client accepts as an ed25519 signature, pinned rather than inherited.
 //!
 //! The rule is libsodium's `crypto_sign_verify_detached`, because that is what TON
