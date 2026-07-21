@@ -51,6 +51,48 @@ jobs:
       - name: tests
         run: cargo test
 
+  mutants:
+    name: would a test notice a missing check
+    # Slow, and it answers a question that does not change between two commits on the
+    # same day, so it runs on the daily schedule rather than on every push.
+    if: github.event_name == 'schedule' && github.repository == 'nirapod-labs/ton-net'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@cargo-mutants
+      # Removes one check at a time and reruns the suite. A passing suite says the code
+      # does what the tests ask; this says whether the tests would notice if it stopped.
+      # That is the question worth asking about a library whose job is refusing things.
+      # Mutants judged unkillable rather than untested are excluded in
+      # .cargo/mutants.toml, each with the reason.
+      - name: cell and proof crates
+        run: cargo mutants -p ton-net-cell -p ton-net-block --timeout 120
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: mutants
+          path: mutants.out/
+          retention-days: 14
+
+  wasm:
+    name: the core still builds for the browser
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      # The browser binding is a later milestone, and by then the decision that
+      # matters is already made: whether the protocol logic stayed free of the
+      # runtime. These three crates are the sans-I/O core and must build with no
+      # threads, no sockets and no clock. The transport layers above them pull in
+      # tokio and are expected to fail here until the browser transport lands.
+      - name: core crates on wasm32
+        run: cargo build --target wasm32-unknown-unknown -p ton-net-tl -p ton-net-cell -p ton-net-block
+
   release-ready:
     name: versions and packaging
     runs-on: ubuntu-latest

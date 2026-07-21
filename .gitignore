@@ -7,6 +7,11 @@ node_modules/
 # reference for editing release-plz.toml, not part of the project.
 .schema/
 
+# cargo-mutants writes its report here. The finding belongs in a test or in the
+# exclusions, not in the repository.
+mutants.out/
+mutants.out.old/
+
 # napi-rs generates the loader and the type definitions from the Rust binding, and
 # both are tracked. The definitions are the published TypeScript API and the doc
 # comments a caller reads in an editor, so leaving them untracked would put the

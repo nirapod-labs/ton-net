@@ -757,4 +757,70 @@ mod tests {
             Err(CellError::Malformed("partial byte has no completion bit"))
         );
     }
+
+    #[test]
+    fn the_checksum_is_the_one_everyone_else_computes() {
+        // This crate writes the checksum on the way out and checks it on the way in,
+        // both through this function, so a round trip agrees with itself no matter what
+        // the function computes. A bag from a reference node does not, and neither does
+        // the published check value for CRC-32C, which is what this pins.
+        assert_eq!(crc32c(b"123456789"), 0xE306_9283);
+        assert_eq!(crc32c(b""), 0);
+    }
+
+    #[test]
+    fn a_bag_whose_checksum_disagrees_is_refused() {
+        let bag = serialize_boc(&parse_boc(&TWO_CELLS).unwrap()).unwrap();
+        // Parsing what was just written exercises the check in the direction that
+        // succeeds, which nothing else here does.
+        assert_eq!(
+            parse_boc(&bag).unwrap()[0].repr_hash(),
+            parse_boc(&TWO_CELLS).unwrap()[0].repr_hash()
+        );
+
+        // A byte of payload altered under a checksum that still describes the original.
+        let mut corrupt = bag.clone();
+        let last = corrupt.len() - 5;
+        corrupt[last] ^= 0xff;
+        assert_eq!(parse_boc(&corrupt), Err(CellError::Checksum));
+
+        // And the checksum itself altered under payload that is still intact.
+        let mut forged = bag;
+        let tail = forged.len() - 1;
+        forged[tail] ^= 0xff;
+        assert_eq!(parse_boc(&forged), Err(CellError::Checksum));
+    }
+
+    #[test]
+    fn a_dense_bag_parses_and_an_overcounted_one_does_not() {
+        // Every cell costs at least its two descriptor bytes, so a count whose minimum
+        // size exceeds what is left is truncation before anything is allocated.
+        //
+        // The guard runs before the root list is read, so what it compares against still
+        // includes those bytes. That makes its exact boundary unreachable by a bag that
+        // would otherwise parse, and the off-by-one in it unobservable: a bag dense
+        // enough to sit on the boundary is one the cell reader rejects anyway. What is
+        // worth pinning is the pair below, a dense bag that parses and an overcounted
+        // one that does not.
+        //
+        // Two empty cells, four payload bytes, which is exactly two apiece.
+        const EXACT: [u8; 15] = [
+            0xb5, 0xee, 0x9c, 0x72, // magic
+            0x01, // one byte per reference, no index, no checksum
+            0x01, // one byte per offset
+            0x02, // two cells
+            0x01, // one root
+            0x00, // no absent cells
+            0x04, // four bytes of cell area
+            0x00, // the root is cell zero
+            0x00, 0x00, // cell zero: no references, no bits
+            0x00, 0x00, // cell one: the same
+        ];
+        assert!(parse_boc(&EXACT).is_ok(), "the boundary itself must parse");
+
+        // One cell more than the bytes can hold.
+        let mut overcount = EXACT;
+        overcount[6] = 0x03;
+        assert_eq!(parse_boc(&overcount), Err(CellError::Truncated));
+    }
 }

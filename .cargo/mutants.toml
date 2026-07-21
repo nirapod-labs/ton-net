@@ -1,0 +1,45 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: 2026 Nirapod Labs
+
+# Mutation testing asks the question a passing suite cannot: would a test notice if
+# a check were removed? For a library whose value is that it refuses things, that is
+# the measure that matters, and it is how the first run here found that the
+# bag-of-cells checksum was written and verified through the same function, so a
+# round trip agreed with itself no matter what that function computed.
+#
+# Mutate one crate, but run every crate's tests. The layers here are thin on their
+# own and checked from above: making `skip_bits` a no-op passes the cell crate's own
+# suite untouched and fails four chain tests one crate up. Scoping the test run to
+# the mutated package reports that as a gap in coverage that is not missing.
+test_workspace = true
+
+# Everything excluded below was read and judged unkillable rather than untested.
+# Each entry says why. Anything not listed that survives is a gap.
+exclude_re = [
+    # `(value << 8) | byte` and `0x40 | ref_size`. The shift clears the low bits and
+    # the flag does not overlap the size, so or and xor produce the same bytes. No
+    # input distinguishes them.
+    "replace \\| with \\^",
+
+    # `deepest.max(depth + 1)` becoming `depth * 1`. Reaching it needs a tree deeper
+    # than the depth limit, which is a fixture the format allows and a machine would
+    # rather not build.
+    "replace \\+ with \\* in parse_boc",
+
+    # The cell-count and depth ceilings. Both are the format's own limits, and a
+    # fixture that sits on one is over a hundred thousand cells.
+    "replace > with >= in parse_boc",
+    "replace > with == in parse_boc",
+    "replace > with >= in serialize_boc",
+    "replace > with == in serialize_boc",
+
+    # `bits > MAX_BITS` after reading a cell's data. The descriptor byte is a u8, so
+    # the bit length it can express tops out at exactly the limit. The guard is
+    # defence against a future change, and unreachable today.
+    "replace > with (>=|==) in .*bit",
+
+    # `len - at` becoming `len + at` in the reader's remaining-bytes count. Its one
+    # caller compares against a value that includes the root list, so the boundary
+    # where the two differ belongs to bags the cell reader rejects regardless.
+    "replace - with \\+ in Reader",
+]

@@ -238,7 +238,7 @@ impl<'a> Slice<'a> {
 
 #[cfg(test)]
 mod tests {
-    use crate::parse_boc;
+    use crate::{parse_boc, CellError};
 
     // One cell of eight bits holding 0xab.
     const ONE_CELL: [u8; 14] = [
@@ -333,5 +333,47 @@ mod tests {
     fn a_variable_integer_needs_a_sane_maximum() {
         let roots = parse_boc(&ONE_CELL).unwrap();
         assert!(roots[0].parse().load_var_uint(1).is_err());
+    }
+
+    #[test]
+    fn a_slice_is_empty_only_once_bits_and_references_are_both_spent() {
+        // Both halves matter. A reader calling this to confirm it consumed a cell whole
+        // would accept one with an unread reference if either half were enough, and an
+        // unread reference is a field nobody looked at.
+        let roots = parse_boc(&TWO_CELLS).unwrap();
+        let mut slice = roots[0].parse();
+        assert!(!slice.is_empty(), "a fresh slice still holds a reference");
+        slice.load_ref().unwrap();
+        assert!(slice.is_empty(), "bits and references are both spent");
+
+        let roots = parse_boc(&ONE_CELL).unwrap();
+        let mut bits_only = roots[0].parse();
+        assert!(!bits_only.is_empty(), "eight bits are still unread");
+        bits_only.skip_bits(8).unwrap();
+        assert!(bits_only.is_empty());
+    }
+
+    #[test]
+    fn a_wide_integer_is_read_up_to_its_width_and_no_further() {
+        let roots = parse_boc(&ONE_CELL).unwrap();
+
+        // The widest read the type holds is allowed, so the guard is exclusive. Asking
+        // for it from a short slice fails on the bits rather than on the width.
+        assert_eq!(
+            roots[0].parse().load_uint128(128),
+            Err(CellError::NotEnoughBits {
+                requested: 128,
+                available: 8,
+            })
+        );
+
+        // One bit wider than the type is refused before the slice is consulted.
+        assert_eq!(
+            roots[0].parse().load_uint128(129),
+            Err(CellError::TooWide {
+                requested: 129,
+                width: 128,
+            })
+        );
     }
 }
