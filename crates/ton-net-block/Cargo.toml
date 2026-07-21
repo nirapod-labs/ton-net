@@ -10,12 +10,19 @@ authors.workspace = true
 
 [dependencies]
 ton-net-cell.workspace = true
+# The block-proof wire types a chain is checked over, and the two messages a validator
+# signature covers.
+ton-net-tl.workspace = true
+# Signature verification is built on the curve crate already in the tree rather than on
+# an ed25519 crate, which would duplicate it (NET-ADR-007).
+curve25519-dalek.workspace = true
 # A validator's short id is the sha256 of its key in TL form, which is how a signature
 # names its signer.
 sha2.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]
-# The block-proof fixtures are whole liteserver answers, so the tests decode one to
-# reach the proofs inside it.
-ton-net-tl.workspace = true
+# The differential test compares this crate's acceptance rule against an audited
+# implementation. It does not ship, so the curve copy it pulls reaches no consumer.
+ed25519-dalek = "3"
+rand_core = "0.9"

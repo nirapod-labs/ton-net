@@ -42,6 +42,7 @@ pub mod dict;
 mod error;
 pub mod proof;
 mod shard;
+pub mod signature;
 pub mod validators;
 
 pub use account::{Account, AccountStatus};
