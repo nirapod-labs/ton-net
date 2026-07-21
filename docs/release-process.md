@@ -41,6 +41,16 @@ claiming to be the same library at different numbers.
    `crates/ton-net/src/mainnet.config.json`. That moves the default trust anchor,
    so the walk from the new pinned block has to be run before the release, not
    after: `just test-sync`.
+6. The binding matrix is green on a dispatch from `main`, including the job that
+   loads a musl binary on musl. That workflow runs on a tag, a schedule and a
+   dispatch, so no ordinary commit exercises it, and the first time it ran it
+   failed on three of seven targets.
+
+   Two of those are still failing and they block this release:
+   [#7](https://github.com/nirapod-labs/ton-net/issues/7), the musl artifacts are
+   built on a glibc host, so the x64 one carries the glibc interpreter and the
+   arm64 one does not link. An npm version can be deprecated but never replaced, so
+   a musl package that cannot load is permanent.
 
 ## Cutting it
 
