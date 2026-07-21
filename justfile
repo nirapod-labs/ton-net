@@ -19,6 +19,12 @@ gate: fmt-check lint licenses workflows versions test doc
 workflows:
     node scripts/check-workflows.mjs
 
+# Advisories, licenses, duplicate versions and sources. Needs the advisory database, so
+# unlike the rest of the gate this one reaches the network. CI also runs it daily,
+# because an advisory arrives against a version that merged weeks ago.
+deny:
+    cargo deny check
+
 # The crates and the npm packages ship from one commit but publish through two
 # toolchains that do not read each other, so nothing but this keeps them in step.
 versions:

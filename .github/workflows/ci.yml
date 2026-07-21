@@ -7,9 +7,10 @@ on:
   push:
     branches: [main]
   pull_request:
-  # The cold-sync test walks every key block the network has published since the block
-  # the config pins, which is minutes and tens of megabytes off a public liteserver. It
-  # runs once a day rather than on every commit.
+  # Two jobs need a clock rather than a commit. The cold-sync test walks every key block
+  # the network has published since the block the config pins, which is minutes and tens
+  # of megabytes off a public liteserver. The advisory check has to rerun on code that
+  # has not changed, because an advisory is published against a version already merged.
   schedule:
     - cron: "17 4 * * *"
 
@@ -107,6 +108,25 @@ jobs:
           name: mutants
           path: mutants.out/
           retention-days: 14
+
+  deny:
+    name: advisories, licenses, duplicates, sources
+    if: github.event_name != 'schedule' || github.repository == 'nirapod-labs/ton-net'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
+        with:
+          toolchain: stable
+      - uses: taiki-e/install-action@a6b2e2dcd845ddd7f509ce4f3ed3d922b80cc5d9 # v2.84.0
+        with:
+          tool: cargo-deny
+      # Also on the daily schedule, and that is the half most projects leave out: an
+      # advisory is published against a version that merged weeks ago, so a check that
+      # only runs on a diff never sees it. Every rule and its exceptions are in
+      # deny.toml, including why the crypto stack sits at two generations.
+      - name: dependency tree
+        run: cargo deny check
 
   wasm:
     name: the core still builds for the browser

@@ -38,9 +38,17 @@ cargo clippy --all-targets -- -D warnings
 cargo test
 RUSTDOCFLAGS="-D warnings" cargo doc --no-deps
 reuse lint
+node scripts/check-workflows.mjs
+cargo deny check
 ```
 
-All five run in CI and all five must pass.
+All of these run in CI and all must pass. `just gate` runs the offline ones in
+one go; `cargo deny check` needs the advisory database and so needs the network.
+
+A new dependency has to clear `deny.toml`: a permissive license on the allow
+list, no published advisory, from crates.io, and no second version of a crate
+already in the tree. That last one is a decision recorded in NET-ADR-003, not a
+formality, and the exceptions in `deny.toml` each say why they are there.
 
 Tests that reach a live mainnet liteserver are marked `#[ignore]` so the default
 run stays offline and deterministic. Run them with `cargo test -- --ignored`. Each

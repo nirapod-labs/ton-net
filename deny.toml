@@ -1,0 +1,73 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: 2026 Nirapod Labs
+
+# What is allowed into the dependency tree, checked by cargo-deny.
+#
+# Three questions this answers that a build does not: whether anything in the tree has a
+# published advisory, whether every license in it can be redistributed under this
+# project's own, and whether a crate arrived from somewhere other than crates.io.
+#
+# A fourth is particular to this workspace. NET-ADR-003 fixes the crypto and codec lines
+# to one copy each, because two generations of the same primitive in one binary is both a
+# wider attack surface and a larger artifact for a library that ships prebuilt. That
+# decision decays silently as dependencies move, so a duplicate is refused here and the
+# ones that exist are listed with their reason.
+#
+# Run with `cargo deny check`.
+
+[graph]
+all-features = true
+
+[advisories]
+# A yanked version is one its author withdrew. That is a weaker signal than an advisory
+# and a real one: it is how a broken release is usually pulled back.
+yanked = "deny"
+# Nothing is ignored. An entry here would be a decision to ship a known problem, and that
+# belongs in a commit message rather than in a list.
+ignore = []
+
+[licenses]
+# Everything ton-net redistributes has to be redistributable under Apache-2.0. These are
+# the permissive licenses that are, and the list is deliberately short: a copyleft or a
+# source-available license in the tree is a decision, not a dependency bump.
+#
+# Unicode-3.0 is here because unicode-ident carries it beside its permissive choice with
+# an AND rather than an OR, so it cannot be chosen away.
+allow = [
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-3-Clause",
+    "ISC",
+    "MIT",
+    "Unicode-3.0",
+    "Unlicense",
+]
+
+[bans]
+multiple-versions = "deny"
+# Each duplicate is named on its own rather than covered by a tree, so that adding a
+# seventh entry is a decision somebody makes. A `skip-tree` over the crypto stack would
+# have swallowed the syn entry below without saying so.
+skip = [
+    # The RustCrypto stack sits at two generations in every artifact this project ships,
+    # and it is not fixable from here. curve25519-dalek 5, which verifies the block
+    # signatures, moved to the digest 0.11 line; tl-proto 0.5, which is the TL codec,
+    # still reaches sha2 0.10 on the digest 0.10 line. Holding this workspace's own sha2
+    # at 0.10 keeps it to one extra copy rather than three, which is what NET-ADR-003
+    # decided. It resolves when tl-proto crosses, and not before.
+    { crate = "block-buffer" },
+    { crate = "cpufeatures" },
+    { crate = "crypto-common" },
+    { crate = "digest" },
+
+    # syn 2 and syn 3 both appear while the proc-macro ecosystem crosses that boundary.
+    # Build-time only: nothing in a published artifact links it.
+    { crate = "syn" },
+]
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+# Everything comes from crates.io. A git dependency cannot be published anyway, so this
+# is the state a release already requires.
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
