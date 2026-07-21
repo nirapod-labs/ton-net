@@ -6,7 +6,7 @@ over TCP and UDP, DHT, liteserver, proof verification, block sync, and a TVM,
 across the core plus the primary bindings.
 
 Governing decisions: [NET-ADR-001](adr/NET-ADR-001-architecture.md) through
-[NET-ADR-005](adr/NET-ADR-005-tvm.md).
+[NET-ADR-007](adr/NET-ADR-007-signature-verification.md).
 
 ---
 
@@ -83,10 +83,14 @@ trust-minimized end to end.
 
 ### v0.3.0: Block-sync engine
 
-The trust anchor. The pinned init key-block, `getBlockProof` link-walking,
-validator-set derivation from config 28/34, and the two-thirds Ed25519 signature
-check. After this, `getAccount` is trust-minimized end to end with no
-caller-supplied hash.
+The trust anchor. The init key-block the network config pins, `getBlockProof`
+link-walking, validator-set derivation from config 34, and the two-thirds Ed25519
+signature check in both of the forms mainnet uses. After this, `getAccount` is
+trust-minimized end to end with no caller-supplied hash.
+
+Decisions in [NET-ADR-006](adr/NET-ADR-006-trust-anchor.md) and
+[NET-ADR-007](adr/NET-ADR-007-signature-verification.md); plan in
+[docs/plan/v0.3.0.md](plan/v0.3.0.md).
 
 *Gate:* sync from the pinned init key-block to the current masterchain head across
 at least one validator-set rotation, matched against the reference node's proof
@@ -201,6 +205,8 @@ Stated honestly:
   schedule risk, sequenced late for exactly that reason.
 - **Proof-engine level-mask and validator-set correctness.** The pytoniq reference
   has documented gaps here; getting them exactly right (not copied) is subtle work
-  on the critical trust path.
+  on the critical trust path. Level-mask hashing was settled in v0.2.0 against a
+  mainnet root match, and the validator-set derivation in v0.3.0 against 107475 real
+  signatures, so this risk is now largely spent.
 - **Mobile CI.** The XCFramework and AAR multi-architecture build is the heaviest
   pipeline and the most likely to consume time in v0.8.0.

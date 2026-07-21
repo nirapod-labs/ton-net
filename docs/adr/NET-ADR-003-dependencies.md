@@ -5,9 +5,15 @@ status: proposed
 date: 2026-07-20
 supersedes: none
 superseded-by: none
+amended-by: NET-ADR-007
 ---
 
 # NET-ADR-003: Depend on tl-proto and keep one copy of each crypto crate
+
+> Amended by [NET-ADR-007](NET-ADR-007-signature-verification.md), which extends
+> `curve25519-dalek`'s purpose here to ed25519 signature verification and adds
+> `ed25519-dalek` as a development dependency for differential testing. The
+> single-copy rule below is unchanged, and is what forced that decision.
 
 ## Context
 
