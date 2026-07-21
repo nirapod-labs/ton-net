@@ -1,12 +1,12 @@
 //! Liteserver query and response TL types.
 //!
-//! These are the `liteServer.*` requests and responses the first release reads,
-//! plus the shared block and account identifiers they carry. A request is wrapped
-//! in a [`Query`], whose bytes then travel inside an [`crate::adnl::Message::Query`].
+//! These are the `liteServer.*` requests and responses the client reads, plus the
+//! shared block and account identifiers they carry. A request is wrapped in a
+//! [`Query`], whose bytes then travel inside an [`crate::adnl::Message::Query`].
 //!
-//! Every response here is the server's word. This crate decodes it; it does not
-//! verify the Merkle proofs a liteserver returns. Proof verification is a later
-//! layer.
+//! Every response here is the server's word. This crate decodes it and checks nothing,
+//! neither the Merkle proofs nor the validator signatures a liteserver returns.
+//! Verification belongs to `ton-net-block`, over the types decoded here.
 
 use tl_proto::{TlRead, TlWrite};
 
@@ -93,6 +93,154 @@ pub struct GetAccountState {
     pub id: BlockIdExt,
     /// The account to read.
     pub account: AccountId,
+}
+
+/// The `liteServer.getBlockProof` request: ask a server to connect a block the client
+/// already trusts to a later one. It answers with a [`PartialBlockProof`].
+///
+/// The `mode` word on the wire is a flag set, and its only flag says whether a target
+/// block follows. It is derived from [`target_block`](Self::target_block) rather than
+/// carried, so the two cannot disagree. With no target the server picks one, which is
+/// not what a client walking towards a known head wants.
+#[derive(TlRead, TlWrite, Debug, Clone, PartialEq, Eq)]
+#[tl(boxed, id = 0x8aea9c44)]
+pub struct GetBlockProof {
+    /// The wire flag word, written from the fields below and discarded on read.
+    #[tl(flags)]
+    pub mode: (),
+    /// The block the client already trusts, which the proof starts from.
+    pub known_block: BlockIdExt,
+    /// The block to prove, or `None` to let the server choose one.
+    #[tl(flags_bit = 0)]
+    pub target_block: Option<BlockIdExt>,
+}
+
+/// One validator's signature, in the `liteServer.signature` bare form.
+#[derive(TlRead, TlWrite, Debug, Clone, PartialEq, Eq)]
+pub struct Signature {
+    /// The signer's short id: SHA-256 of its key in the `pub.ed25519` TL form, the
+    /// same computation the ADNL handshake performs on a server key.
+    pub node_id_short: [u8; 32],
+    /// The 64-byte ed25519 signature.
+    pub signature: Vec<u8>,
+}
+
+/// A `liteServer.SignatureSet`: what a set of validator signatures covers.
+///
+/// Mainnet has used two forms. [`Ordinary`](Self::Ordinary) signs a block identity
+/// directly. [`Simplex`](Self::Simplex) comes from TON's Simplex consensus and signs a
+/// vote naming a candidate, so the block is reached through the candidate rather than
+/// signed outright. Mainnet changed form at masterchain block 59379986, and a chain
+/// spanning that point carries both.
+///
+/// The two arms are not interchangeable: their first two integer fields are in the
+/// opposite order, so reading one as the other silently swaps them. The constructor id
+/// is what tells them apart, and a third form no version of this client knows is
+/// refused by [`TlError::UnknownConstructor`](crate::TlError::UnknownConstructor)
+/// rather than read as either.
+#[derive(TlRead, TlWrite, Debug, Clone, PartialEq, Eq)]
+#[tl(boxed)]
+#[non_exhaustive]
+pub enum SignatureSet {
+    /// The original form. The signatures cover a [`crate::signed::BlockId`].
+    ///
+    /// Its scheme line carries an explicit constructor id, which is exactly the id the
+    /// older unnamed `liteServer.signatureSet` line computes to. The union was added
+    /// without moving the wire form a client already spoke.
+    #[tl(id = 0xf644a6e6)]
+    Ordinary {
+        /// A short hash of the validator set that signed.
+        validator_set_hash: i32,
+        /// The catchain sequence number the set belongs to.
+        catchain_seqno: i32,
+        /// The signatures.
+        signatures: Vec<Signature>,
+    },
+    /// The Simplex form. The signatures cover a [`crate::signed::DataToSign`] wrapping
+    /// a finalize vote, built from `session_id`, `slot`, and the hash of `candidate`.
+    #[tl(id = 0xac249800)]
+    Simplex {
+        /// The catchain sequence number the set belongs to.
+        cc_seqno: i32,
+        /// A short hash of the validator set that signed.
+        validator_set_hash: i32,
+        /// The signatures.
+        signatures: Vec<Signature>,
+        /// The consensus session the vote belongs to. It is signed alongside the vote,
+        /// so a signature raised in one session cannot be replayed into another.
+        session_id: [u8; 32],
+        /// The slot the candidate was proposed for.
+        slot: i32,
+        /// The serialized `consensus.CandidateHashData` the vote names, kept as bytes
+        /// because the vote covers its hash and never needs it decoded.
+        candidate: Vec<u8>,
+    },
+}
+
+/// A `liteServer.BlockLink`: one step of a block proof chain.
+///
+/// A [`Forward`](Self::Forward) step goes from a key block to a later block and is
+/// carried by the signatures of the validator set that key block named. A
+/// [`Back`](Self::Back) step goes the other way and cannot use signatures, because a
+/// block is not signed by validators who came later; it shows instead that the
+/// destination is recorded in the source block's state.
+#[derive(TlRead, TlWrite, Debug, Clone, PartialEq, Eq)]
+#[tl(boxed)]
+#[non_exhaustive]
+pub enum BlockLink {
+    /// A step backwards, proved from the source block's state.
+    #[tl(id = 0xef7e1bef)]
+    Back {
+        /// Whether the destination is a key block.
+        to_key_block: bool,
+        /// The block the step starts from.
+        from: BlockIdExt,
+        /// The block the step ends at.
+        to: BlockIdExt,
+        /// A proof of the destination block's header, as raw bag-of-cells bytes.
+        dest_proof: Vec<u8>,
+        /// A proof of the source block, as raw bag-of-cells bytes.
+        proof: Vec<u8>,
+        /// A proof of the source block's state, holding its list of previous
+        /// masterchain blocks, as raw bag-of-cells bytes.
+        state_proof: Vec<u8>,
+    },
+    /// A step forwards, carried by validator signatures.
+    #[tl(id = 0x520fce1c)]
+    Forward {
+        /// Whether the destination is a key block.
+        to_key_block: bool,
+        /// The key block the step starts from.
+        from: BlockIdExt,
+        /// The block the step ends at.
+        to: BlockIdExt,
+        /// A proof of the destination block's header, as raw bag-of-cells bytes.
+        dest_proof: Vec<u8>,
+        /// A proof of the source key block's configuration, which is where the
+        /// validator set that signed comes from, as raw bag-of-cells bytes.
+        config_proof: Vec<u8>,
+        /// The signatures over the destination.
+        signatures: SignatureSet,
+    },
+}
+
+/// The `liteServer.partialBlockProof` response: as much of a proof chain as the server
+/// chose to send at once.
+///
+/// The server picks the route. A client validates every step of it and believes
+/// nothing about the route itself, including whether it runs forwards.
+#[derive(TlRead, TlWrite, Debug, Clone, PartialEq, Eq)]
+#[tl(boxed, id = 0x8ed0d2c1)]
+pub struct PartialBlockProof {
+    /// Whether the chain reaches the requested target. When it does not, the caller
+    /// asks again from [`to`](Self::to).
+    pub complete: bool,
+    /// The block the chain starts from.
+    pub from: BlockIdExt,
+    /// The block the chain reaches.
+    pub to: BlockIdExt,
+    /// The steps, in order.
+    pub steps: Vec<BlockLink>,
 }
 
 /// The `liteServer.masterchainInfo` response: the server's current masterchain head.

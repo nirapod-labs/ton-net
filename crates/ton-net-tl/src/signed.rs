@@ -1,0 +1,107 @@
+//! The messages a validator signature covers.
+//!
+//! A signature in a [`crate::lite::SignatureSet`] is 64 bytes and a signer id. It says
+//! nothing about what was signed, so a client that wants to check one has to rebuild
+//! the exact bytes the validator's key went over. There are two such forms, and a walk
+//! from the block the mainnet config pins to today crosses both: mainnet changed form
+//! at masterchain block 59379986.
+//!
+//! [`BlockId`] is the older form and signs a block's identity outright. The Simplex
+//! form signs a vote instead, and is assembled from three types here:
+//!
+//! ```text
+//! DataToSign { session_id, data = Vote::Finalize { id = CandidateId { slot, hash } } }
+//! ```
+//!
+//! Nothing in this module hashes. `CandidateId::hash` is the SHA-256 of the candidate
+//! bytes the signature set carries, computed by the caller, which keeps the digest
+//! crates out of a codec crate.
+//!
+//! These types are written and never read: a client builds one to check a signature
+//! against it. They deserialize anyway so a round-trip test can pin the layout.
+
+use tl_proto::{TlRead, TlWrite};
+
+/// The `ton.blockId` form: the identity of the block being signed.
+///
+/// This is the whole of the older signed message, 68 bytes with its constructor id.
+/// The file hash is the load-bearing part. It is the one field of a block identity no
+/// Merkle proof can establish, being a hash of the serialized block file rather than
+/// of the cell tree, so a link's destination is believed only after its signatures
+/// check and not after its header proof checks.
+#[derive(TlRead, TlWrite, Debug, Clone, PartialEq, Eq)]
+#[tl(boxed, id = 0xc50b6e70)]
+pub struct BlockId {
+    /// The block's root cell hash.
+    pub root_cell_hash: [u8; 32],
+    /// The block's file hash.
+    pub file_hash: [u8; 32],
+}
+
+/// The `ton.blockIdApprove` form: the same two fields under a different constructor.
+///
+/// It shares [`BlockId`]'s scheme line and result type and differs from it in four
+/// bytes, and it is not what a block proof's signatures cover. It is here as the
+/// negative control that keeps that from being an assumption. A client checking a real
+/// set against the wrong constructor finds every signature invalid, which looks exactly
+/// like a forged set, so the two are worth telling apart in a test rather than in
+/// prose.
+#[derive(TlRead, TlWrite, Debug, Clone, PartialEq, Eq)]
+#[tl(boxed, id = 0x2dd44a49)]
+pub struct BlockIdApprove {
+    /// The block's root cell hash.
+    pub root_cell_hash: [u8; 32],
+    /// The block's file hash.
+    pub file_hash: [u8; 32],
+}
+
+/// A `consensus.candidateId`: the candidate a Simplex vote names.
+#[derive(TlRead, TlWrite, Debug, Clone, PartialEq, Eq)]
+#[tl(boxed, id = 0xb691cd3f)]
+pub struct CandidateId {
+    /// The slot the candidate was proposed for.
+    pub slot: i32,
+    /// SHA-256 of the serialized `consensus.CandidateHashData` the signature set
+    /// carries as `candidate`.
+    pub hash: [u8; 32],
+}
+
+/// A `consensus.simplex.UnsignedVote`: what a validator votes on a candidate.
+///
+/// A block proof rests on [`Finalize`](Self::Finalize), because finalization is what
+/// commits a block. [`Notarize`](Self::Notarize) is its near neighbour and serves the
+/// same purpose here as [`BlockIdApprove`]: checking a real set against it finds every
+/// signature invalid, so it is what shows the right one was not a lucky guess. The
+/// union has a third member this client never builds.
+#[derive(TlRead, TlWrite, Debug, Clone, PartialEq, Eq)]
+#[tl(boxed)]
+#[non_exhaustive]
+pub enum Vote {
+    /// A vote on a candidate that does not commit it.
+    #[tl(id = 0xcdf605a8)]
+    Notarize {
+        /// The candidate voted on.
+        id: CandidateId,
+    },
+    /// A vote committing a candidate, which is what a block proof carries.
+    #[tl(id = 0x40a7e105)]
+    Finalize {
+        /// The candidate voted on.
+        id: CandidateId,
+    },
+}
+
+/// A `consensus.dataToSign`: the envelope every Simplex signature covers.
+///
+/// A vote is never signed on its own. It is placed here beside the session id and the
+/// whole object is signed, so a signature raised in one consensus session cannot be
+/// replayed into another. The vote travels as a TL `bytes` field, so it carries a
+/// length and padding rather than sitting flush against the session id.
+#[derive(TlRead, TlWrite, Debug, Clone, PartialEq, Eq)]
+#[tl(boxed, id = 0xa8e33df8)]
+pub struct DataToSign {
+    /// The consensus session the signature belongs to.
+    pub session_id: [u8; 32],
+    /// The serialized [`Vote`].
+    pub data: Vec<u8>,
+}

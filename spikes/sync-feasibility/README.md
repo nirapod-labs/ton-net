@@ -15,6 +15,7 @@ wire types, the block header and validator-set decode, and the signature check.
 cargo run --release --bin sync-spike          # the whole walk
 cargo run --release --bin sync-spike -- 4     # stop after four rounds
 cargo run --release --bin analyse             # work out a signed message from a capture
+cargo run --release --bin capture             # re-cut the codec's test fixtures
 ```
 
 It needs outbound TCP to the mainnet liteservers listed in `main.rs`. A full walk
@@ -135,6 +136,9 @@ window is not a check.
   change which signatures are accepted. The 107475-signature run is the evidence that
   the subset is right.
 - No backward links. None appeared, and an anchor kept on key blocks never needs one.
-- No trimmed corpus. The captures under `captured/` are whole replies of about 700 kB;
-  the hermetic fixtures the library tests need are a handful of links, one of each
-  signed form, and trimming them is v0.3.0's own work.
+- No chain corpus. The captures under `captured/` are whole replies of about 700 kB,
+  too large to commit and too coarse to name a case. `capture` cuts what the codec
+  tests need out of them, by asking for the shortest proof there is between two blocks
+  the walk already found: one link per answer, one answer per signed form, in
+  `crates/ton-net-tl/tests/fixtures`. The corpus the link and chain checks want is a
+  run of links across a validator-set rotation, and that is v0.3.0's own work.
