@@ -169,6 +169,10 @@ fn signed_message(set: &SignatureSet, to: &BlockIdExt) -> Result<Vec<u8>, BlockE
             // nothing on its own about which block that candidate was. Without this,
             // real signatures lifted from one block and attached to a link claiming
             // another would verify and carry it.
+            //
+            // Both candidate forms are accepted, and that is not an oversight. An empty
+            // candidate names the block its slot extends rather than one it proposes, so
+            // finalize votes over it certify that block; see `CandidateBlock::Empty`.
             let named = CandidateBlock::read_prefix(candidate).map_err(|_| {
                 BlockError::ChainBroken("has a signed candidate that cannot be read")
             })?;
@@ -190,11 +194,19 @@ fn signed_message(set: &SignatureSet, to: &BlockIdExt) -> Result<Vec<u8>, BlockE
 /// otherwise stall a client by adding one. A validator counted twice contributes once. A
 /// signature is only counted after it verifies, so a bad duplicate cannot displace the
 /// real one and drop a link below the threshold.
+///
+/// That last ordering is what makes a budget necessary. Verifying before deduplicating is
+/// the sound order, but it means a repeated signer costs a curve operation every time, so
+/// a set padded with copies of one member is a compute amplifier. An honest set carries
+/// each member at most once, and this is the only place the set's own size is in scope to
+/// say so.
 fn carried_weight(
     set: &ValidatorSet,
     signatures: &[Signature],
     message: &[u8],
 ) -> Result<u64, BlockError> {
+    let budget = set.len().saturating_mul(2);
+    let mut attempts = 0usize;
     let mut counted: Vec<[u8; 32]> = Vec::new();
     let mut weight = 0u64;
     for entry in signatures {
@@ -204,6 +216,12 @@ fn carried_weight(
         let Err(at) = counted.binary_search(&entry.node_id_short) else {
             continue;
         };
+        // Spent only on an entry naming a member that is not already counted, so a set
+        // also carrying signatures from other rounds is unaffected.
+        if attempts >= budget {
+            break;
+        }
+        attempts += 1;
         if !signature::verify(&validator.public_key, message, &entry.signature) {
             continue;
         }
@@ -211,6 +229,14 @@ fn carried_weight(
         weight = weight
             .checked_add(validator.weight)
             .ok_or(BlockError::Malformed("validator weights that overflow"))?;
+        // Past the threshold nothing further can change the answer, and the rest of an
+        // honest set is about a fifth of the curve work a whole sync does. The caller
+        // tests the same predicate, so the weight returned here is a lower bound rather
+        // than a total; only the not-enough-weight path needs the total, and that path is
+        // reached only when this loop ran to the end.
+        if set.carries(weight) {
+            return Ok(weight);
+        }
     }
     Ok(weight)
 }

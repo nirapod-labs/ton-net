@@ -128,6 +128,13 @@ impl ShardState {
     /// dictionary does not read as it should.
     pub fn account(&self, account_id: &[u8; 32]) -> Result<Lookup<ShardAccountEntry>, BlockError> {
         let accounts = self.accounts()?;
+        // A proof may prune the dictionary away entirely, and a placeholder's first bit
+        // is clear, which reads exactly like an empty dictionary. Without this the shrug
+        // and the answer become one answer, and a server can deny that any account exists
+        // by withholding rather than by lying.
+        if accounts.is_exotic() {
+            return Ok(Lookup::Pruned);
+        }
         let mut slice = accounts.parse();
         // An augmented dictionary: a bit, then the root, then the summary over it. An
         // empty dictionary is a visible statement that it holds nothing.
@@ -172,19 +179,23 @@ impl ShardState {
     ///
     /// Returns [`BlockError::Malformed`] if the header does not read as a shard state, or
     /// [`BlockError::WrongConstructor`] if the extra is some other structure.
-    pub fn masterchain_extra(&self) -> Result<Option<McStateExtra>, BlockError> {
+    pub fn masterchain_extra(&self) -> Result<Lookup<McStateExtra>, BlockError> {
         let mut slice = self.cell.parse();
+        // The state says outright whether an extra follows, so a basechain state is a
+        // statement rather than a silence.
         if !skip_to_custom(&mut slice)? {
-            return Ok(None);
+            return Ok(Lookup::Absent);
         }
         let cell = self
             .cell
             .reference(CUSTOM_REFERENCE)
             .ok_or(BlockError::Malformed("shard state without its extra"))?;
+        // A proof that prunes the extra away is not a state that has none, and the two
+        // must not answer alike: one is a shrug and the other a fact about the chain.
         if cell.is_exotic() {
-            return Ok(None);
+            return Ok(Lookup::Pruned);
         }
-        Ok(Some(McStateExtra::from_cell(cell)?))
+        Ok(Lookup::Found(McStateExtra::from_cell(cell)?))
     }
 }
 

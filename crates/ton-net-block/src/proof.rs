@@ -12,10 +12,10 @@
 //! block it names for the account, which is derived from the masterchain state rather
 //! than believed.
 //!
-//! Where that hash comes from is the caller's problem in this release, and it is a real
-//! one: a client that asks the same server for the anchor has proved nothing. Deriving
-//! the anchor from a single pinned key block is block sync, which this crate does not do
-//! yet.
+//! Where that hash comes from decides what the check is worth: a client that asks the
+//! same server for the anchor has proved nothing. Deriving it instead from a single
+//! pinned key block is block sync, which is [`crate::chain::verify_chain`] in this same
+//! crate, and which the facade above runs before it calls in here.
 //!
 //! # The chain
 //!
@@ -221,7 +221,11 @@ pub fn verify_shard_block(
     let roots = parse_boc(shard_proof)?;
     let state_hash = verify_block_state(&roots, trusted_block_hash)?;
     let state = verify_shard_state(&roots, &state_hash)?;
-    let extra = state.masterchain_extra()?.ok_or(BlockError::NotCovered)?;
+    // A withheld extra and a state that has none both leave the shard record unproved,
+    // which is the same answer to the caller even though they are different facts.
+    let Lookup::Found(extra) = state.masterchain_extra()? else {
+        return Err(BlockError::NotCovered);
+    };
 
     match extra.shard_for(workchain, account_id)? {
         Lookup::Found(descr) => Ok(descr.root_hash),
@@ -285,9 +289,16 @@ pub fn verify_account(read: &AccountRead<'_>) -> Result<Account, BlockError> {
     let root = account
         .first()
         .ok_or(BlockError::Malformed("account state has no root cell"))?;
-    // An account is an ordinary cell. Refusing an exotic root closes the trick of
-    // answering with a placeholder that carries the right hash and no contents.
-    if root.is_exotic() {
+    // An account is an ordinary cell, and so is everything beneath it: a state is data,
+    // and the cell kinds it holds all stand at level zero.
+    //
+    // Refusing only an exotic root is not enough, because the hash below cannot see a
+    // pruned child. A pruned branch answers at level zero with the hash it replaced, so
+    // standing one in for the account's code or data leaves this root's hash byte for
+    // byte the same and the reader gets a placeholder's own bytes back as proved contract
+    // state. The level mask does see it: every cell is held to the mask its children
+    // imply, so one pruned branch anywhere below raises the root's above zero.
+    if root.is_exotic() || root.level_mask() != 0 {
         return Err(BlockError::NotBound);
     }
     if root.hash() != entry.account_hash() {

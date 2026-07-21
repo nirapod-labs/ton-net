@@ -266,7 +266,12 @@ fn read_shard_ident(s: &mut Slice<'_>) -> Result<(i32, u64), BlockError> {
     }
     let workchain = s.load_uint(32)? as u32 as i32;
     let prefix = s.load_uint(64)?;
-    Ok((workchain, prefix | 1u64 << (63 - prefix_bits)))
+    // Only the declared bits are the prefix; the rest of the word is cleared before the
+    // terminator goes in. Every real header carries them clear already, so this changes
+    // no answer today. A header that did not would otherwise give this client a shard
+    // value no other implementation computes, and the shard is compared for equality.
+    let significant = prefix & !(u64::MAX >> prefix_bits >> 1);
+    Ok((workchain, significant | 1u64 << (63 - prefix_bits)))
 }
 
 /// Steps over a `CurrencyCollection`: a grams amount and a maybe-referenced dictionary.

@@ -21,10 +21,12 @@
 //! carries the right hash and no contents, or edit the bytes. None of them may produce an
 //! account.
 
+use std::collections::HashMap;
+
 use ton_net_block::{
-    proof, verify_account, AccountRead, AccountStatus, BlockError, Coins, ShardState,
+    proof, verify_account, AccountRead, AccountStatus, BlockError, Coins, Lookup, ShardState,
 };
-use ton_net_cell::parse_boc;
+use ton_net_cell::{parse_boc, Cell, CellType};
 
 /// A masterchain account: the zero address, which is deployed and holds a balance.
 const MASTERCHAIN: &str = include_str!("fixtures/read-masterchain.txt");
@@ -91,6 +93,110 @@ impl Read {
             )
         }
     }
+}
+
+/// A cell as it appears in a bag: descriptors, stored data, and forward indices.
+struct Raw {
+    level_mask: u8,
+    exotic: bool,
+    bits: u16,
+    data: Vec<u8>,
+    refs: Vec<usize>,
+}
+
+/// Serializes a cell graph as a bag of cells, standing a placeholder in wherever `prune`
+/// says to.
+///
+/// This is the edit a withholding server makes. The placeholder carries the hash and the
+/// depth of the subtree it replaces, so a pruned branch answers at level zero with what
+/// it replaced and every hash above it is unchanged: the result is a legal bag that
+/// checks out against the same block, carrying less. Rebuilding it here rather than
+/// editing bytes is what makes the tamper cases below expressible at all, since the edit
+/// is structural and no byte flip produces it.
+///
+/// Cells come out in an order where a reference points strictly forward, and each level
+/// mask is the one the cell model derives from whatever ends up beneath it, so the bag
+/// this writes is one the parser accepts on its own terms.
+fn prune_at(roots: &[Cell], prune: &dyn Fn(&Cell) -> bool) -> Vec<u8> {
+    fn walk(
+        cell: &Cell,
+        prune: &dyn Fn(&Cell) -> bool,
+        out: &mut Vec<Raw>,
+        seen: &mut HashMap<[u8; 32], usize>,
+    ) -> usize {
+        if let Some(&at) = seen.get(cell.repr_hash()) {
+            return at;
+        }
+        let raw = if prune(cell) {
+            let mut data = vec![0x01, 0x01];
+            data.extend_from_slice(cell.hash());
+            data.extend_from_slice(&cell.depth().to_be_bytes());
+            Raw {
+                level_mask: 1,
+                exotic: true,
+                bits: (data.len() * 8) as u16,
+                data,
+                refs: Vec::new(),
+            }
+        } else {
+            let refs: Vec<usize> = cell
+                .refs()
+                .iter()
+                .map(|child| walk(child, prune, out, seen))
+                .collect();
+            let children = refs.iter().fold(0u8, |mask, &at| mask | out[at].level_mask);
+            Raw {
+                level_mask: match cell.cell_type() {
+                    CellType::PrunedBranch => cell.level_mask(),
+                    CellType::LibraryReference => 0,
+                    CellType::MerkleProof | CellType::MerkleUpdate => children >> 1,
+                    CellType::Ordinary => children,
+                },
+                exotic: cell.is_exotic(),
+                bits: cell.bit_len(),
+                data: cell.data().to_vec(),
+                refs,
+            }
+        };
+        out.push(raw);
+        seen.insert(*cell.repr_hash(), out.len() - 1);
+        out.len() - 1
+    }
+
+    // Post-order, so every child lands before its parent. Reversing that puts every
+    // parent first, which is the direction the format requires.
+    let mut out = Vec::new();
+    let mut seen = HashMap::new();
+    let at: Vec<usize> = roots
+        .iter()
+        .map(|root| walk(root, prune, &mut out, &mut seen))
+        .collect();
+    let last = out.len() - 1;
+    let index = |at: usize| (last - at) as u16;
+
+    let mut body = Vec::new();
+    for cell in out.iter().rev() {
+        let partial = u8::from(cell.bits % 8 != 0);
+        body.push(cell.refs.len() as u8 + 8 * u8::from(cell.exotic) + 32 * cell.level_mask);
+        body.push((cell.data.len() as u8) * 2 - partial);
+        body.extend_from_slice(&cell.data);
+        for &child in &cell.refs {
+            body.extend_from_slice(&index(child).to_be_bytes());
+        }
+    }
+
+    // Two-byte references and a four-byte cell area, wide enough for any proof here, and
+    // no index or checksum since neither is required to read a bag back.
+    let mut bag = vec![0xb5, 0xee, 0x9c, 0x72, 0x02, 0x04];
+    bag.extend_from_slice(&(out.len() as u16).to_be_bytes());
+    bag.extend_from_slice(&(at.len() as u16).to_be_bytes());
+    bag.extend_from_slice(&0u16.to_be_bytes());
+    bag.extend_from_slice(&(body.len() as u32).to_be_bytes());
+    for &root in &at {
+        bag.extend_from_slice(&index(root).to_be_bytes());
+    }
+    bag.extend_from_slice(&body);
+    bag
 }
 
 fn unhex(s: &str) -> Vec<u8> {
@@ -296,6 +402,72 @@ fn a_state_root_that_is_a_placeholder_is_refused() {
 }
 
 #[test]
+fn an_account_whose_contents_were_pruned_away_is_refused() {
+    // The placeholder trick one level down. Refusing an exotic root is not enough: a
+    // pruned branch standing in for the account's code or data leaves the root's hash
+    // byte for byte the same, so the binding cannot see the substitution and the caller
+    // would read the placeholder's own bytes as proved contract state.
+    let read = Read::parse(BASECHAIN);
+    let state = parse_boc(&read.state).expect("the state parses");
+    let root = &state[0];
+    assert!(
+        !root.refs().is_empty(),
+        "the fixture account has contents to prune"
+    );
+
+    let forged = prune_at(&state[..1], &|cell| {
+        root.refs()
+            .iter()
+            .any(|c| c.repr_hash() == cell.repr_hash())
+    });
+
+    let rebuilt = parse_boc(&forged).expect("the forged state is a legal bag");
+    assert_eq!(
+        rebuilt[0].hash(),
+        root.hash(),
+        "the edit has to be invisible to the hash, or it proves nothing"
+    );
+    assert!(rebuilt[0].refs().iter().all(|c| c.is_exotic()));
+
+    assert_eq!(
+        verify_account(&read.with_state(&forged)),
+        Err(BlockError::NotBound)
+    );
+}
+
+#[test]
+fn a_pruned_accounts_dictionary_is_not_an_empty_one() {
+    // An empty dictionary and a withheld one begin with the same bit: clear. Reading the
+    // placeholder as a dictionary turns "the server did not show me" into "the account is
+    // not there", which is a proof of absence for any account that exists.
+    let read = Read::parse(BASECHAIN);
+    let roots = parse_boc(&read.proof).expect("the proof parses");
+    let accounts = {
+        let state_hash = proof::verify_block_state(&roots, &read.shard_block_root_hash)
+            .expect("the block proof checks out");
+        let state = proof::verify_shard_state(&roots, &state_hash).expect("the state is covered");
+        *state
+            .accounts()
+            .expect("the state has an accounts cell")
+            .repr_hash()
+    };
+
+    let mut forged = Read::parse(BASECHAIN);
+    forged.proof = prune_at(&roots, &|cell| *cell.repr_hash() == accounts);
+
+    // The proof still checks out. It just no longer says anything about the account, and
+    // the empty state a server would pair with it must not read as a proved absence.
+    assert_eq!(
+        verify_account(&forged.with_state(&[])),
+        Err(BlockError::NotCovered)
+    );
+    assert_eq!(
+        verify_account(&forged.with_state(&read.state)),
+        Err(BlockError::NotCovered)
+    );
+}
+
+#[test]
 fn a_proof_whose_content_was_swapped_out_is_refused() {
     // The proof roots at the right hash and the bag of cells is well formed. What is wrong
     // is that the tree attached no longer hashes to the root the proof carries, which only
@@ -332,6 +504,7 @@ fn a_shard_record_is_read_for_the_shard_that_covers_the_account() {
     let extra = state
         .masterchain_extra()
         .expect("the extra reads")
+        .found()
         .expect("a masterchain state has one");
 
     let descr = extra
@@ -341,12 +514,17 @@ fn a_shard_record_is_read_for_the_shard_that_covers_the_account() {
         .expect("the account's workchain is recorded");
     assert_eq!(descr.root_hash, read.shard_block_root_hash);
 
-    // A workchain the masterchain has no record of.
-    assert!(extra
+    // A workchain the masterchain has no record of, and the proof says so rather than
+    // declining to answer. The variant is the assertion, not `found().is_none()`: a shrug
+    // and a proved negative both answer `None` to that, and telling them apart is the
+    // whole reason `Lookup` has three arms.
+    match extra
         .shard_for(7, &read.account_id)
         .expect("the lookup reads")
-        .found()
-        .is_none());
+    {
+        Lookup::Absent => {}
+        other => panic!("expected a proved absence, got {other:?}"),
+    }
 }
 
 #[test]

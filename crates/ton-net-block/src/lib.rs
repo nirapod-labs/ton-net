@@ -55,3 +55,7 @@ pub use error::BlockError;
 pub use proof::{verify_account, AccountRead};
 pub use shard::{McStateExtra, ShardAccountEntry, ShardDescr, ShardState};
 pub use validators::{Validator, ValidatorSet};
+
+/// The block identity and proof-chain types [`verify_chain`] reads, re-exported from
+/// ton-net-tl so a caller need not name that crate to check a chain.
+pub use ton_net_tl::lite::{BlockIdExt, BlockLink, PartialBlockProof};

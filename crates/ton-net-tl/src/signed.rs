@@ -115,10 +115,22 @@ pub enum CandidateBlock {
         /// The block the candidate proposes.
         block: crate::lite::BlockIdExt,
     },
-    /// `consensus.candidateHashDataEmpty`, a candidate for a slot with no block.
+    /// `consensus.candidateHashDataEmpty`, a candidate for a slot that produced no block
+    /// of its own.
+    ///
+    /// The block named here is not a proposal. It is the tip the empty slot extends, and
+    /// a validator refuses to vote for a candidate naming anything else, so a set of
+    /// finalize votes over one of these is a certificate that the named block is
+    /// committed. Simplex finalization is transitive: finalizing an empty slot finalizes
+    /// its nearest ordinary ancestor, which is how a committed block followed by empty
+    /// slots comes to be served with a signature set in this form.
+    ///
+    /// The two constructors therefore say the same thing about the block they name, which
+    /// is why [`block`](CandidateBlock::block) unions them. Requiring `Ordinary` would
+    /// tighten nothing and would stall a sync at the first block an empty slot follows.
     #[tl(id = 0x72b4d933)]
     Empty {
-        /// The block the candidate proposes.
+        /// The block the empty slot extends, and thereby finalizes.
         block: crate::lite::BlockIdExt,
     },
 }
