@@ -4,6 +4,11 @@ on:
   push:
     branches: [main]
   pull_request:
+  # The cold-sync test walks every key block the network has published since the block
+  # the config pins, which is minutes and tens of megabytes off a public liteserver. It
+  # runs once a day rather than on every commit.
+  schedule:
+    - cron: "17 4 * * *"
 
 env:
   CARGO_TERM_COLOR: always
@@ -53,7 +58,11 @@ jobs:
       # unreachable, so liteserver rotation does not fail the build, but a real protocol
       # regression does.
       - name: network tests
-        run: cargo test -- --ignored
+        run: cargo test -- --ignored --skip cold_sync
+      # Only on the daily schedule: the full walk from the config's init block.
+      - name: cold sync
+        if: github.event_name == 'schedule'
+        run: cargo test -- --ignored cold_sync
 
   node:
     name: node binding
