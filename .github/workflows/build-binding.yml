@@ -67,16 +67,25 @@ jobs:
         with:
           node-version: 22
 
-      # No musl toolchain is installed on purpose. These crates pull in no C, so
-      # rustc links a musl target with its own bundled libc and needs nothing from
-      # the host, which is what the x64 musl build does: it never asks for one.
+      # BOTH MUSL TARGETS ARE BROKEN HERE, and this is where that is recorded until
+      # they are built somewhere that can build them.
       #
-      # The two musl targets do not agree on that by default. rustc names `cc` as the
-      # linker for x86_64-unknown-linux-musl and `aarch64-linux-musl-gcc` for the
-      # arm64 one, so the arm64 build looks for a cross wrapper that is not there.
-      # Installing musl-tools puts one there and moves the failure rather than fixing
-      # it: that wrapper links a shared object against a `libgcc_s.so.1` its sysroot
-      # does not carry. Naming `cc` builds arm64 the same way x64 is already built.
+      # rustc names `cc` as the linker for x86_64-unknown-linux-musl and
+      # `aarch64-linux-musl-gcc` for the arm64 one. On a glibc host `cc` is the glibc
+      # driver, so the x64 build succeeds and produces a shared object carrying the
+      # glibc interpreter: `ld-linux-x86-64.so.2`, which no musl system has. It is a
+      # musl artifact in name only, and it would fail to load for everyone who
+      # installed it. The musl smoke job below is what says so.
+      #
+      # The arm64 target fails outright, and it fails honestly: the cross wrapper it
+      # asks for is a real musl linker. Supplying it via musl-tools moves the failure
+      # to a `libgcc_s.so.1` its sysroot does not carry, which is what a genuine musl
+      # link needs and a Debian musl sysroot does not have. Pointing arm64 at `cc`
+      # instead was tried and is wrong for the reason above: it turns a loud failure
+      # into a quiet wrong answer.
+      #
+      # The fix is to build these two where the toolchain, the libc and libgcc already
+      # agree, which is an Alpine container, not to keep adjusting a glibc host.
 
       # Not `npm ci`. The optional dependencies name the per-platform packages,
       # and npm refuses a clean install while they have no lockfile entries,
@@ -89,10 +98,6 @@ jobs:
 
       - name: build
         working-directory: bindings/node
-        # Read only when that target is the one being built, so it is inert on the
-        # other six.
-        env:
-          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER: cc
         run: npx napi build --platform --release --target ${{ matrix.target }}
 
       # The loader picks a binary by filename, so a build that produced the wrong
