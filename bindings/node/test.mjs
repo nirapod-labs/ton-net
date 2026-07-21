@@ -197,7 +197,11 @@ async function main() {
         proof: at.proof,
         state: at.value.state,
       }),
-    /proof/,
+    // Every failure names its kind before its message, so a caller can tell a server
+    // that did not prove its answer from a socket that dropped without matching on
+    // prose. The two are not the same situation: one is a reason to stop asking this
+    // server, the other is a reason to try again.
+    (error) => error.message.startsWith("PROOF: "),
     "live proof bytes verified against a block they say nothing about",
   );
 
@@ -239,8 +243,32 @@ async function main() {
   );
   await assert.rejects(
     client.accountAt(ELECTOR, { ...head, shard: "not-hex" }),
-    /shard is not a hex u64/,
+    /shard must be 16 hex digits/,
     "a shard that is not hex rejects",
+  );
+  // Sixteen decimal digits are sixteen hex digits too, so a shard written in decimal by
+  // another library would be read as a different shard with nothing said about it.
+  await assert.rejects(
+    client.accountAt(ELECTOR, { ...head, shard: "9223372036854775808" }),
+    /shard must be 16 hex digits/,
+    "a decimal shard rejects rather than being read as hex",
+  );
+
+  // A block outside the masterchain cannot anchor a read: a shard block would leave the
+  // masterchain path checking a server's proof against a server's hash.
+  await assert.rejects(
+    client.accountAt(ELECTOR, { ...head, workchain: 0, shard: "2000000000000000" }),
+    (error) => error.message.startsWith("PROOF: the trusted block is in workchain"),
+    "a block outside the masterchain is refused as an anchor",
+  );
+
+  // The freshness bound reaches JavaScript, and it is the only thing standing between a
+  // caller and a genuine block from last week proved against its own signatures.
+  assert.strictEqual(Config.mainnet().maxHeadAge, 600, "the default bound is readable");
+  assert.strictEqual(
+    Config.mainnet().withMaxHeadAge(30).maxHeadAge,
+    30,
+    "the bound can be tightened",
   );
 
   // A malformed address rejects rather than throwing synchronously or hanging.
