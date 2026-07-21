@@ -1,0 +1,12 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: 2026 Nirapod Labs
+
+# Blank issues stay open so a question has somewhere to go. Once Discussions is
+# enabled they move there and this becomes false.
+blank_issues_enabled: true
+contact_links:
+  - name: Report a vulnerability
+    url: https://github.com/nirapod-labs/ton-net/security/advisories/new
+    about: >-
+      Anything that lets a server get an unproven answer past a check, or that
+      panics on hostile bytes. Private, not a public issue.

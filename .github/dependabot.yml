@@ -1,0 +1,44 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: 2026 Nirapod Labs
+
+# Updates are grouped so a week produces one pull request per ecosystem rather
+# than one per crate. A security update stays ungrouped and arrives on its own,
+# which is the only kind worth interrupting other work for.
+version: 2
+updates:
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      cargo:
+        patterns: ["*"]
+        update-types: [minor, patch]
+    # The crypto and codec lines are held deliberately: bumping them across a
+    # generation duplicates the primitives the whole workspace shares. A major
+    # here is a decision, not a chore.
+    ignore:
+      - dependency-name: curve25519-dalek
+        update-types: [version-update:semver-major]
+      - dependency-name: sha2
+        update-types: [version-update:semver-major]
+      - dependency-name: aes
+        update-types: [version-update:semver-major]
+      - dependency-name: ctr
+        update-types: [version-update:semver-major]
+
+  - package-ecosystem: npm
+    directory: /bindings/node
+    schedule:
+      interval: weekly
+    groups:
+      npm:
+        patterns: ["*"]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]

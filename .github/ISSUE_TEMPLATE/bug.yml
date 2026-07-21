@@ -1,0 +1,61 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: 2026 Nirapod Labs
+
+name: Bug report
+description: Something behaves differently from what it says it does.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: >-
+        A bug that lets a server get an unproven answer past a check is a
+        vulnerability, not a bug report. Close this and use
+        [private reporting](https://github.com/nirapod-labs/ton-net/security/advisories/new)
+        instead.
+
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What the library did, and what it was supposed to do instead.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: How to reproduce
+      description: >-
+        The smallest code that shows it. If it needs a specific account, block or
+        liteserver, name them: an answer that depends on network state cannot be
+        reproduced without the state.
+      render: rust
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: A release, or the commit if building from a branch.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Where
+      options:
+        - Rust crates
+        - Node binding
+        - Both, or not sure
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Operating system, architecture, and the Rust or Node version.
+    validations:
+      required: false

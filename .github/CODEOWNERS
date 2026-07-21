@@ -1,0 +1,22 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: 2026 Nirapod Labs
+
+# Everything is reviewed by the maintainer today. The value of the file is that it
+# stays true as that stops being the case, and that the paths below are the ones
+# where a wrong change is expensive rather than merely wrong.
+* @athexweb3
+
+# The proof and signature paths are the library's whole reason to exist. A change
+# here that looks harmless can make the client believe something unproven.
+/crates/ton-net-block/ @athexweb3
+/crates/ton-net-cell/ @athexweb3
+
+# Decisions of record. Changing one is superseding it, not editing it.
+/docs/adr/ @athexweb3
+
+# The gate itself, and the terms the work is published under.
+/.github/ @athexweb3
+/LICENSE @athexweb3
+/LICENSES/ @athexweb3
+/NOTICE @athexweb3
+/REUSE.toml @athexweb3
