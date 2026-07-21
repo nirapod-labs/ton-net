@@ -48,12 +48,10 @@ jobs:
             runner: ubuntu-latest
           - target: x86_64-unknown-linux-musl
             runner: ubuntu-latest
-            musl: true
           - target: aarch64-unknown-linux-gnu
             runner: ubuntu-24.04-arm
           - target: aarch64-unknown-linux-musl
             runner: ubuntu-24.04-arm
-            musl: true
           - target: x86_64-pc-windows-msvc
             runner: windows-latest
     steps:
@@ -69,12 +67,13 @@ jobs:
         with:
           node-version: 22
 
-      # A musl target needs a linker the host does not carry by default. The
-      # crates here pull in no C, so the linker is all that is missing: no
-      # sysroot, no cross toolchain.
-      - name: musl linker
-        if: matrix.musl
-        run: sudo apt-get update && sudo apt-get install -y musl-tools
+      # No musl toolchain is installed on purpose. These crates pull in no C, so
+      # rustc links a musl target with its own bundled libc and needs nothing from
+      # the host. Installing musl-tools is what broke the arm64 build: it puts an
+      # `aarch64-linux-musl-gcc` on the path, rustc prefers it to the self-contained
+      # path, and that wrapper then links a shared object against a `libgcc_s.so.1`
+      # its sysroot does not carry. The x64 build never picked the wrapper up and
+      # never needed it, which is the same evidence read from the other side.
 
       # Not `npm ci`. The optional dependencies name the per-platform packages,
       # and npm refuses a clean install while they have no lockfile entries,
@@ -91,17 +90,22 @@ jobs:
 
       # The loader picks a binary by filename, so a build that produced the wrong
       # one, or nothing, has to fail here rather than at somebody's install.
+      #
+      # Counted by globbing rather than through `wc`, because BSD `wc` pads its
+      # output and GNU `wc` does not, so the string comparison this used to make
+      # failed on both macOS runners against a build that had just succeeded.
       - name: artifact exists
         shell: bash
         working-directory: bindings/node
         run: |
-          count=$(ls -1 *.node 2>/dev/null | wc -l)
-          if [ "$count" != "1" ]; then
-            echo "expected one .node, found $count"
+          shopt -s nullglob
+          built=(*.node)
+          if [ ${#built[@]} -ne 1 ]; then
+            echo "expected one .node, found ${#built[@]}"
             ls -la
             exit 1
           fi
-          ls -la *.node
+          ls -la "${built[0]}"
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
