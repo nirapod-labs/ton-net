@@ -14,14 +14,19 @@
 //! block's state. There is no way to turn the first into the second.
 //!
 //! What [`Verified`] does not settle on its own is where the block hash came from.
-//! Passing [`Client::account_verified`] a head read from the same liteserver shows only
-//! that the server agrees with itself, which a server making things up can also manage.
+//! Passing [`Client::account_at`] a head read from the same liteserver shows only that the
+//! server agrees with itself, which a server making things up can also manage.
 //!
 //! [`Client::sync`] is what closes that. It walks from the key block the config pins to
 //! the network's current head, checking a validator signature set at every step, and
 //! leaves the client holding a block it proved rather than one a server named. The block
 //! it starts from is the single input still taken on trust, and it comes from the file
 //! that already decides which network a client is on.
+//!
+//! [`Client::account`] reads against that block, so it is the read to reach for.
+//! [`Client::account_at`] proves against a block the caller names, and
+//! [`Client::account_reported`] checks nothing at all. The safe one is the one with the
+//! plain name.
 //!
 //! # Example
 //!
@@ -31,17 +36,16 @@
 //! # async fn run() -> Result<(), ton_net::Error> {
 //! let config = Config::mainnet();
 //! let mut client = Client::connect(&config).await?;
+//! let elector = Address::parse("-1:3333333333333333333333333333333333333333333333333333333333333333")?;
 //!
-//! // The server's word.
-//! let reported = client.account(&Address::parse("-1:3333333333333333333333333333333333333333333333333333333333333333")?).await?;
-//! println!("reported balance: {}", reported.value().balance);
-//!
-//! // Proved, relative to a block the caller vouches for.
-//! # let trusted = client.masterchain_info().await?.into_value().last;
-//! let account = client
-//!     .account_verified(&Address::parse("-1:3333333333333333333333333333333333333333333333333333333333333333")?, &trusted)
-//!     .await?;
+//! // Proved against a block the client walked to itself. The first call pays for the
+//! // walk; save `client.anchor()` and hand it to `connect_from` next time.
+//! let account = client.account(&elector).await?;
 //! println!("proved balance: {}", account.value().balance);
+//!
+//! // The server's word, for a caller who asks for it by name.
+//! let reported = client.account_reported(&elector).await?;
+//! println!("reported balance: {}", reported.value().balance);
 //! # Ok(())
 //! # }
 //! ```

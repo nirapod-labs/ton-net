@@ -216,7 +216,7 @@ impl TonClient {
     pub async fn account(&self, address: String) -> napi::Result<ReportedAccount> {
         let parsed = ton_net::Address::parse(&address).map_err(to_js)?;
         let mut client = self.inner.lock().await;
-        let reported = client.account(&parsed).await.map_err(to_js)?;
+        let reported = client.account_reported(&parsed).await.map_err(to_js)?;
         let proof = Buffer::from(reported.proof().to_vec());
         Ok(ReportedAccount {
             value: account(reported.into_value()),
@@ -244,10 +244,7 @@ impl TonClient {
         let parsed = ton_net::Address::parse(&address).map_err(to_js)?;
         let anchor = block_id_ext(&trusted)?;
         let mut client = self.inner.lock().await;
-        let verified = client
-            .account_verified(&parsed, &anchor)
-            .await
-            .map_err(to_js)?;
+        let verified = client.account_at(&parsed, &anchor).await.map_err(to_js)?;
         Ok(VerifiedAccount {
             anchor: block_id(verified.anchor()),
             value: account(verified.into_value()),

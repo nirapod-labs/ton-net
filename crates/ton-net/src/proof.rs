@@ -7,11 +7,12 @@ use crate::Account;
 
 /// Proves an account read against the block hash the read was checked to.
 ///
-/// [`Client::account_verified`](crate::Client::account_verified) reads and proves in one
-/// call, and is what most callers want. This is the same check as a standalone function,
-/// for the case where the bytes and the anchor arrive separately: bytes fetched now with
-/// [`Client::account_state`](crate::Client::account_state) and an anchor that turns up
-/// later, or bytes handed over by something that is not this client at all.
+/// [`Client::account`](crate::Client::account) walks to a block it proves and checks
+/// against it in one call, and is what most callers want. This is the same check as a
+/// standalone function, for the case where the bytes and the anchor arrive separately:
+/// bytes fetched now with [`Client::account_state`](crate::Client::account_state) and an
+/// anchor that turns up later, or bytes handed over by something that is not this client
+/// at all.
 ///
 /// The check is pure. It touches no socket and depends on nothing but its arguments, so
 /// the same bytes always give the same answer.

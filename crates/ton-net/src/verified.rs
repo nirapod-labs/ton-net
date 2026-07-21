@@ -10,11 +10,14 @@ use ton_net_lite::BlockIdExt;
 ///
 /// # What this does and does not say
 ///
-/// The claim is relative, not absolute: the value is as trustworthy as the block hash the
-/// caller supplied, and no more. Handing [`account_verified`](crate::Client::account_verified)
-/// a head read from the same server proves only that the server is internally consistent,
-/// which a server making things up can also manage. Deriving an anchor from a single
-/// pinned key block is block sync, which this release does not do.
+/// The claim is relative: the value is as trustworthy as the block in its
+/// [anchor](Self::anchor), and no more. That block's own worth depends on where it came
+/// from. Handing [`account_at`](crate::Client::account_at) a head read from the same
+/// server proves only that the server is internally consistent, which a server making
+/// things up can also manage. A block from [`Client::sync`](crate::Client::sync), and so
+/// from [`Client::account`](crate::Client::account), was walked to from the key block the
+/// config pins with a validator signature set checked at every step, and rests on nothing
+/// the server chose.
 ///
 /// # Why it cannot be forged
 ///

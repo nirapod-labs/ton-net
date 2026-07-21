@@ -4,7 +4,7 @@
 //! them with `--ignored`. They use only the public facade and each skips if no
 //! liteserver is reachable, so liteserver rotation does not fail the build.
 
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use ton_net::{AccountRead, Address, Client, Config, Error};
 
@@ -68,7 +68,10 @@ async fn reads_accounts_in_both_workchains() {
     // The elector and the config contract are always-active masterchain contracts.
     for (name, address) in [("elector", ELECTOR), ("config", CONFIG_CONTRACT)] {
         let parsed = Address::parse(address).expect("valid address");
-        let account = client.account(&parsed).await.expect("account read");
+        let account = client
+            .account_reported(&parsed)
+            .await
+            .expect("account read");
         assert!(account.value().is_active(), "{name} is deployed");
         assert!(
             account.value().balance.nanotons() > 0,
@@ -81,7 +84,7 @@ async fn reads_accounts_in_both_workchains() {
     // A basechain account: the read must complete and decode even if the account is empty.
     let basechain = Address::parse(BASECHAIN).expect("valid address");
     let account = client
-        .account(&basechain)
+        .account_reported(&basechain)
         .await
         .expect("basechain account read");
     eprintln!("basechain account balance: {}", account.value().balance);
@@ -112,7 +115,7 @@ async fn verifies_live_accounts_in_both_workchains() {
     ] {
         let parsed = Address::parse(address).expect("valid address");
         let verified = client
-            .account_verified(&parsed, &trusted)
+            .account_at(&parsed, &trusted)
             .await
             .unwrap_or_else(|e| panic!("{name} did not verify: {e}"));
 
@@ -144,7 +147,7 @@ async fn a_block_the_server_does_not_know_is_refused_before_any_proof() {
     // apart by accident. A caller who invents a block never reaches the proof engine: the
     // server has no such block to read at.
     let parsed = Address::parse(ELECTOR).expect("valid address");
-    match client.account_verified(&parsed, &unknown).await {
+    match client.account_at(&parsed, &unknown).await {
         Err(Error::LiteServer { .. }) => {}
         Err(other) => panic!("expected the server to refuse the block, got {other}"),
         Ok(_) => panic!("a read succeeded at a block that does not exist"),
@@ -337,4 +340,81 @@ async fn a_sync_from_a_block_that_is_not_on_the_chain_is_refused() {
         Err(other) => panic!("expected a sync failure, got {other}"),
         Ok(_) => panic!("a block the chain does not contain was accepted as an anchor"),
     }
+}
+
+// The milestone's point, end to end: a proved account balance with nothing handed to the
+// client but the config. Every hash it rests on was derived by walking from the key block
+// that config pins, so it costs a first sync and runs on the same schedule as one.
+//
+// The root hashes are printed because a live balance cannot be matched against a second
+// source without racing the chain, and a block can. Run on 2026-07-21 this reached head
+// 81097241 with root 05f66b3ec144e7e43c177f4c95585110b3623379c38a228d38ea7f486449f1d6 and
+// kept anchor 81095391 with root 870c400aa1d2616d04576e08e266a94ef340084e2b233fa7e3c9bd11788b4d3d.
+// tonapi.io reports both root hashes exactly, and gives the head's prev_key_block_seqno as
+// 81095391, so the block the client kept is the last key block before the head it proved.
+// The independent balance match is the hermetic one in ton-net-block, at a pinned block
+// where a second public API can be asked the same question and the answer holds still.
+#[tokio::test]
+#[ignore = "walks every key block since the config's init block; minutes and tens of megabytes"]
+async fn a_cold_sync_then_proves_an_account_against_a_block_it_derived() {
+    let config = Config::mainnet();
+    let init = config.init_block().expect("an init block").clone();
+    let Some(mut client) = connect().await else {
+        return;
+    };
+
+    let elector = Address::parse(ELECTOR).expect("valid address");
+    let started = Instant::now();
+    let account = match client.account(&elector).await {
+        Ok(account) => account,
+        Err(e @ (Error::Transport(_) | Error::Timeout)) => {
+            eprintln!("skipping: the liteserver went away mid-walk: {e}");
+            return;
+        }
+        Err(e) => panic!("a proved read from the config alone failed: {e}"),
+    };
+
+    // The block it was proved against is one the client walked to, not one it was given.
+    let anchor = client.anchor().expect("a synced client has an anchor");
+    assert!(anchor.seqno > init.seqno);
+    assert!(account.anchor().seqno > init.seqno);
+    assert_eq!(account.anchor().workchain, -1);
+    assert!(account.value().balance.nanotons() > 0);
+    let hex = |bytes: &[u8]| -> String { bytes.iter().map(|b| format!("{b:02x}")).collect() };
+    eprintln!(
+        "proved the elector at {} in {:.1?}: balance {}",
+        account.anchor().seqno,
+        started.elapsed(),
+        account.value().balance
+    );
+    eprintln!(
+        "  head   {} root {}",
+        account.anchor().seqno,
+        hex(&account.anchor().root_hash)
+    );
+    eprintln!("  anchor {} root {}", anchor.seqno, hex(&anchor.root_hash));
+
+    // The proved path and the unchecked one read the same chain, so they agree. This is a
+    // cross-check between two code paths on one server, not an independent source.
+    let reported = client
+        .account_reported(&elector)
+        .await
+        .expect("an unchecked read");
+    // The code cell, not the whole state: the elector's data moves between two reads
+    // seconds apart, and a test that compares it is asserting the chain stood still.
+    assert_eq!(
+        reported.value().code().map(|code| code.hash()),
+        account.value().code().map(|code| code.hash()),
+        "the proved and unchecked reads decoded different contract code"
+    );
+
+    // A second proved read is cheap, because the anchor now stands near the head.
+    let started = Instant::now();
+    client
+        .account(&elector)
+        .await
+        .expect("a second proved read");
+    let second = started.elapsed();
+    eprintln!("a second proved read took {second:.1?}");
+    assert!(second < Duration::from_secs(30));
 }

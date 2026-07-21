@@ -217,12 +217,35 @@ impl Client {
         bounded(self.lite.masterchain_info()).await
     }
 
-    /// Reads an account at the current masterchain head and decodes it.
+    /// Reads an account and proves it against a block this client established itself.
+    ///
+    /// Walks the chain to a current head, reads the account there, and checks the proofs
+    /// against it. **Nothing in the result rests on a hash the caller supplied**, which is
+    /// what separates this from [`account_at`](Self::account_at): the block it proves
+    /// against was derived from the key block the config pins, one validator signature set
+    /// at a time.
+    ///
+    /// Every call walks. After the first that is a link or two, but it is not free, so a
+    /// caller reading many accounts should [`sync`](Self::sync) once and pass the head to
+    /// [`account_at`](Self::account_at) rather than pay it per account.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::Config`] if there is nothing to start a walk from, [`Error::Sync`]
+    /// if the chain does not check out, [`Error::Stale`] if the head it reaches is too
+    /// old, [`Error::Proof`] if the account does not bind to that head, or the transport
+    /// errors.
+    pub async fn account(&mut self, address: &Address) -> Result<Verified<Account>, Error> {
+        let head = self.sync().await?.head;
+        self.account_at(address, &head).await
+    }
+
+    /// Reads an account at the current masterchain head without checking anything.
     ///
     /// Reads the head first, then the account at that block. The value is the server's
-    /// word: the proofs it sent are carried along unchecked. To check them, use
-    /// [`account_verified`](Self::account_verified) with a block hash from a source the
-    /// caller trusts.
+    /// word: the proofs it sent are carried along unchecked. It is named for what it is
+    /// because after this release the proven read is the one a caller lands on without
+    /// choosing, and this is the exception.
     ///
     /// # Errors
     ///
@@ -230,7 +253,10 @@ impl Client {
     /// if the server returns an error, [`Error::Decode`] if a response does not decode,
     /// [`Error::Cell`] if the account state does not read as an account, or
     /// [`Error::Transport`] on a socket failure.
-    pub async fn account(&mut self, address: &Address) -> Result<ServerReported<Account>, Error> {
+    pub async fn account_reported(
+        &mut self,
+        address: &Address,
+    ) -> Result<ServerReported<Account>, Error> {
         let head = self.masterchain_info().await?;
         let reported = self.account_state(address, &head.value().last).await?;
         // Decoding does not make the value any more believed, so it stays wrapped.
@@ -260,7 +286,7 @@ impl Client {
         bounded(self.lite.account_state(block, &account)).await
     }
 
-    /// Reads an account at a block the caller trusts, and proves it belongs to that block.
+    /// Reads an account at a block the caller names, and proves it belongs to that block.
     ///
     /// The proofs are checked against `trusted`'s root hash: for an account outside the
     /// masterchain the shard block holding it is derived from the masterchain state rather
@@ -270,10 +296,15 @@ impl Client {
     /// a proved answer rather than a failure. An account the proof declines to cover is a
     /// failure.
     ///
-    /// `trusted` is the one input taken on faith, and taking it from
-    /// [`masterchain_info`](Self::masterchain_info) on this same client proves nothing:
-    /// that only shows the server agrees with itself. It has to come from somewhere the
-    /// caller trusts independently.
+    /// `trusted` is taken on faith, so where it came from is the whole question. Taking it
+    /// from [`masterchain_info`](Self::masterchain_info) on this same client proves
+    /// nothing: that only shows the server agrees with itself. The two sources that do
+    /// mean something are a block this client proved, from [`sync`](Self::sync) or
+    /// [`anchor`](Self::anchor), and a block the caller trusts independently.
+    ///
+    /// Reading many accounts at one proved block is what this is for now:
+    /// [`account`](Self::account) walks the chain on every call, so a caller who wants a
+    /// consistent snapshot syncs once and passes the head here.
     ///
     /// # Errors
     ///
@@ -281,7 +312,7 @@ impl Client {
     /// to `trusted`, [`Error::Cell`] if the bytes are not cells, or [`Error::Timeout`],
     /// [`Error::LiteServer`], [`Error::Decode`], or [`Error::Transport`] as the read
     /// fails.
-    pub async fn account_verified(
+    pub async fn account_at(
         &mut self,
         address: &Address,
         trusted: &BlockIdExt,
