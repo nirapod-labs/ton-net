@@ -47,8 +47,10 @@ const LITESERVERS: &[(&str, &str)] = &[
 const INIT_BLOCK_SEQNO: u32 = 46_894_135;
 /// The generation time of that block, used to measure the walk's progress.
 const INIT_BLOCK_UTIME: u32 = 1_744_842_508;
-const INIT_BLOCK_ROOT_HASH: &str = "3048e69a12cf946ebc99b4cf9ca61c3ff4b3fcc88c4015763ac01204ecc1bf9f";
-const INIT_BLOCK_FILE_HASH: &str = "bbdac0b4543e9141449ceb37c3c63ba6e9cc4e2c904d77f56d17e44acf1d1bed";
+const INIT_BLOCK_ROOT_HASH: &str =
+    "3048e69a12cf946ebc99b4cf9ca61c3ff4b3fcc88c4015763ac01204ecc1bf9f";
+const INIT_BLOCK_FILE_HASH: &str =
+    "bbdac0b4543e9141449ceb37c3c63ba6e9cc4e2c904d77f56d17e44acf1d1bed";
 
 const QUERY_TIMEOUT: Duration = Duration::from_secs(45);
 
@@ -120,7 +122,9 @@ impl Server {
     }
 
     async fn head(&mut self) -> Result<BlockIdExt, String> {
-        let answer = self.query(GET_MASTERCHAIN_INFO.to_le_bytes().to_vec()).await?;
+        let answer = self
+            .query(GET_MASTERCHAIN_INFO.to_le_bytes().to_vec())
+            .await?;
         let mut r = Reader::new(&answer);
         let id = r.u32().map_err(|e| e.to_string())?;
         if id != MASTERCHAIN_INFO {
@@ -158,7 +162,10 @@ async fn run() -> Result<(), String> {
     let anchor = init_block();
     println!("  head       {head} seqno {}", head.seqno);
     println!("  init block {anchor} seqno {}", anchor.seqno);
-    println!("  distance   {} masterchain blocks", head.seqno - anchor.seqno);
+    println!(
+        "  distance   {} masterchain blocks",
+        head.seqno - anchor.seqno
+    );
 
     let started = Instant::now();
     let (proof, raw) = server.block_proof(&anchor, &head).await?;
@@ -185,8 +192,8 @@ async fn run() -> Result<(), String> {
     }
     println!("  forward : {forward}");
     println!("  backward: {back}");
-    if forward > 0 {
-        println!("  signatures per forward link: about {}", signatures / forward);
+    if let Some(per_link) = signatures.checked_div(forward) {
+        println!("  signatures per forward link: about {per_link}");
     }
 
     println!("\n  first few steps:");
@@ -261,7 +268,10 @@ async fn run() -> Result<(), String> {
 
     let set = block::validator_set(&first.config_proof, &first.from.root_hash)?;
     println!("\n  validator set named by key block {}", first.from.seqno);
-    println!("    total / main                 {} / {}", set.total, set.main);
+    println!(
+        "    total / main                 {} / {}",
+        set.total, set.main
+    );
     println!(
         "    window                       {} .. {}",
         set.utime_since, set.utime_until
@@ -324,7 +334,9 @@ async fn walk(
         }
 
         if proof.steps.is_empty() {
-            return Err(format!("round {rounds} returned no steps, so the walk cannot advance"));
+            return Err(format!(
+                "round {rounds} returned no steps, so the walk cannot advance"
+            ));
         }
         if proof.from != anchor {
             return Err(format!(
@@ -342,7 +354,10 @@ async fn walk(
                 ));
             }
             if step.to().seqno <= anchor.seqno {
-                return Err(format!("a link does not move forward, {anchor} to {}", step.to()));
+                return Err(format!(
+                    "a link does not move forward, {anchor} to {}",
+                    step.to()
+                ));
             }
             match step {
                 Link::Back(l) => {
@@ -399,7 +414,9 @@ async fn walk(
         }
 
         if anchor.seqno <= before {
-            return Err(format!("round {rounds} did not raise the anchor above {before}"));
+            return Err(format!(
+                "round {rounds} did not raise the anchor above {before}"
+            ));
         }
         println!(
             "  round {rounds:>3}: {:>2} links, {:>7} B, seqno {} ({:.1}% by time)",
@@ -422,8 +439,19 @@ async fn walk(
     println!("  links            {links}");
     println!("  backward links   none, or the walk would have stopped at the first");
     println!("  signatures       {signatures} checked");
-    println!("  validator sets   {} distinct, so {} rotations crossed", sets.len(), sets.len().saturating_sub(1));
-    println!("  signed forms     {}", forms.iter().map(|(f, s)| format!("{f} from seqno {s}")).collect::<Vec<_>>().join(", "));
+    println!(
+        "  validator sets   {} distinct, so {} rotations crossed",
+        sets.len(),
+        sets.len().saturating_sub(1)
+    );
+    println!(
+        "  signed forms     {}",
+        forms
+            .iter()
+            .map(|(f, s)| format!("{f} from seqno {s}"))
+            .collect::<Vec<_>>()
+            .join(", ")
+    );
     if let Some((share, weight, total, seqno)) = thinnest {
         // The threshold is two thirds, so how far the thinnest real link sits above it
         // is the headroom a stricter signature rule has before it costs liveness.
@@ -433,11 +461,20 @@ async fn walk(
             (share - 2.0 / 3.0) * 100.0
         );
     }
-    println!("  received         {:.1} MB", server.received as f64 / 1_048_576.0);
+    println!(
+        "  received         {:.1} MB",
+        server.received as f64 / 1_048_576.0
+    );
     println!("  elapsed          {elapsed:.1?} ({network:.1?} of it waiting on the network)");
     if links > 0 {
-        println!("  per link         {:.1} kB", server.received as f64 / links as f64 / 1024.0);
-        println!("  reached utime    {at_utime} ({:.1}% of the way by time)", progress(at_utime));
+        println!(
+            "  per link         {:.1} kB",
+            server.received as f64 / links as f64 / 1024.0
+        );
+        println!(
+            "  reached utime    {at_utime} ({:.1}% of the way by time)",
+            progress(at_utime)
+        );
     }
     Ok(())
 }

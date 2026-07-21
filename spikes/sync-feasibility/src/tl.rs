@@ -95,9 +95,8 @@ pub enum SignatureSet {
 impl SignatureSet {
     pub fn signatures(&self) -> &[Signature] {
         match self {
-            SignatureSet::Ordinary { signatures, .. } | SignatureSet::Simplex { signatures, .. } => {
-                signatures
-            }
+            SignatureSet::Ordinary { signatures, .. }
+            | SignatureSet::Simplex { signatures, .. } => signatures,
         }
     }
 

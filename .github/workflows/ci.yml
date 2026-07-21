@@ -10,7 +10,8 @@ env:
 
 # The Node binding gets its own job as that layer lands in the v0.1.0 plan. The
 # hermetic gate covers the core crates; the network job runs the ignored tests that
-# reach a live liteserver.
+# reach a live liteserver; the spike job covers the standalone projects the gate
+# cannot see.
 jobs:
   check:
     name: fmt, clippy, docs, tests
@@ -79,3 +80,27 @@ jobs:
       - name: gate test
         working-directory: bindings/node
         run: node test.mjs
+
+  spikes:
+    name: spike lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      # Each spike is a standalone project with its own lockfile, excluded from the
+      # workspace, so --all-targets above never reaches one. Unlinted they rot: every
+      # clippy release adds lints, and the drift surfaces as a wall of unrelated
+      # errors for whoever next opens the file. A spike is committed evidence, so the
+      # fix is always lint-only, but it is cheaper the day the lint appears. Only fmt
+      # and clippy run here; a spike has no tests and publishes no docs. The glob
+      # covers a new spike without touching this file.
+      - name: fmt and clippy
+        run: |
+          for manifest in spikes/*/Cargo.toml; do
+            echo "== ${manifest%/Cargo.toml} =="
+            cargo fmt --manifest-path "$manifest" --check
+            cargo clippy --manifest-path "$manifest" --all-targets -- -D warnings
+          done

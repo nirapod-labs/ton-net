@@ -25,16 +25,56 @@ type Aes256Ctr = ctr::Ctr128BE<aes::Aes256>;
 // (dotted ip, port, server ed25519 public key hex). The set rotates over time; a
 // stale or unreachable entry is skipped and the next one is tried.
 const LITESERVERS: &[(&str, u16, &str)] = &[
-    ("5.9.10.47", 19949, "9f85439d2094b92a639c2c9493d7b740e39dea8d08b525986d39d6dd69e7f309"),
-    ("5.9.10.15", 48014, "dd73baecafea8be82edd3f6ff06da1c75c8d99666171c2f73bb4a8a2c168f06d"),
-    ("135.181.177.59", 53312, "685f750ae507bae3aff6b9b65b9f8eff8877f0cdec466e340ed49d4714219ad4"),
-    ("135.181.140.212", 13206, "2b4b77f8858b3971d832f31cac66433ecfa99f9f1ad7b2c56e75e842429cdb1c"),
-    ("135.181.140.221", 46995, "c10134315857356517a56896e4193c7008ab221e4d346ddc64cd7f7d254a22db"),
-    ("65.21.141.233", 30131, "c2b41a788162b293df1e774405cd2cd1fc7b192a7c50516f79b9f2b5041f73a0"),
-    ("65.21.141.198", 47160, "bce7b55eab7fd40436679e8fafed519f0f9fd0d98003bacd0991481de0a107ba"),
-    ("65.21.141.231", 17728, "058495a4beda3e4d245390ad96c21a7bff267f607f36b062ec32a67a97235fa4"),
-    ("65.21.141.197", 13570, "895407ef57329a83609eb84e4f7e6d97f63b93ce97e6256ebb955febc2a689f4"),
-    ("164.68.101.206", 52995, "4271857bd922856f9329a704befc455aa557791c4207a0a18e384d4eb2fbfbf9"),
+    (
+        "5.9.10.47",
+        19949,
+        "9f85439d2094b92a639c2c9493d7b740e39dea8d08b525986d39d6dd69e7f309",
+    ),
+    (
+        "5.9.10.15",
+        48014,
+        "dd73baecafea8be82edd3f6ff06da1c75c8d99666171c2f73bb4a8a2c168f06d",
+    ),
+    (
+        "135.181.177.59",
+        53312,
+        "685f750ae507bae3aff6b9b65b9f8eff8877f0cdec466e340ed49d4714219ad4",
+    ),
+    (
+        "135.181.140.212",
+        13206,
+        "2b4b77f8858b3971d832f31cac66433ecfa99f9f1ad7b2c56e75e842429cdb1c",
+    ),
+    (
+        "135.181.140.221",
+        46995,
+        "c10134315857356517a56896e4193c7008ab221e4d346ddc64cd7f7d254a22db",
+    ),
+    (
+        "65.21.141.233",
+        30131,
+        "c2b41a788162b293df1e774405cd2cd1fc7b192a7c50516f79b9f2b5041f73a0",
+    ),
+    (
+        "65.21.141.198",
+        47160,
+        "bce7b55eab7fd40436679e8fafed519f0f9fd0d98003bacd0991481de0a107ba",
+    ),
+    (
+        "65.21.141.231",
+        17728,
+        "058495a4beda3e4d245390ad96c21a7bff267f607f36b062ec32a67a97235fa4",
+    ),
+    (
+        "65.21.141.197",
+        13570,
+        "895407ef57329a83609eb84e4f7e6d97f63b93ce97e6256ebb955febc2a689f4",
+    ),
+    (
+        "164.68.101.206",
+        52995,
+        "4271857bd922856f9329a704befc455aa557791c4207a0a18e384d4eb2fbfbf9",
+    ),
 ];
 
 // IEEE CRC32 (reflected, poly 0xEDB88320). TON TL constructor id = crc32 of the
@@ -124,14 +164,20 @@ impl Adnl {
 
     fn recv(&mut self) -> Result<Vec<u8>, String> {
         let mut lenb = [0u8; 4];
-        self.stream.read_exact(&mut lenb).map_err(|e| format!("read len: {e}"))?;
+        self.stream
+            .read_exact(&mut lenb)
+            .map_err(|e| format!("read len: {e}"))?;
         self.rx.apply_keystream(&mut lenb);
         let len = u32::from_le_bytes(lenb) as usize;
-        if len < 64 || len > (1 << 20) {
-            return Err(format!("implausible frame length {len} (cipher desync => handshake wrong)"));
+        if !(64..=(1 << 20)).contains(&len) {
+            return Err(format!(
+                "implausible frame length {len} (cipher desync => handshake wrong)"
+            ));
         }
         let mut body = vec![0u8; len];
-        self.stream.read_exact(&mut body).map_err(|e| format!("read body: {e}"))?;
+        self.stream
+            .read_exact(&mut body)
+            .map_err(|e| format!("read body: {e}"))?;
         self.rx.apply_keystream(&mut body);
         let nonce = &body[..32];
         let payload = &body[32..len - 32];
@@ -199,7 +245,8 @@ fn handshake(addr: SocketAddr, server_pub: &[u8; 32], ids: &Ids) -> Result<Adnl,
     let tx = Aes256Ctr::new_from_slices(&params[32..64], &params[80..96]).map_err(|_| "tx init")?;
 
     let mut s = stream;
-    s.write_all(&packet).map_err(|e| format!("send handshake: {e}"))?;
+    s.write_all(&packet)
+        .map_err(|e| format!("send handshake: {e}"))?;
 
     Ok(Adnl { stream: s, rx, tx })
 }
@@ -301,7 +348,10 @@ fn main() {
                             println!("   <- adnl.answer but could not frame answer bytes");
                         }
                     } else {
-                        println!("   <- unexpected frame id={id:08x} echo_ok={}", echoed == &qid[..]);
+                        println!(
+                            "   <- unexpected frame id={id:08x} echo_ok={}",
+                            echoed == &qid[..]
+                        );
                     }
                     break;
                 }
@@ -336,7 +386,10 @@ fn decode_answer(answer: &[u8], ids: &Ids) {
         return;
     }
     if id != ids.mc_info {
-        println!("   <- answer id {id:08x} (not masterchainInfo): {}", hex(&answer[..answer.len().min(48)]));
+        println!(
+            "   <- answer id {id:08x} (not masterchainInfo): {}",
+            hex(&answer[..answer.len().min(48)])
+        );
         return;
     }
     // last: tonNode.blockIdExt = workchain:int shard:long seqno:int root_hash:int256 file_hash:int256

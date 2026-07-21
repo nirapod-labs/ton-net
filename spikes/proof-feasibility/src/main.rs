@@ -333,7 +333,7 @@ async fn main() {
     // The block's state update names the state root the state proof must cover.
     let state_root = pcells
         .iter()
-        .find(|c| kind(*c) == Kind::MerkleUpdate)
+        .find(|c| kind(c) == Kind::MerkleUpdate)
         .map(|c| hash32(&c.data[33..]));
     let mut stage3 = block_proof.is_some();
     match state_root {

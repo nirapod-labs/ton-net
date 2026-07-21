@@ -41,7 +41,10 @@ fn main() {
         unreachable!()
     };
 
-    println!("== the simplex set on the link to seqno {} ==\n", link.to.seqno);
+    println!(
+        "== the simplex set on the link to seqno {} ==\n",
+        link.to.seqno
+    );
     println!("  cc_seqno           {cc_seqno}");
     println!("  validator_set_hash {validator_set_hash}");
     println!("  session_id         {}", hex(session_id));
@@ -160,10 +163,7 @@ fn main() {
                     ));
                     tries.push((
                         format!("dataToSign({vname}Vote {sname}/{hname})"),
-                        sig::data_to_sign(
-                            session_id,
-                            &[&vote.to_le_bytes()[..], &boxed].concat(),
-                        ),
+                        sig::data_to_sign(session_id, &[&vote.to_le_bytes()[..], &boxed].concat()),
                     ));
                     tries.push((
                         format!("{pname}{vname}Vote[bare id] {sname}/{hname}"),
