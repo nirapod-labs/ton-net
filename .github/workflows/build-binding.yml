@@ -150,3 +150,38 @@ jobs:
       - name: gate test
         working-directory: bindings/node
         run: node test.mjs
+
+  # A musl binary that builds is not a musl binary that runs, and every other job
+  # here is on glibc, so loading it anywhere else proves nothing about it. Two of
+  # the seven published binaries are musl and neither had ever been loaded.
+  #
+  # The container is only for the load. Checkout and download stay on the host,
+  # because a JavaScript action is executed by the runner's own Node, which is
+  # linked against glibc and does not run inside an Alpine container.
+  smoke-musl:
+    name: the musl binary loads on musl
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: binding-x86_64-unknown-linux-musl
+          path: bindings/node
+      # The gate test imports the generated loader and nothing else, so it needs no
+      # install: the loader is plain JavaScript over `fs`, and it picks the musl
+      # binary here because it detects a musl libc, which is the half of the loader
+      # nothing had exercised either.
+      #
+      # The image is a moving tag where every action above is pinned to a commit,
+      # which is a deliberate exception rather than an oversight: Dependabot tracks
+      # an image named in a `container:` key or a Dockerfile and not one named
+      # inside a script, so a digest here would be a pin nothing updates. The trade
+      # is accepted because this container is handed no token and contributes
+      # nothing to a published artifact; it only loads one that already exists.
+      - name: load it on alpine
+        run: |
+          docker run --rm \
+            --volume "$PWD/bindings/node:/binding" \
+            --workdir /binding \
+            node:22-alpine node test.mjs
