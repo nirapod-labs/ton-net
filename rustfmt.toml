@@ -1,0 +1,7 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: 2026 Nirapod Labs
+
+# Only settings stable rustfmt understands. A nightly-only key here would warn on
+# every run for every contributor, which trains people to ignore the output.
+edition = "2021"
+newline_style = "Unix"

@@ -1,0 +1,36 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: 2026 Nirapod Labs
+
+# The core is Rust, but a binding lands in every language this library reaches, so
+# the settings below cover the ones already here and the ones the roadmap adds.
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 4
+
+[*.{rs,py}]
+indent_size = 4
+
+[*.{js,mjs,cjs,ts,tsx,json,yml,yaml,toml,kt,kts,gradle,dart}]
+indent_size = 2
+
+[*.swift]
+indent_size = 4
+
+[*.md]
+# A trailing double space is a hard line break in Markdown, so trimming it would
+# silently reflow a paragraph.
+trim_trailing_whitespace = false
+
+[{Makefile,justfile}]
+indent_style = tab
+
+# Captured mainnet bytes are compared verbatim against what a liteserver served.
+[*.hex]
+insert_final_newline = false
+trim_trailing_whitespace = false

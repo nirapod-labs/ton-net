@@ -1,0 +1,12 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: 2026 Nirapod Labs
+
+# This pins what a contributor builds with, not what the library requires. The
+# supported floor is the rust-version in each manifest: 1.85 for the core crates
+# and 1.88 for the Node binding, which napi-rs 3 raises.
+#
+# A toolchain file overrides whatever rustup would otherwise select, including in
+# CI, so the job that checks the floor passes the toolchain explicitly.
+[toolchain]
+channel = "stable"
+components = ["rustfmt", "clippy"]

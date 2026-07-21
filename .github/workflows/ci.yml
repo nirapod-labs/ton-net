@@ -52,13 +52,22 @@ jobs:
         run: cargo test
 
   msrv:
-    name: msrv 1.85
+    name: msrv 1.85 core, 1.88 binding
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@1.85.0
+      - uses: dtolnay/rust-toolchain@1.88.0
       - uses: Swatinem/rust-cache@v2
-      - run: cargo build
+      # rust-toolchain.toml selects stable for any command that does not name a
+      # toolchain, including here, so the floor is passed explicitly. Without the
+      # +version this job would build on stable and report the floor as met.
+      - name: core floor
+        run: cargo +1.85.0 build
+      # napi-rs 3 raises the binding above the core floor, and nothing checked it
+      # until now, so the manifest could claim a floor no build had ever tried.
+      - name: binding floor
+        run: cargo +1.88.0 build -p ton-net-node
 
   network:
     name: network integration
