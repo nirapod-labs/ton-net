@@ -161,7 +161,8 @@ impl Cell {
     /// # Errors
     ///
     /// Returns [`CellError::Malformed`] if an exotic cell is too short to hold the
-    /// hashes and depths its level mask claims.
+    /// hashes and depths its level mask claims, or if the level mask is not the one the
+    /// cell's kind and children imply.
     pub(crate) fn from_parts(
         data: Vec<u8>,
         bits: u16,
@@ -169,6 +170,11 @@ impl Cell {
         cell_type: CellType,
         level_mask: u8,
     ) -> Result<Cell, CellError> {
+        if level_mask != implied_mask(cell_type, &refs, level_mask) {
+            return Err(CellError::Malformed(
+                "cell level mask is not the one its children imply",
+            ));
+        }
         let (hashes, depths) = compute(&data, bits, &refs, cell_type, level_mask)?;
         Ok(Cell {
             inner: Arc::new(Inner {
@@ -318,6 +324,28 @@ impl Cell {
             ),
             bits_descriptor(self.inner.bits),
         )
+    }
+}
+
+/// The level mask a cell must carry, given its kind and its children.
+///
+/// Only a pruned branch chooses its own mask; every other kind derives one. An ordinary
+/// cell stands as high as the highest thing below it, a Merkle cell resolves one level of
+/// what it covers and so sits one lower, and a library reference stands alone at zero.
+///
+/// This is checked rather than assumed because the mask is hashed into the cell's
+/// identity. A cell whose stored mask is higher than its children justify hashes the same
+/// at level zero but answers a different representation hash, so accepting one would let
+/// two cells that are equal disagree about what they are.
+fn implied_mask(cell_type: CellType, refs: &[Cell], stored: u8) -> u8 {
+    let children = refs
+        .iter()
+        .fold(0u8, |mask, child| mask | child.level_mask());
+    match cell_type {
+        CellType::PrunedBranch => stored,
+        CellType::LibraryReference => 0,
+        CellType::MerkleProof | CellType::MerkleUpdate => children >> 1,
+        CellType::Ordinary => children,
     }
 }
 

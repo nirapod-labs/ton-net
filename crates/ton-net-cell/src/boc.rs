@@ -88,6 +88,10 @@ impl<'a> Reader<'a> {
     fn remaining(&self) -> usize {
         self.bytes.len() - self.at
     }
+
+    fn consumed(&self) -> usize {
+        self.at
+    }
 }
 
 /// The number of data bits a cell holds, from its bit descriptor and stored bytes.
@@ -109,7 +113,7 @@ fn bit_len(d2: u8, data: &[u8]) -> Result<u16, CellError> {
 }
 
 /// Determines a cell's kind, and checks an exotic cell is long enough to be read.
-fn classify(exotic: bool, data: &[u8]) -> Result<CellType, CellError> {
+fn classify(exotic: bool, data: &[u8], level_mask: u8) -> Result<CellType, CellError> {
     if !exotic {
         return Ok(CellType::Ordinary);
     }
@@ -120,12 +124,21 @@ fn classify(exotic: bool, data: &[u8]) -> Result<CellType, CellError> {
         CellType::from_tag(tag).ok_or(CellError::Malformed("unknown exotic cell type"))?;
 
     if cell_type == CellType::PrunedBranch {
+        // A pruned branch carries its level mask twice, in the descriptor and in the
+        // cell body, and only the descriptor copy is hashed. Two copies that disagree
+        // would leave a cell whose body says one thing and whose identity says another,
+        // so the disagreement is refused rather than resolved.
+        let stored = *data
+            .get(1)
+            .ok_or(CellError::Malformed("pruned branch has no mask byte"))?;
+        if stored != level_mask {
+            return Err(CellError::Malformed(
+                "pruned branch mask disagrees with its descriptor",
+            ));
+        }
         // A pruned branch stores one hash and one depth per marked level, after its type
         // and mask bytes. Checking the length here keeps every later read in range.
-        let levels = data
-            .get(1)
-            .ok_or(CellError::Malformed("pruned branch has no mask byte"))?
-            .count_ones() as usize;
+        let levels = stored.count_ones() as usize;
         if data.len() < 2 + levels * 34 {
             return Err(CellError::Malformed(
                 "pruned branch is too short for its level mask",
@@ -192,9 +205,14 @@ pub fn parse_boc(bytes: &[u8]) -> Result<Vec<Cell>, CellError> {
 
     let count = reader.uint(ref_size)? as usize;
     let roots = reader.uint(ref_size)? as usize;
-    let _absent = reader.uint(ref_size)?;
-    let _total_size = reader.uint(offset_size)?;
+    let absent = reader.uint(ref_size)? as usize;
+    let total_size = reader.uint(offset_size)? as usize;
 
+    // An absent cell is a reference to a cell the bag does not carry, which only the
+    // format's incremental-update use has. A bag holding one cannot be read whole.
+    if absent != 0 {
+        return Err(CellError::Header("absent cells"));
+    }
     if count > MAX_CELLS {
         return Err(CellError::TooManyCells { limit: MAX_CELLS });
     }
@@ -220,6 +238,22 @@ pub fn parse_boc(bytes: &[u8]) -> Result<Vec<Cell>, CellError> {
         reader.take(count.saturating_mul(offset_size))?;
     }
 
+    // The header states how many bytes the cells take. Holding a bag to its own statement
+    // leaves no unread tail to hide bytes in, and rejects a bag that claims a size it does
+    // not carry rather than reading whatever happens to follow.
+    let stated_end = reader
+        .consumed()
+        .checked_add(total_size)
+        .ok_or(CellError::Header("cell area size"))?;
+    let body_end = if has_checksum {
+        bytes.len().saturating_sub(4)
+    } else {
+        bytes.len()
+    };
+    if stated_end != body_end {
+        return Err(CellError::Header("cell area size"));
+    }
+
     let mut raw = Vec::with_capacity(count);
     for index in 0..count {
         let d1 = reader.byte()?;
@@ -236,7 +270,7 @@ pub fn parse_boc(bytes: &[u8]) -> Result<Vec<Cell>, CellError> {
         if bits > MAX_BITS {
             return Err(CellError::Malformed("cell holds more than 1023 bits"));
         }
-        let cell_type = classify(exotic, &data)?;
+        let cell_type = classify(exotic, &data, level_mask)?;
 
         let mut refs = Vec::with_capacity(ref_count);
         for _ in 0..ref_count {
