@@ -10,11 +10,12 @@
 //!
 //! # Trust
 //!
-//! Nothing in this crate checks a proof. An [`Account`] decoded from bytes a liteserver
-//! sent is the server's word until something verifies it, and the type does not claim
-//! otherwise. The proof engine that turns a trusted block hash into a checked account
-//! read builds on [`Block::new_state_hash`], [`ShardState::account`], and the cell
-//! hashing beneath them.
+//! Decoding and checking are separate here, and the types say which is which. An
+//! [`Account`] from [`Account::decode`] is bytes a server sent, believed because the
+//! server said so. The same type from [`proof::verify_account`] was checked against a
+//! block hash the caller trusts. Nothing about the value records the difference, so the
+//! caller keeps track of which call produced it; the facade above this crate is where
+//! that distinction is carried in the type.
 //!
 //! This is an internal crate of the ton-net client.
 //!
@@ -38,10 +39,13 @@ mod block;
 mod coins;
 pub mod dict;
 mod error;
+pub mod proof;
 mod shard;
 
 pub use account::{Account, AccountStatus};
 pub use block::Block;
 pub use coins::Coins;
+pub use dict::Lookup;
 pub use error::BlockError;
-pub use shard::{ShardAccountEntry, ShardState};
+pub use proof::{verify_account, AccountRead};
+pub use shard::{McStateExtra, ShardAccountEntry, ShardDescr, ShardState};

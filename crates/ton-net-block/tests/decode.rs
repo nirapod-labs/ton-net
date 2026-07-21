@@ -13,7 +13,7 @@
 //! alignment: the balance becomes noise and the status reads as frozen. Both an account
 //! with storage extra and one without are pinned here so the ambiguity stays closed.
 
-use ton_net_block::{Account, AccountStatus, Block, BlockError, Coins, ShardState};
+use ton_net_block::{Account, AccountStatus, Block, BlockError, Coins, Lookup, ShardState};
 use ton_net_cell::{parse_boc, Cell};
 
 /// A basechain account with a balance and no code: the zero address.
@@ -152,6 +152,7 @@ fn the_accounts_dictionary_finds_the_account_the_proof_covers() {
     let entry = state
         .account(&CONFIG_ACCOUNT_ID)
         .expect("the dictionary reads")
+        .found()
         .expect("the proof covers this account");
 
     // Inside a proof the account itself is pruned away, and the placeholder carries the
@@ -174,9 +175,11 @@ fn an_account_the_proof_does_not_cover_is_not_found() {
     let state = covered(&roots, ShardState::from_cell).expect("a root covers the shard state");
 
     // A proof prunes every branch but the one it covers, so a walk toward any other
-    // account runs into a placeholder and stops.
-    let absent = state.account(&[0xAA; 32]).expect("the dictionary reads");
-    assert!(absent.is_none());
+    // account runs into a placeholder and stops there, having learned nothing.
+    assert_eq!(
+        state.account(&[0xAA; 32]).expect("the dictionary reads"),
+        Lookup::Pruned
+    );
 }
 
 #[test]

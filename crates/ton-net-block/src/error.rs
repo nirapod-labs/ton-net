@@ -31,4 +31,33 @@ pub enum BlockError {
     /// A dictionary label claimed more bits than the remaining key can hold.
     #[error("dictionary label is longer than the key it labels")]
     LabelTooLong,
+
+    /// A cell that has to be a Merkle proof is some other kind of cell.
+    #[error("not a merkle proof")]
+    NotAMerkleProof,
+
+    /// A Merkle proof's content does not hash to the root the proof itself claims.
+    #[error("merkle proof content does not hash to the root it carries")]
+    ProofInconsistent,
+
+    /// No proof roots at the hash it was required to root at.
+    ///
+    /// This is what a proof for some other block, or for some other part of this block,
+    /// fails as.
+    #[error("no merkle proof roots at the required hash")]
+    ProofNotAnchored,
+
+    /// The proof prunes away the path to the account, so it says nothing about it.
+    ///
+    /// A server that returns this has not answered the question, which is different from
+    /// proving the account is not there.
+    #[error("the proof does not cover the account")]
+    NotCovered,
+
+    /// The account state does not match the hash the proof binds to the block.
+    ///
+    /// Either the state is some other account, or some other version of this one, or the
+    /// server claimed an existence the proof contradicts.
+    #[error("the account state does not bind to the proved block")]
+    NotBound,
 }

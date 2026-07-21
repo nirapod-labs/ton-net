@@ -1,9 +1,9 @@
-//! The shard state, walked as far as one account.
+//! The shard state, walked as far as one account or one shard binding.
 
-use ton_net_cell::Cell;
+use ton_net_cell::{Cell, Slice};
 
 use crate::coins::Coins;
-use crate::dict;
+use crate::dict::{self, Lookup};
 use crate::error::BlockError;
 
 /// The constructor tag a shard state begins with.
@@ -12,8 +12,26 @@ const SHARD_STATE_TAG: u32 = 0x9023_afe2;
 /// The reference holding a shard state's accounts dictionary.
 const ACCOUNTS_REFERENCE: usize = 1;
 
+/// The reference holding a masterchain state's extra, when it has one.
+const CUSTOM_REFERENCE: usize = 3;
+
 /// The width of an account key in the accounts dictionary.
 const ACCOUNT_KEY_BITS: u16 = 256;
+
+/// The constructor tag a masterchain state extra begins with.
+const MC_STATE_EXTRA_TAG: u64 = 0xcc26;
+
+/// The width of a workchain key in the shard-hashes dictionary.
+const WORKCHAIN_KEY_BITS: u16 = 32;
+
+/// The two constructor tags a shard descriptor begins with.
+///
+/// The two differ only past the fields read here, in whether the fee counters sit inline
+/// or behind a reference.
+const SHARD_DESCR_TAGS: [u64; 2] = [0xa, 0xb];
+
+/// The deepest a workchain may split, which bounds the shard tree walk.
+const MAX_SPLIT_DEPTH: usize = 60;
 
 /// What a shard's accounts dictionary holds for one account.
 ///
@@ -21,7 +39,7 @@ const ACCOUNT_KEY_BITS: u16 = 256;
 /// [`account_cell`](ShardAccountEntry::account_cell) is a placeholder rather than the
 /// account. Its [`hash`](Cell::hash) is the account's hash either way, which is what
 /// binds a separately delivered account state to this block.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ShardAccountEntry {
     account: Cell,
     last_trans_hash: [u8; 32],
@@ -100,28 +118,33 @@ impl ShardState {
 
     /// Looks one account up in the shard's accounts dictionary.
     ///
-    /// Returns `None` when the dictionary does not hold the account. Over a Merkle proof
-    /// that also covers an account the proof did not include, because a proof prunes
-    /// every branch but the one it covers.
+    /// The three outcomes are described on [`Lookup`]. Over a Merkle proof the difference
+    /// between an account the dictionary shows is not there and one the proof simply does
+    /// not cover is the difference between an answer and a shrug.
     ///
     /// # Errors
     ///
     /// Returns [`BlockError::Malformed`] or [`BlockError::Cell`] if the state or the
     /// dictionary does not read as it should.
-    pub fn account(&self, account_id: &[u8; 32]) -> Result<Option<ShardAccountEntry>, BlockError> {
+    pub fn account(&self, account_id: &[u8; 32]) -> Result<Lookup<ShardAccountEntry>, BlockError> {
         let accounts = self.accounts()?;
         let mut slice = accounts.parse();
-        // An augmented dictionary: a bit, then the root, then the summary over it.
+        // An augmented dictionary: a bit, then the root, then the summary over it. An
+        // empty dictionary is a visible statement that it holds nothing.
         let Some(root) = slice.load_maybe_ref()? else {
-            return Ok(None);
+            return Ok(Lookup::Absent);
         };
-        let Some(entry) = dict::lookup(root, ACCOUNT_KEY_BITS, account_id)? else {
-            return Ok(None);
+        let entry = match dict::lookup(root, ACCOUNT_KEY_BITS, account_id)? {
+            Lookup::Found(entry) => entry,
+            Lookup::Absent => return Ok(Lookup::Absent),
+            Lookup::Pruned => return Ok(Lookup::Pruned),
         };
 
         let mut leaf = entry.slice()?;
         // The augmentation the accounts dictionary carries: how deep the subtree splits,
-        // and the balance under it. Stepped over to reach the account itself.
+        // and the balance under it. Stepped over to reach the account itself. The balance
+        // is a currency collection, so its extra-currency dictionary takes a reference
+        // when it is not empty, and the account is not always the first reference.
         leaf.skip_bits(5)?;
         let _ = Coins::load(&mut leaf)?;
         let _ = leaf.load_maybe_ref()?;
@@ -133,10 +156,165 @@ impl ShardState {
         last_trans_hash.copy_from_slice(&hash);
         let last_trans_lt = leaf.load_uint(64)?;
 
-        Ok(Some(ShardAccountEntry {
+        Ok(Lookup::Found(ShardAccountEntry {
             account,
             last_trans_hash,
             last_trans_lt,
         }))
     }
+
+    /// The masterchain extra, which only a masterchain state carries.
+    ///
+    /// Returns `None` for a shard state that has no extra, and for a masterchain state
+    /// whose extra was pruned out of the proof being read.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`BlockError::Malformed`] if the header does not read as a shard state, or
+    /// [`BlockError::WrongConstructor`] if the extra is some other structure.
+    pub fn masterchain_extra(&self) -> Result<Option<McStateExtra>, BlockError> {
+        let mut slice = self.cell.parse();
+        if !skip_to_custom(&mut slice)? {
+            return Ok(None);
+        }
+        let cell = self
+            .cell
+            .reference(CUSTOM_REFERENCE)
+            .ok_or(BlockError::Malformed("shard state without its extra"))?;
+        if cell.is_exotic() {
+            return Ok(None);
+        }
+        Ok(Some(McStateExtra::from_cell(cell)?))
+    }
+}
+
+/// Reads past the fixed shard-state header, returning whether an extra follows.
+///
+/// The header is fixed width, so the count below is the whole of it. A shard state cell
+/// holds exactly these bits and nothing more, which is what makes reading it this way
+/// safe: a layout change shows up as a short read rather than as a silent shift.
+fn skip_to_custom(slice: &mut Slice<'_>) -> Result<bool, BlockError> {
+    // The constructor tag, already checked, then the global id.
+    slice.skip_bits(32 + 32)?;
+    // shard_ident$00 shard_pfx_bits:(#<= 60) workchain_id:int32 shard_prefix:uint64
+    if slice.load_uint(2)? != 0 {
+        return Err(BlockError::Malformed("shard identifier"));
+    }
+    slice.skip_bits(6 + 32 + 64)?;
+    // seq_no, vert_seq_no, gen_utime, gen_lt, min_ref_mc_seqno, then before_split.
+    slice.skip_bits(32 + 32 + 32 + 64 + 32 + 1)?;
+    Ok(slice.load_bit()?)
+}
+
+/// What a masterchain state records about one shard's latest block.
+///
+/// Only the fields a verified account read needs are kept: the height, and the block root
+/// hash that an account-state proof for that shard has to root at.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct ShardDescr {
+    /// The shard block's sequence number.
+    pub seq_no: u32,
+    /// The shard block's root hash.
+    pub root_hash: [u8; 32],
+}
+
+impl ShardDescr {
+    /// Reads a shard descriptor from a slice positioned at its constructor tag.
+    fn load(slice: &mut Slice<'_>) -> Result<ShardDescr, BlockError> {
+        let tag = slice.load_uint(4)?;
+        if !SHARD_DESCR_TAGS.contains(&tag) {
+            return Err(BlockError::WrongConstructor {
+                expected: "shard_descr",
+            });
+        }
+        let seq_no = slice.load_uint(32)? as u32;
+        slice.skip_bits(32 + 64 + 64)?; // reg_mc_seqno, start_lt, end_lt
+        let bytes = slice.load_bytes(32)?;
+        let mut root_hash = [0u8; 32];
+        root_hash.copy_from_slice(&bytes);
+        Ok(ShardDescr { seq_no, root_hash })
+    }
+}
+
+/// The masterchain-only part of a masterchain state.
+///
+/// A masterchain state carries the network configuration, the validator set, and the
+/// record of every shard's latest block. This reads the last of those, which is what ties
+/// a shard block to the masterchain block a caller trusts.
+#[derive(Debug, Clone)]
+pub struct McStateExtra {
+    cell: Cell,
+}
+
+impl McStateExtra {
+    /// Reads a masterchain extra from its cell, checking the constructor tag.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`BlockError::WrongConstructor`] if the cell is not a masterchain extra.
+    pub fn from_cell(cell: &Cell) -> Result<McStateExtra, BlockError> {
+        let tag = cell.parse().load_uint(16)?;
+        if tag != MC_STATE_EXTRA_TAG {
+            return Err(BlockError::WrongConstructor {
+                expected: "masterchain_state_extra",
+            });
+        }
+        Ok(McStateExtra { cell: cell.clone() })
+    }
+
+    /// Finds the shard whose address range holds an account, and what it last recorded.
+    ///
+    /// The shards of a workchain form a binary tree over address prefixes, so descending
+    /// it by the bits of `account_id` lands on the one shard that covers the account. The
+    /// walk is the coverage check: there is no other shard the account could be in.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`BlockError::Malformed`] or [`BlockError::Cell`] if the shard record does
+    /// not read as it should.
+    pub fn shard_for(
+        &self,
+        workchain: i32,
+        account_id: &[u8; 32],
+    ) -> Result<Lookup<ShardDescr>, BlockError> {
+        let mut slice = self.cell.parse();
+        slice.skip_bits(16)?; // the constructor tag, already checked
+        let Some(root) = slice.load_maybe_ref()? else {
+            return Ok(Lookup::Absent);
+        };
+        let entry = match dict::lookup(root, WORKCHAIN_KEY_BITS, &workchain.to_be_bytes())? {
+            Lookup::Found(entry) => entry,
+            Lookup::Absent => return Ok(Lookup::Absent),
+            Lookup::Pruned => return Ok(Lookup::Pruned),
+        };
+
+        // The dictionary holds each workchain's shard tree behind a reference.
+        let tree = entry.slice()?.load_ref()?.clone();
+        find_shard(&tree, account_id)
+    }
+}
+
+/// Descends a workchain's shard tree by the leading bits of an account id.
+fn find_shard(root: &Cell, account_id: &[u8; 32]) -> Result<Lookup<ShardDescr>, BlockError> {
+    let mut node = root.clone();
+    for depth in 0..=MAX_SPLIT_DEPTH {
+        if node.is_exotic() {
+            return Ok(Lookup::Pruned);
+        }
+        let mut slice = node.parse();
+        if !slice.load_bit()? {
+            // bt_leaf: this shard covers the account.
+            return ShardDescr::load(&mut slice).map(Lookup::Found);
+        }
+        // bt_fork: the address bit at this depth chooses the half.
+        let branch = usize::from((account_id[depth / 8] >> (7 - depth % 8)) & 1 == 1);
+        node = node
+            .reference(branch)
+            .ok_or(BlockError::Malformed("shard tree fork without both halves"))?
+            .clone();
+    }
+    Err(BlockError::Malformed(
+        "shard tree deeper than a shard splits",
+    ))
 }

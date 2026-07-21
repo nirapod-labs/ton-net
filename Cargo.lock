@@ -691,6 +691,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "ton-net-block"
+version = "0.1.0-alpha.1"
+dependencies = [
+ "thiserror",
+ "ton-net-cell",
+]
+
+[[package]]
+name = "ton-net-cell"
+version = "0.1.0-alpha.1"
+dependencies = [
+ "sha2",
+ "thiserror",
+]
+
+[[package]]
 name = "ton-net-lite"
 version = "0.1.0-alpha.1"
 dependencies = [

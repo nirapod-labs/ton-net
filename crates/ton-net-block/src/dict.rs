@@ -14,12 +14,45 @@ use ton_net_cell::{Cell, Slice};
 
 use crate::error::BlockError;
 
+/// How a lookup ended.
+///
+/// Over a complete dictionary only [`Found`](Lookup::Found) and [`Absent`](Lookup::Absent)
+/// happen. Over a Merkle proof a third answer exists and matters: the proof covers one
+/// path and replaces the rest with placeholders, so a walk can end at a placeholder
+/// having learned nothing.
+///
+/// Keeping [`Pruned`](Lookup::Pruned) apart from [`Absent`](Lookup::Absent) is what makes
+/// a proof of absence worth anything. A proof rooted at a trusted hash makes every label
+/// it shows part of that hash, so a label that disagrees with the key is evidence no such
+/// key exists. A placeholder is not evidence of anything, and a client that read the two
+/// as one answer would accept "this account does not exist" from a server that had merely
+/// declined to prove it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Lookup<T> {
+    /// The dictionary holds the key.
+    Found(T),
+    /// The dictionary shows the key is not in it.
+    Absent,
+    /// A pruned branch stands where the walk had to go, so the key is unknown.
+    Pruned,
+}
+
+impl<T> Lookup<T> {
+    /// The value, if the key was found.
+    pub fn found(self) -> Option<T> {
+        match self {
+            Lookup::Found(value) => Some(value),
+            _ => None,
+        }
+    }
+}
+
 /// Where a lookup landed: the cell holding the leaf, and where its contents start.
 ///
 /// The walk stops once the key is spent, which leaves the cursor just past the label.
 /// [`slice`](DictEntry::slice) reopens the cell at that point, so the caller reads
 /// whatever the dictionary stores.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DictEntry {
     cell: Cell,
     bit_offset: u16,
@@ -102,19 +135,18 @@ fn read_label(slice: &mut Slice<'_>, max: u16) -> Result<Vec<bool>, BlockError> 
 /// Looks `key` up in the dictionary rooted at `root`.
 ///
 /// `root` is the edge cell a `HashmapE` points at, and `key_bits` is the dictionary's
-/// fixed key width. Returns `None` when the key is absent.
+/// fixed key width.
 ///
-/// A walk over a Merkle proof stops at a pruned branch and returns `None`: a proof
-/// covers one path and prunes the rest, so a key it does not cover is simply not there
-/// to read. Telling that apart from a key genuinely absent from the full dictionary is
-/// the proof engine's job, not this walk's.
+/// The three outcomes are described on [`Lookup`]. Over a Merkle proof, a caller that
+/// needs an answer rather than a maybe has to treat [`Lookup::Pruned`] as a failure of
+/// the server to answer.
 ///
 /// # Errors
 ///
 /// Returns [`BlockError::KeyLength`] if `key` is too short for `key_bits`, or
 /// [`BlockError::Malformed`] or [`BlockError::Cell`] if the tree does not read as a
 /// dictionary.
-pub fn lookup(root: &Cell, key_bits: u16, key: &[u8]) -> Result<Option<DictEntry>, BlockError> {
+pub fn lookup(root: &Cell, key_bits: u16, key: &[u8]) -> Result<Lookup<DictEntry>, BlockError> {
     let needed = usize::from(key_bits).div_ceil(8);
     if key.len() < needed {
         return Err(BlockError::KeyLength {
@@ -129,9 +161,9 @@ pub fn lookup(root: &Cell, key_bits: u16, key: &[u8]) -> Result<Option<DictEntry
 
     loop {
         // A proof replaces the branches it does not cover with pruned placeholders,
-        // which hold a hash rather than a dictionary node.
+        // which hold a hash rather than a dictionary node. Nothing can be read from one.
         if node.is_exotic() {
-            return Ok(None);
+            return Ok(Lookup::Pruned);
         }
 
         let mut slice = node.parse();
@@ -139,9 +171,12 @@ pub fn lookup(root: &Cell, key_bits: u16, key: &[u8]) -> Result<Option<DictEntry
         if label.len() > usize::from(remaining) {
             return Err(BlockError::LabelTooLong);
         }
+        // The label is the run of bits every key below this edge shares. A key that
+        // disagrees with it has no entry below, and because the label is part of what the
+        // root hash covers, that is evidence rather than an absence of evidence.
         for (offset, bit) in label.iter().enumerate() {
             if key_bit(key, consumed + offset) != *bit {
-                return Ok(None);
+                return Ok(Lookup::Absent);
             }
         }
         consumed += label.len();
@@ -149,7 +184,7 @@ pub fn lookup(root: &Cell, key_bits: u16, key: &[u8]) -> Result<Option<DictEntry
 
         if remaining == 0 {
             let bit_offset = node.bit_len() - slice.remaining_bits() as u16;
-            return Ok(Some(DictEntry {
+            return Ok(Lookup::Found(DictEntry {
                 cell: node,
                 bit_offset,
             }));
