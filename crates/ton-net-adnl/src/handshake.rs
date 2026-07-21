@@ -58,6 +58,15 @@ pub enum HandshakeError {
     /// secret can be derived from it.
     #[error("server public key is not a valid ed25519 point")]
     InvalidServerKey,
+
+    /// The key exchange produced the all-zero secret, which is no secret at all.
+    ///
+    /// A key of small order decodes as a point and multiplies to zero, so it passes
+    /// [`InvalidServerKey`](Self::InvalidServerKey) and then collapses the session onto
+    /// values the packet carries in the clear. Distinct from an unreadable key because
+    /// the cause is different: this key is well formed and chosen to be useless.
+    #[error("the key exchange produced no shared secret")]
+    DegenerateSharedSecret,
 }
 
 /// Builds a client handshake for one liteserver.
@@ -95,6 +104,14 @@ pub fn client_handshake(
         .decompress()
         .ok_or(HandshakeError::InvalidServerKey)?;
     let shared = server_point.to_montgomery().mul_clamped(scalar).to_bytes();
+    // RFC 7748 section 6.1: abort on the all-zero output. Decoding as a point is not
+    // enough, because the clamp forces the scalar to a multiple of the cofactor and every
+    // small-order key then multiplies to zero. The key below is built from `shared` and
+    // `checksum`, and `checksum` travels in the clear, so a zero secret would hand the
+    // whole session to anyone watching the packet go past.
+    if shared == [0u8; 32] {
+        return Err(HandshakeError::DegenerateSharedSecret);
+    }
 
     let checksum = sha256(&[&secrets.params]);
 
@@ -226,5 +243,38 @@ mod tests {
             client_handshake(&bad, &secrets()),
             Err(HandshakeError::InvalidServerKey)
         ));
+    }
+
+    #[test]
+    fn a_small_order_server_key_is_rejected() {
+        // These decode to points, so the check above passes them, and then every one
+        // multiplies to zero because the clamp makes the scalar a multiple of the
+        // cofactor. A zero secret leaves the handshake key as sixteen zero bytes followed
+        // by half of a checksum the packet carries in the clear, which is a session
+        // anyone watching can read and write. RFC 7748 section 6.1 says to abort.
+        let low_order = [
+            "0000000000000000000000000000000000000000000000000000000000000000",
+            "0100000000000000000000000000000000000000000000000000000000000000",
+            "ecffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f",
+            "0000000000000000000000000000000000000000000000000000000000000080",
+            "26e8958fc2b227b045c3f489f2ef98f0d5dfac05d3c63339b13802886d53fc05",
+            "c7176a703d4dd84fba3c0b760d10670f2a2053fa2c39ccc64ec7fd7792ac03fa",
+            "0100000000000000000000000000000000000000000000000000000000000080",
+            "ecffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        ];
+        for key in low_order {
+            let key = unhex32(key);
+            assert!(
+                matches!(
+                    client_handshake(&key, &secrets()),
+                    Err(HandshakeError::DegenerateSharedSecret)
+                        | Err(HandshakeError::InvalidServerKey)
+                ),
+                "a key of small order was accepted: {key:02x?}"
+            );
+        }
+
+        // The real key still works, so the check costs nothing an honest config pays.
+        assert!(client_handshake(&server_key(), &secrets()).is_ok());
     }
 }

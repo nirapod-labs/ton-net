@@ -28,6 +28,19 @@ const MAX_FRAMES_PER_QUERY: usize = 8;
 pub struct AdnlConnection<T> {
     transport: T,
     ciphers: SessionCiphers,
+    /// Whether this side still knows where it is in the stream.
+    ///
+    /// The frame ciphers are a counter the two ends advance in step, so a frame that is
+    /// only half moved leaves this side counting from a place the server is not, and
+    /// every later frame decrypts to nothing. Nothing observable happens at the moment it
+    /// goes wrong: a read that is cancelled partway takes bytes off the socket and drops
+    /// them, and a cancelled future in Rust is a dropped one, so there is no error to
+    /// catch and no code left to run.
+    ///
+    /// What can be arranged is that the flag is lowered before a frame starts moving and
+    /// raised only once it has finished. An interruption anywhere in between leaves it
+    /// lowered by simply not reaching the line that would raise it.
+    intact: bool,
 }
 
 /// A failure opening or running an ADNL session.
@@ -53,6 +66,15 @@ pub enum AdnlError {
     /// No answer to the query arrived within the frame budget.
     #[error("no answer to the query")]
     NoAnswer,
+
+    /// A frame stopped partway, so this side no longer knows where the stream is.
+    ///
+    /// The session cannot recover: the ciphers count in step with the server and there is
+    /// no way to find the place again from this end. A caller reconnects. This is what a
+    /// cancelled read leaves behind, so it follows an abandoned deadline as often as it
+    /// follows a real failure.
+    #[error("the session lost its place in the stream")]
+    Desynchronized,
 }
 
 impl<T: Transport> AdnlConnection<T> {
@@ -77,7 +99,18 @@ impl<T: Transport> AdnlConnection<T> {
         Ok(Self {
             transport,
             ciphers: handshake.ciphers,
+            intact: true,
         })
+    }
+
+    /// Whether the session still knows where it is in the stream.
+    ///
+    /// False once a frame has stopped partway, which is permanent. A caller holding a
+    /// connection across deadlines checks this to tell a session worth reusing from one
+    /// that will fail every later query.
+    #[must_use]
+    pub fn is_intact(&self) -> bool {
+        self.intact
     }
 
     /// Runs one query and returns the answer bytes.
@@ -90,7 +123,8 @@ impl<T: Transport> AdnlConnection<T> {
     /// # Errors
     ///
     /// Returns [`AdnlError::Transport`] or [`AdnlError::Frame`] on an I/O or framing
-    /// failure, [`AdnlError::Malformed`] if a frame is not an ADNL message, or
+    /// failure, [`AdnlError::Desynchronized`] if an earlier frame stopped partway,
+    /// [`AdnlError::Malformed`] if nothing that arrived decoded as an ADNL message, or
     /// [`AdnlError::NoAnswer`] if no matching answer arrives within the frame budget.
     pub async fn query(&mut self, query: &[u8]) -> Result<Vec<u8>, AdnlError> {
         let query_id: [u8; 32] = random();
@@ -99,9 +133,9 @@ impl<T: Transport> AdnlConnection<T> {
             query: query.to_vec(),
         });
         let nonce: [u8; 32] = random();
-        let frame = self.ciphers.seal(&nonce, &message);
-        self.transport.write_all(&frame).await?;
+        self.send(&nonce, &message).await?;
 
+        let mut undecodable = 0usize;
         for _ in 0..MAX_FRAMES_PER_QUERY {
             let payload = self.recv().await?;
             if payload.is_empty() {
@@ -113,20 +147,56 @@ impl<T: Transport> AdnlConnection<T> {
                     answer,
                 }) if answered == query_id => return Ok(answer),
                 Ok(_) => continue, // some other message; keep waiting for this answer
-                Err(_) => return Err(AdnlError::Malformed),
+                // A frame that decrypted and passed its checksum but names a message this
+                // crate does not model. ADNL has more message kinds than the two read
+                // here, so this is a gap in what is decoded rather than a broken stream,
+                // and it is skipped like any other message that is not the answer. The
+                // frame was read whole, so the stream position is still known.
+                Err(_) => undecodable += 1,
             }
+        }
+        if undecodable == MAX_FRAMES_PER_QUERY {
+            return Err(AdnlError::Malformed);
         }
         Err(AdnlError::NoAnswer)
     }
 
+    /// Seals one frame and puts it on the wire.
+    async fn send(&mut self, nonce: &[u8; 32], message: &[u8]) -> Result<(), AdnlError> {
+        self.check()?;
+        let frame = self.ciphers.seal(nonce, message);
+        // Sealing has already advanced the send keystream over the whole frame, so a
+        // write that stops partway leaves the server reading the rest of one frame out of
+        // the front of the next.
+        self.intact = false;
+        self.transport.write_all(&frame).await?;
+        self.intact = true;
+        Ok(())
+    }
+
     /// Reads one frame: the length prefix, then the body, decrypted and checked.
     async fn recv(&mut self) -> Result<Vec<u8>, AdnlError> {
+        self.check()?;
+        // Both reads and `open_len` are inside the window. A partial read of the prefix
+        // loses bytes the socket will not give back, and `open_len` moves the receive
+        // keystream by four bytes that only the body read can consume.
+        self.intact = false;
         let mut prefix = [0u8; 4];
         self.transport.read_exact(&mut prefix).await?;
         let len = self.ciphers.open_len(&mut prefix)?;
         let mut body = vec![0u8; len];
         self.transport.read_exact(&mut body).await?;
-        Ok(self.ciphers.open_body(&mut body)?)
+        let payload = self.ciphers.open_body(&mut body)?;
+        self.intact = true;
+        Ok(payload)
+    }
+
+    fn check(&self) -> Result<(), AdnlError> {
+        if self.intact {
+            Ok(())
+        } else {
+            Err(AdnlError::Desynchronized)
+        }
     }
 }
 

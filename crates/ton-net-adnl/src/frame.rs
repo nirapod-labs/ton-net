@@ -24,10 +24,16 @@ use crate::{sha256, Aes256Ctr};
 /// empty payload. A shorter length means the stream is desynchronized.
 const MIN_FRAME: usize = 64;
 
-/// The largest frame body accepted, one mebibyte. A larger length is read as a
-/// desynchronized stream (a wrong handshake decrypts the length prefix to garbage)
-/// rather than a real frame, and is refused before any allocation follows it.
-const MAX_FRAME: usize = 1 << 20;
+/// The largest frame body accepted, which is the protocol's own ceiling. A larger length
+/// is read as a desynchronized stream (a wrong handshake decrypts the length prefix to
+/// garbage) rather than a real frame, and is refused before any allocation follows it.
+///
+/// The server decides how much goes in one answer, and a measured mainnet block-proof
+/// reply is already 713 kB, so a bound set from what replies look like today would refuse
+/// honest traffic on the day a server sends a few more links. The bounds that limit work
+/// belong where the work is: `ton-net` caps the links, the proof sizes and the signature
+/// counts it will check, all of them well under this.
+const MAX_FRAME: usize = 1 << 24;
 
 /// The two stream ciphers of one ADNL session.
 ///
