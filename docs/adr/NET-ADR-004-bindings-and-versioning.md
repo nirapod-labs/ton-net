@@ -152,7 +152,7 @@ TON-specific (see NET-ADR-001).
 
 ## Custody and security
 
-Custody gate: pass (no keys). Binding note: the FFI boundary must not widen the
+The library holds no user keys. Binding note: the FFI boundary must not widen the
 key surface; the exposed API carries bytes and typed results, never a user key,
 in every language.
 

@@ -128,10 +128,10 @@ format.
 
 ## Custody and security
 
-Custody gate: pass (no keys). The dependency choice is itself a security decision:
-constant-time, audited-where-possible, memory-safe pure-Rust crypto, no C or
-assembly, `zeroize` on ephemeral secrets, and one audited copy of each primitive
-rather than two.
+The library holds no user keys. The dependency choice is itself a security
+decision: constant-time, audited-where-possible, memory-safe pure-Rust crypto, no
+C or assembly, `zeroize` on ephemeral secrets, and one audited copy of each
+primitive rather than two.
 
 ## Verification
 

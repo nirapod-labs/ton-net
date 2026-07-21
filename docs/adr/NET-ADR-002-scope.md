@@ -107,7 +107,8 @@ chain-agnostic core.
 
 ## Custody and security
 
-Custody gate: **pass, structurally** (NET-ADR-001). No user keys, ever.
+**No user keys, ever**, and that holds structurally rather than by policy
+(NET-ADR-001).
 
 Two properties are load-bearing and first-class:
 

@@ -90,8 +90,8 @@ TON-specific (see NET-ADR-001). The TVM is TON's virtual machine.
 
 ## Custody and security
 
-Custody gate: pass (no keys). The TVM executes read-only get-methods over proven,
-read-only state; it does not sign, send, or hold anything. Its security surface is
+The TVM holds no keys and executes read-only get-methods over proven, read-only
+state; it does not sign, send, or hold anything. Its security surface is
 execution fidelity (a wrong result misleads a consumer) and resource bounds (gas
 and step limits against a hostile contract), both covered by tests.
 

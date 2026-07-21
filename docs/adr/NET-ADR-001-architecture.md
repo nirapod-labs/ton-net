@@ -97,7 +97,7 @@ Nirapod product code, not to a dedicated TON library.
 
 ## Custody and security
 
-Custody gate: **pass, structurally.** The only keys the library holds are the
+**Structurally, no user key can live here.** The only keys the library holds are
 ephemeral x25519 keys for an ADNL handshake and, optionally, a throwaway client
 ADNL identity. Neither is a user wallet key; both are generated per session and
 discarded. The library moves and verifies bytes; it does not sign user

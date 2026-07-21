@@ -191,11 +191,11 @@ Failure paths:
 - **Amplification and flooding** -> bounded response buffers, a capped in-flight
   window, unsolicited datagrams dropped.
 
-Custody and security, the gate result:
+Custody and security:
 
-- **Custody gate: pass, structurally** (NET-ADR-001). Only ephemeral network keys;
-  no user key anywhere; the type surface gives one no home. `sendMessage`
-  broadcasts already-signed bytes.
+- **Structurally, no user key can live here** (NET-ADR-001). Only ephemeral
+  network keys; no user key anywhere; the type surface gives one no home.
+  `sendMessage` broadcasts already-signed bytes.
 - **Primary hardening targets:** the TL deserializer (total, bounded, fuzzed), the
   cell-hash and Merkle-proof verification (a wrong level mask or a skipped check
   silently breaks the trust guarantee), the block-sync signature check, and the
