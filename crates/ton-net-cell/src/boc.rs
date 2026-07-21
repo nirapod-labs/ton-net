@@ -1,5 +1,7 @@
 //! The bag of cells: the serialized form of a cell graph.
 
+use std::collections::{HashMap, HashSet};
+
 use crate::cell::{Cell, CellType};
 use crate::error::CellError;
 
@@ -28,6 +30,34 @@ struct RawCell {
     refs: Vec<usize>,
     cell_type: CellType,
     level_mask: u8,
+}
+
+/// The CRC-32C (Castagnoli) checksum a bag of cells may carry, reflected form.
+fn crc32c(bytes: &[u8]) -> u32 {
+    let mut crc = 0xFFFF_FFFFu32;
+    for &byte in bytes {
+        crc ^= u32::from(byte);
+        for _ in 0..8 {
+            crc = if crc & 1 != 0 {
+                (crc >> 1) ^ 0x82F6_3B78
+            } else {
+                crc >> 1
+            };
+        }
+    }
+    !crc
+}
+
+/// The number of bytes needed to hold `value`, at least one.
+fn byte_width(value: u64) -> usize {
+    let bits = u64::BITS - value.leading_zeros();
+    (bits.div_ceil(8)).max(1) as usize
+}
+
+/// Appends the low `width` bytes of `value`, big-endian.
+fn push_be(out: &mut Vec<u8>, value: u64, width: usize) {
+    let bytes = value.to_be_bytes();
+    out.extend_from_slice(&bytes[8 - width..]);
 }
 
 /// A reader that returns an error rather than reading past the end.
@@ -139,6 +169,7 @@ pub fn parse_boc(bytes: &[u8]) -> Result<Vec<Cell>, CellError> {
 
     let flags = reader.byte()?;
     let has_index = flags & 0x80 != 0;
+    let has_checksum = flags & 0x40 != 0;
     let ref_size = usize::from(flags & 0x07);
     let offset_size = usize::from(reader.byte()?);
     if !(1..=4).contains(&ref_size) {
@@ -146,6 +177,17 @@ pub fn parse_boc(bytes: &[u8]) -> Result<Vec<Cell>, CellError> {
     }
     if !(1..=8).contains(&offset_size) {
         return Err(CellError::Header("offset size"));
+    }
+
+    // A checksum, when present, trails the whole bag and covers everything before it.
+    // Checking it first means corrupt bytes are rejected before anything is built.
+    if has_checksum {
+        let split = bytes.len().checked_sub(4).ok_or(CellError::Truncated)?;
+        let (body, tail) = bytes.split_at(split);
+        let stored = u32::from_le_bytes([tail[0], tail[1], tail[2], tail[3]]);
+        if crc32c(body) != stored {
+            return Err(CellError::Checksum);
+        }
     }
 
     let count = reader.uint(ref_size)? as usize;
@@ -245,7 +287,7 @@ pub fn parse_boc(bytes: &[u8]) -> Result<Vec<Cell>, CellError> {
             refs,
             raw_cell.cell_type,
             raw_cell.level_mask,
-        ));
+        )?);
     }
 
     root_list
@@ -257,6 +299,137 @@ pub fn parse_boc(bytes: &[u8]) -> Result<Vec<Cell>, CellError> {
                 .ok_or(CellError::BadReference)
         })
         .collect()
+}
+
+/// Orders every cell reachable from `roots` so each comes before the cells it
+/// references, which is the order a bag of cells stores them in.
+///
+/// Cells are shared by representation hash, so a subtree reached by two parents is
+/// stored once. Reverse post-order depth-first search gives the ordering, and the walk
+/// is iterative so a deep graph cannot overflow the stack.
+fn topological(roots: &[Cell]) -> Result<(Vec<Cell>, Vec<Vec<usize>>), CellError> {
+    enum Step {
+        Visit(Cell),
+        Emit(Cell),
+    }
+
+    let mut seen: HashSet<[u8; 32]> = HashSet::new();
+    let mut order: Vec<Cell> = Vec::new();
+    let mut stack: Vec<Step> = roots.iter().rev().map(|c| Step::Visit(c.clone())).collect();
+
+    while let Some(step) = stack.pop() {
+        match step {
+            Step::Visit(cell) => {
+                if !seen.insert(*cell.repr_hash()) {
+                    continue;
+                }
+                stack.push(Step::Emit(cell.clone()));
+                for child in cell.refs().iter().rev() {
+                    stack.push(Step::Visit(child.clone()));
+                }
+            }
+            Step::Emit(cell) => order.push(cell),
+        }
+    }
+    order.reverse();
+
+    let index_of = index_of(&order);
+    let mut children = Vec::with_capacity(order.len());
+    for cell in &order {
+        let mut indices = Vec::with_capacity(cell.refs().len());
+        for child in cell.refs() {
+            indices.push(
+                index_of
+                    .get(child.repr_hash())
+                    .copied()
+                    .ok_or(CellError::Malformed("a reference was not reachable"))?,
+            );
+        }
+        children.push(indices);
+    }
+    Ok((order, children))
+}
+
+/// Maps each cell's identity to its position.
+fn index_of(order: &[Cell]) -> HashMap<[u8; 32], usize> {
+    order
+        .iter()
+        .enumerate()
+        .map(|(index, cell)| (*cell.repr_hash(), index))
+        .collect()
+}
+
+/// Serializes a cell graph as a bag of cells, with a checksum.
+///
+/// A cell shared by more than one parent is stored once, keyed by its representation
+/// hash, so the output is as compact as the format allows.
+///
+/// The result is a valid bag of cells but not a canonical one: the format admits several
+/// encodings of the same graph, so a round trip is measured by the cell hashes it
+/// reproduces, not by byte equality with the input.
+///
+/// # Errors
+///
+/// Returns [`CellError::Header`] if `roots` is empty, or [`CellError::TooManyCells`] if
+/// the graph is larger than [`MAX_CELLS`].
+///
+/// # Examples
+///
+/// ```
+/// use ton_net_cell::{parse_boc, serialize_boc};
+///
+/// let bytes = [0xb5, 0xee, 0x9c, 0x72, 0x01, 0x01, 0x01, 0x01, 0x00, 0x03, 0x00,
+///              0x00, 0x02, 0xab];
+/// let roots = parse_boc(&bytes)?;
+/// let again = parse_boc(&serialize_boc(&roots)?)?;
+/// assert_eq!(roots[0].hash(), again[0].hash());
+/// # Ok::<(), ton_net_cell::CellError>(())
+/// ```
+pub fn serialize_boc(roots: &[Cell]) -> Result<Vec<u8>, CellError> {
+    if roots.is_empty() {
+        return Err(CellError::Header("root count"));
+    }
+    let (order, children) = topological(roots)?;
+    let count = order.len();
+    if count > MAX_CELLS {
+        return Err(CellError::TooManyCells { limit: MAX_CELLS });
+    }
+    let positions = index_of(&order);
+    let ref_size = byte_width(count as u64);
+
+    let mut body = Vec::new();
+    for (cell, refs) in order.iter().zip(&children) {
+        let (d1, d2) = cell.stored_descriptors();
+        body.push(d1);
+        body.push(d2);
+        body.extend_from_slice(cell.data());
+        for &index in refs {
+            push_be(&mut body, index as u64, ref_size);
+        }
+    }
+    let offset_size = byte_width(body.len() as u64);
+
+    let mut out = Vec::with_capacity(body.len() + 32);
+    out.extend_from_slice(&MAGIC);
+    // No index, a checksum, and the reference size in the low three bits.
+    out.push(0x40 | ref_size as u8);
+    out.push(offset_size as u8);
+    push_be(&mut out, count as u64, ref_size);
+    push_be(&mut out, roots.len() as u64, ref_size);
+    push_be(&mut out, 0, ref_size); // no absent cells
+    push_be(&mut out, body.len() as u64, offset_size);
+    for root in roots {
+        let index = positions
+            .get(root.repr_hash())
+            .copied()
+            .ok_or(CellError::Malformed("a root was not reachable"))?;
+        push_be(&mut out, index as u64, ref_size);
+    }
+    out.extend_from_slice(&body);
+
+    let checksum = crc32c(&out);
+    out.extend_from_slice(&checksum.to_le_bytes());
+    Ok(out)
 }
 
 #[cfg(test)]

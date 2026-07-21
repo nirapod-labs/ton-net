@@ -7,8 +7,17 @@
 //! meaning, which is what makes Merkle proofs possible.
 //!
 //! [`parse_boc`] reads the serialized form, a bag of cells, into the root cells it
-//! holds. [`Cell::parse`] opens a [`Slice`], a cursor that reads typed values out of a
-//! cell's bits and references.
+//! holds, and [`serialize_boc`] writes one back. [`Cell::parse`] opens a [`Slice`], a
+//! cursor that reads typed values out of a cell's bits and references.
+//!
+//! # Identity and proofs
+//!
+//! A cell's identity is its representation hash, returned by [`Cell::hash`]. The hash is
+//! computed when the cell is built, following the level rules that give exotic cells
+//! their meaning: at level zero a pruned branch answers with the hash of the subtree it
+//! replaced, so a pruned copy of a tree hashes to the same value as the full tree. That
+//! substitution is what makes a Merkle proof checkable, and [`Cell::hash_at`] reaches
+//! the other levels.
 //!
 //! # Untrusted input
 //!
@@ -17,12 +26,6 @@
 //! allocates on a declared size it has not checked: it returns [`CellError`] instead,
 //! and refuses a bag past [`MAX_CELLS`] or [`MAX_DEPTH`], a reference that does not
 //! point strictly forward, or a cell whose descriptors and data disagree.
-//!
-//! # This release
-//!
-//! This release parses and reads. Representation hashing and serialization arrive with
-//! the proof engine, and the cell model here carries the level mask and exotic kinds
-//! they need.
 //!
 //! This is an internal crate of the ton-net client.
 //!
@@ -48,7 +51,7 @@ mod cell;
 mod error;
 mod slice;
 
-pub use boc::{parse_boc, MAX_CELLS, MAX_DEPTH};
+pub use boc::{parse_boc, serialize_boc, MAX_CELLS, MAX_DEPTH};
 pub use cell::{Cell, CellType};
 pub use error::CellError;
 pub use slice::Slice;

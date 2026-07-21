@@ -9,4 +9,6 @@ rust-version.workspace = true
 authors.workspace = true
 
 [dependencies]
+# The representation hash is SHA-256, on the single copy NET-ADR-003 fixes.
+sha2.workspace = true
 thiserror.workspace = true

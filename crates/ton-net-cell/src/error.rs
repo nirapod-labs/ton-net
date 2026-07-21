@@ -19,6 +19,10 @@ pub enum CellError {
     #[error("bag of cells header is invalid: {0}")]
     Header(&'static str),
 
+    /// The bag carried a checksum that its bytes do not match.
+    #[error("bag of cells checksum does not match")]
+    Checksum,
+
     /// A cell referenced a cell that does not exist, or that does not come after it.
     ///
     /// References point strictly forward in a bag of cells, which is also what keeps the
