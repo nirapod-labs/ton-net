@@ -1,3 +1,9 @@
 # `@ton-net/core-win32-x64-msvc`
 
-This is the **x86_64-pc-windows-msvc** binary for `@ton-net/core`
+The prebuilt **win32-x64-msvc** binary for [`ton-net`](https://www.npmjs.com/package/ton-net).
+
+There is no reason to install this package directly. `ton-net` lists it as an
+optional dependency, and npm installs whichever one matches the current platform
+and skips the rest, so installing `ton-net` is the whole story.
+
+Source and issues: <https://github.com/nirapod-labs/ton-net>

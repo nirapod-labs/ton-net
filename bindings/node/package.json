@@ -67,7 +67,7 @@
     "build:debug": "napi build --platform",
     "test": "node test.mjs",
     "check-package": "node scripts/check-package.mjs",
-    "prepack": "node scripts/stage-licenses.mjs"
+    "prepack": "node scripts/prepare-packages.mjs"
   },
   "devDependencies": {
     "@napi-rs/cli": "^3.0.0"

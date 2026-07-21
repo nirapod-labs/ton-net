@@ -68,6 +68,25 @@ if (!existsSync(platforms)) {
         problems.push(`${manifest.name} has no ${name}; run \`npm run prepack\``);
       }
     }
+
+    // The readme napi generates says the binary belongs to the package name
+    // prefix, which is not a package anyone can install: it is a string that
+    // exists only to name these. Someone who lands here while debugging an
+    // install would go looking for it and find nothing.
+    const readme = join(dir, "README.md");
+    if (!existsSync(readme)) {
+      problems.push(`${manifest.name} has no README.md; run \`npm run prepack\``);
+    } else {
+      const text = readFileSync(readme, "utf8");
+      if (!text.includes(`npmjs.com/package/${main.name}`)) {
+        problems.push(`${manifest.name} does not point a reader at ${main.name}`);
+      }
+      if (new RegExp(`\`${main.napi.packageName}\``).test(text)) {
+        problems.push(
+          `${manifest.name} names ${main.napi.packageName} as if it were installable`,
+        );
+      }
+    }
   }
 
   for (const name of optional) {
