@@ -57,3 +57,11 @@ serde_json = "1"
 napi = { version = "3", default-features = false }
 napi-derive = "3"
 napi-build = "2"
+
+# Verifying a proof chain is signature-bound: a cold sync checks over a hundred thousand
+# ed25519 signatures, and the curve and digest crates are roughly two orders of magnitude
+# slower without optimization. Leaving them unoptimized in a debug build turns a two
+# minute network test into one that outlives its own deadlines, so the dependencies are
+# optimized while this workspace's own crates keep their debug builds.
+[profile.dev.package."*"]
+opt-level = 2
