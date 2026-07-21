@@ -70,6 +70,6 @@
     "prepack": "node scripts/prepare-packages.mjs"
   },
   "devDependencies": {
-    "@napi-rs/cli": "^3.0.0"
+    "@napi-rs/cli": "^3.7.4"
   }
 }
