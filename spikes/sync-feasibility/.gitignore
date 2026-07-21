@@ -1,0 +1,3 @@
+# Whole replies of about 700 kB each, reproducible by running the spike. The trimmed
+# fixtures the library tests need are a v0.3.0 deliverable, not these.
+captured/

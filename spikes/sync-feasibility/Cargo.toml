@@ -1,0 +1,23 @@
+[package]
+name = "sync-spike"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+# A standalone project with its own lockfile, excluded from the workspace like the
+# other spikes. It reuses the proven layers, ADNL for the network and the cell engine
+# for the proofs, and hand-rolls exactly what v0.3.0 adds: the block-proof wire types,
+# the block header and validator-set decode, and the signature check.
+[dependencies]
+ton-net-adnl = { path = "../../crates/ton-net-adnl" }
+ton-net-tl = { path = "../../crates/ton-net-tl" }
+ton-net-cell = { path = "../../crates/ton-net-cell" }
+ton-net-block = { path = "../../crates/ton-net-block" }
+# The signature check is built on the curve crate and the digest already in the tree,
+# which is the dependency question this spike exists partly to answer.
+curve25519-dalek = "5"
+sha2 = "0.10"
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+
+[profile.dev]
+opt-level = 1
