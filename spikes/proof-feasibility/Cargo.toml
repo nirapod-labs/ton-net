@@ -1,0 +1,16 @@
+[package]
+name = "proof-spike"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+# A standalone project with its own lockfile, excluded from the workspace like the
+# adnl spike. It reuses the v0.1.0 facade to capture a real account and proof, then
+# hand-rolls the bag-of-cells parse and the cell hashing that v0.2.0 will build.
+[dependencies]
+ton-net = { path = "../../crates/ton-net" }
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+sha2 = "0.10"
+
+[profile.dev]
+opt-level = 1
