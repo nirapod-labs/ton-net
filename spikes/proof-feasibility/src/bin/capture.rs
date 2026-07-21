@@ -1,11 +1,17 @@
-//! Captures an account's state and proof as hex, to pin as a test fixture.
+//! Captures everything one account read returns, to pin as a test fixture.
 //!
 //! The cell and block crates are tested against bytes TON produced rather than bytes
-//! they wrote themselves. This dumps those bytes for one account.
+//! they wrote themselves. A verified read needs the whole matched set, not just the
+//! state: the masterchain block it was read at, the shard block holding the account, the
+//! proof tying the two together, the account-state proof, and the state itself. Captured
+//! separately they would not chain, so they are captured in one call.
 //!
 //! ```text
-//! cargo run --bin capture -- 0:fcb91a3a...
+//! cargo run --bin capture -- -1:5555555555555555555555555555555555555555555555555555555555555555
 //! ```
+//!
+//! The block root hash it prints is the liteserver's own word. Confirm it against a
+//! source independent of that server before pinning it as a trusted anchor.
 
 use ton_net::{Address, Client, Config};
 
@@ -31,12 +37,17 @@ async fn main() {
 
     let parsed = Address::parse(&address).expect("valid address");
     let reported = client.account(&parsed).await.expect("account read");
-    let block = &reported.value().block;
+    let read = reported.value();
 
-    println!("ADDRESS={address}");
-    println!("BLOCK_SEQNO={}", block.seqno);
-    println!("BLOCK_ROOT_HASH={}", hex(&block.root_hash));
-    println!("STATE_LEN={}", reported.value().state.len());
-    println!("STATE_HEX={}", hex(&reported.value().state));
-    println!("PROOF_HEX={}", hex(reported.proof()));
+    println!("# {address}");
+    println!("workchain={}", parsed.workchain());
+    println!("account_id={}", hex(parsed.account_id()));
+    println!("block_seqno={}", read.block.seqno);
+    println!("block_root_hash={}", hex(&read.block.root_hash));
+    println!("shard_block_seqno={}", read.shard_block.seqno);
+    println!("shard_block_shard={:016x}", read.shard_block.shard);
+    println!("shard_block_root_hash={}", hex(&read.shard_block.root_hash));
+    println!("shard_proof={}", hex(&read.shard_proof));
+    println!("proof={}", hex(reported.proof()));
+    println!("state={}", hex(&read.state));
 }

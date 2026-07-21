@@ -83,8 +83,9 @@ impl<T: Transport> LiteClient<T> {
     /// Reads an account's raw state at a given masterchain block.
     ///
     /// `block` is usually the head from [`masterchain_info`](Self::masterchain_info).
-    /// The account-state proof the server sends is kept on the returned wrapper, still
-    /// unchecked.
+    /// The account-state proof the server sends is kept on the returned wrapper, and the
+    /// shard proof that links the account's shard block to `block` is kept on the state.
+    /// Neither is checked here.
     ///
     /// # Errors
     ///
@@ -105,6 +106,8 @@ impl<T: Transport> LiteClient<T> {
         Ok(ServerReported::new(
             AccountState {
                 block: block_id(state.id),
+                shard_block: block_id(state.shardblk),
+                shard_proof: state.shard_proof,
                 state: state.state,
             },
             state.proof,

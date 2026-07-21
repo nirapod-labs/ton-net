@@ -76,13 +76,26 @@ pub struct MasterchainInfo {
 
 /// An account's state as a liteserver reports it.
 ///
-/// The state is raw bag-of-cells bytes. This release does not parse the cell tree into a
-/// balance, code, and data, nor check the proof the server sent alongside it.
+/// The state is raw bag-of-cells bytes. This client does not parse the cell tree into a
+/// balance, code, and data, nor check the proofs the server sent alongside it.
+///
+/// Two proofs come back for one read, and they chain. The account-state proof, kept on
+/// the [`ServerReported`] wrapper, roots at [`shard_block`](Self::shard_block). The shard
+/// proof kept here roots at [`block`](Self::block) and is what ties that shard block to
+/// the masterchain, so a reader with a trusted masterchain hash can follow one to the
+/// other. A masterchain account is already in the masterchain block, so its shard proof
+/// is empty and its shard block is the block it was read at.
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct AccountState {
     /// The masterchain block the state was read at.
     pub block: BlockIdExt,
+    /// The shard block holding the account, equal to [`block`](Self::block) for a
+    /// masterchain account.
+    pub shard_block: BlockIdExt,
+    /// The proof tying the shard block to the masterchain block, as raw bag-of-cells
+    /// bytes. Empty for a masterchain account.
+    pub shard_proof: Vec<u8>,
     /// The account state, as raw bag-of-cells bytes. Empty for an account that does not
     /// exist at the block.
     pub state: Vec<u8>,
