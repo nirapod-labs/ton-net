@@ -6,10 +6,13 @@ language.
 > Working name. The launch name is an open decision (see
 > [docs/roadmap.md](docs/roadmap.md)).
 
-ton-net speaks TON's own protocols directly: TL, ADNL over TCP and UDP, the
-Kademlia DHT, the liteserver query layer, Merkle-proof verification, key-block
-sync, and a TVM for local execution. One correct implementation, exposed to
-Node, browsers, Swift, Kotlin, Dart, and Python through thin bindings.
+ton-net speaks TON's own protocols directly, with no HTTP indexer in the path.
+Today that is TL, ADNL over TCP, the liteserver query layer, Merkle-proof
+verification, and key-block sync: enough to read an account and prove it against
+a block the client walked to itself. ADNL over UDP, the Kademlia DHT, and a TVM
+for local execution are the milestones still ahead. One correct implementation,
+exposed to Node, browsers, Swift, Kotlin, Dart, and Python through thin
+bindings.
 
 ---
 
@@ -42,20 +45,23 @@ TON the same correct way, without an intermediary.
 
 ## What it does
 
-The full protocol surface a TON client needs, nothing node-only:
+The full protocol surface a TON client needs, nothing node-only. Working where
+unmarked; the rest carries the release it lands in.
 
 - **TL codec** with CRC32-IEEE constructor tags, boxed and bare types.
-- **ADNL** over TCP (liteservers) and UDP (peer-to-peer), with channels.
-- **DHT**, read and write: resolve an ADNL address to an IP, publish a record.
-- **Liteserver queries**: account state, transactions, config, blocks, run a
-  get-method, send a message.
+- **ADNL** over TCP (liteservers). UDP, peer-to-peer with channels, in v0.5.0.
+- **DHT**, read and write: resolve an ADNL address to an IP, publish a record
+  (v0.5.0).
+- **Liteserver queries**: account state now; transactions, config, blocks, run a
+  get-method and send a message across v0.4.0 to v0.7.0.
 - **Proof verification**: BoC and exotic-cell hashing, the TL-B for the block
   structures, and the `check_*_proof` routines, so a liteserver answer is
   verified rather than trusted.
 - **Block sync**: a pinned key-block anchor, `getBlockProof` link-walking, and a
   two-thirds validator-signature check that anchors the current block.
 - **TVM**: run a get-method locally against proven code and data, so a computed
-  result is trustless, not server-reported.
+  result is trustless, not server-reported (v0.7.0). Until it lands a TON
+  balance is a proven read and a jetton balance is not.
 
 Out of scope for v1.0.0 and deliberately so: RLDP, overlays, catchain, TON
 Storage, and TON Sites. These are node-level or separate products. See
@@ -92,18 +98,42 @@ The short version:
   transport it can.
 - **Proofs are not optional.** A complete client verifies what a liteserver
   returns. A response for an account carries Merkle proofs; ton-net checks them
-  against a validator-signature-anchored block, so the client trusts the server
-  for nothing on the read path.
+  against a validator-signature-anchored block, so nothing the server says about
+  the read is taken on its word.
 
 ---
 
 ## Status
 
-Design stage. Every wire fact in the design is drawn from primary sources: the
-`ton_api.tl` and `lite_api.tl` schemas, the C++ reference in `ton-blockchain/ton`,
-and the pytoniq light client. The CRC32 constructor-tag mechanism, the ADNL
-handshake byte layouts, the DHT parameters, and the liteserver method set are
-verified against the reference, not inferred.
+Working, on mainnet, for the read path. A client connects to a liteserver over
+ADNL, walks from the key block its config pins to the network's current head
+checking a validator signature set at every link, and reads an account proved
+against the block it arrived at. `v0.1.0` and `v0.2.0` are tagged.
+
+What a first walk costs, measured against mainnet in July 2026: 1244 links over
+78 replies, about 52 MB and a minute and a half. A client that saves the block
+it ended on and hands it back next time pays one link instead.
+
+Every wire fact is drawn from primary sources: the `ton_api.tl` and
+`lite_api.tl` schemas, the C++ reference in `ton-blockchain/ton`, and the
+pytoniq light client. The CRC32 constructor-tag mechanism, the ADNL handshake
+byte layouts, the DHT parameters, and the liteserver method set are verified
+against the reference, not inferred.
+
+### What is still taken on trust
+
+Two things, and they are the whole list:
+
+- **The block the config pins.** A walk has to start somewhere. It comes from
+  the same file that decides which network the client is on, it is one visible
+  block identity, and a caller who does not want to trust that file can pass
+  their own starting block instead.
+- **The local clock.** A proof establishes that a block is real and was
+  committed by the validators, and says nothing at all about when it was handed
+  over. A server replaying a genuine chain from last year passes every other
+  check in the library. The clock is what catches it, so a client whose clock is
+  wrong has a weaker freshness guarantee than one whose clock is right; the
+  library reports a clock far enough behind rather than quietly passing.
 
 ---
 

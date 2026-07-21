@@ -139,9 +139,12 @@ sync crosses 607 of them. The set to use is the one the source key block names.
 - A cold sync costs a measured 52.6 MB and 154 seconds, and grows by about 800 key blocks
   a year while the published pinned block stands still. Refreshing the bundled config
   snapshot becomes part of cutting a release rather than housekeeping.
-- The cost is paid at connect, where a caller expects setup cost, rather than inside a
-  read. A caller who does not persist the returned anchor pays it again on every start,
-  which the documentation has to say plainly.
+- The cost is paid on the first read rather than at connect. Connect opens a channel and
+  proves nothing; the walk runs when a read needs a block to prove against. This reverses
+  what an earlier draft of this record proposed, on the grounds that a caller who wants
+  only an unproven read, or who is handing in their own anchor, should not be made to pay
+  for a walk they will not use. A caller who does not persist the returned anchor pays
+  the walk again on every start, which the documentation has to say plainly, and does.
 - Supporting two signed forms is not optional, and a third arriving is likely: one
   arrived inside the span this milestone has to cross. Refusing an unknown form by name
   makes that a clean failure that tells a caller the library is behind the network,

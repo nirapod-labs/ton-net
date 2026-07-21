@@ -82,6 +82,13 @@ jobs:
         run: npm install
       - name: clippy
         run: cargo clippy -p ton-net-node --all-targets -- -D warnings
+      # The binding is a workspace member but not a default one, so the hermetic job's
+      # doc gate does not reach it. Without this its broken-link lint never runs, on the
+      # one crate whose doc comments are copied verbatim into the published index.d.ts.
+      - name: docs
+        env:
+          RUSTDOCFLAGS: -D warnings
+        run: cargo doc --no-deps -p ton-net-node
       - name: build addon
         working-directory: bindings/node
         run: npx napi build --platform
