@@ -66,13 +66,28 @@ on native and omits it on wasm, so one async surface maps to each host's idiom.
 
 Adopt the matrix-rust-sdk model, which fits a multi-registry reality best:
 
-- **The Rust crates move in lockstep**, one shared version, enforced by
-  cargo-release `shared-version = true`. This is the version of the library.
+- **The Rust crates move in lockstep**, one shared version. This is the version of
+  the library. An earlier draft of this record named cargo-release as the tool;
+  release-plz drives it instead, which is cargo-release plus the part that was
+  going to be written by hand anyway: it reads the conventional commits, opens a
+  release pull request carrying the version bump and the changelog for review, and
+  publishes in dependency order on merge.
 - **Each published language artifact carries its own package version** in its own
   registry (npm, PyPI, Swift Package Manager, Maven, pub.dev), because those
   ecosystems have their own conventions and cadences. The mapping from a library
   version to each artifact version is recorded, the way libsignal enforces and
   matrix documents.
+
+  In practice that mapping is the identity, and deliberately so: the number is the
+  same everywhere and only the channel differs, an npm dist-tag against a
+  crates.io prerelease suffix. Keeping it that way means "which ton-net is this"
+  has one answer. Where a registry will not accept the same string, PyPI spells a
+  prerelease `0.3.0a1` rather than `0.3.0-alpha.1`, the mapping stops being the
+  identity for that registry alone.
+
+  No release tool spans this. release-plz moves the Cargo side and napi moves the
+  npm side, and neither reads the other, so the stamping and the check that they
+  agree are this project's own and run in CI.
 - SemVer is measured against the **observable API and the wire behavior**. A wire
   format change or a proof-verification behavior change is breaking. Internal crate
   refactors are not. The library stays `0.x` until the API and the proof/sync

@@ -1,0 +1,122 @@
+# Changelog
+
+Notable changes to ton-net. The format follows
+[Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the versioning is
+described in [the roadmap](docs/roadmap.md): the Rust crates move in lockstep on
+one library version, and SemVer is measured against the observable API and the
+wire behavior, so a proof-verification change is breaking and an internal refactor
+is not.
+
+Nothing has been published to a registry yet. Every version below is a git tag.
+The first ordinary registry release is 0.3.0, the point at which a read no longer
+depends on a block hash the caller has to supply.
+
+## [Unreleased]
+
+Everything for 0.3.0. The heading moves when the release is cut.
+
+### Added
+
+- **Block sync.** A client walks from the key block the network configuration
+  pins to the current masterchain head, checking a two-thirds validator signature
+  set at every link, and reads an account proved against the block it arrived at.
+  A read is now trust-minimized end to end: nothing is trusted but the pinned
+  block and the local clock.
+- `Client::sync` walks the chain forward and reports what it cost.
+- `Client::connect_from` resumes from a key block proven on an earlier run, which
+  turns a first walk of over a thousand links into a single one. `Client::anchor`
+  returns the block to save.
+- `Client::account_verified` returns `Verified<Account>`, a type that cannot be
+  constructed outside the crate without a proof having checked out.
+- `ton_net::verify_account` and `BlockIdExt::new`, so a caller can verify a read
+  and name an out-of-band anchor without going through the facade.
+- The Node binding carries an anchor in both directions and exposes
+  `accountVerified`, `accountState` and `verifyAccount`.
+- Validator signature checking in both of the forms mainnet uses, including the
+  Simplex vote, whose candidate hash is now bound to the block a link claims.
+
+### Fixed
+
+Three of these are soundness failures in proof verification. They were found and
+fixed before any version reached a registry, so no published release ever carried
+them.
+
+- **A proof could deny that an account exists.** A pruned account dictionary and
+  an empty one both begin with a clear bit, so a server could withhold the
+  dictionary and have the answer read as a proved absence. The two are now
+  distinguished, and a withheld answer is refused.
+- **A proof could hide what it answered for.** The root check tested for an exotic
+  cell but not for a level mask, and a level-1 pruned branch answers for the hash
+  it replaced, so a substituted account body verified against the block. The mask
+  is now checked.
+- **An exotic cell was not held to its own shape.** A pruned branch could carry
+  references, and a cell could claim more references than the model allows. Both
+  are refused, along with a pruned branch whose length disagrees with its level
+  mask.
+- A byte-aligned cell had two encodings, one of which produced a hash no other
+  implementation computes.
+- A degenerate key exchange is refused. A low-order server key decompresses fine
+  but drives the shared secret to zero, which would have made the session
+  readable.
+- A connection whose read was cancelled mid-frame is marked broken rather than
+  reused. The stream cipher had already advanced, so every later frame would have
+  decrypted to noise.
+- A sync that a server calls complete is checked against the block it was asked
+  to reach, rather than believed.
+- A sync is bounded by elapsed time as well as by rounds, and a local clock behind
+  the chain is reported instead of quietly passing.
+- The maximum frame size matches the protocol rather than sitting below it.
+- An address carries its tag rather than assuming one, and base64 input is
+  required to be canonical.
+- Error kinds report where a failure came from, so a decode failure inside a proof
+  no longer arrives as something softer than a proof failure.
+- A thrown error in the Node binding carries a stable code prefix a caller can
+  branch on.
+
+### Changed
+
+- A cold sync got about a third faster by stopping once the signature weight
+  passes the threshold, rather than verifying the rest of an honest set.
+- The bound on cell count is set by what a cell costs in memory rather than by
+  what the format permits.
+
+### Security
+
+The three soundness failures above compose. A liteserver that exploited all of
+them could deny an account exists, replace a contract's code and data with
+placeholders, and fill those placeholders with cells of its own, and the result
+would have been handed to a caller as verified. Each now has a regression test,
+and each test was confirmed to fail with its guard removed.
+
+## [0.2.0] - 2026-07-21
+
+The cell and proof engine.
+
+### Added
+
+- The TON cell model: representation hashing, level masks, exotic cells, and the
+  bag-of-cells codec in both directions.
+- The TL-B for TON's block and account structures, decoded from cells.
+- Merkle proof verification, and `verify_account` for a read checked against a
+  masterchain block hash the caller supplies.
+- `Verified<T>`, which names the anchor a value was proved against.
+- A Node binding for the verified read.
+
+## [0.1.0] - 2026-07-21
+
+The foundation: a liteserver read over TON's own protocols, from Node.
+
+### Added
+
+- A TL codec over `tl-proto` with CRC32-IEEE constructor tags.
+- ADNL over TCP: the handshake, session key derivation, and encrypted stream
+  framing, sans-I/O over a transport seam.
+- The liteserver query layer, and the network configuration loader.
+- A napi-rs Node binding.
+
+Reads at this version are the server's unproven word, and are marked in the API
+with a `ServerReported` type.
+
+[Unreleased]: https://github.com/nirapod-labs/ton-net/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/nirapod-labs/ton-net/compare/v0.1.0...v0.2.0
+[0.1.0]: https://github.com/nirapod-labs/ton-net/releases/tag/v0.1.0
