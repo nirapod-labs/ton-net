@@ -144,5 +144,31 @@
         "key": "G6cNAr6wXBBByWDzddEWP5xMFsAcp6y13fXA8Q7EJlM="
       }
     }
-  ]
+  ],
+  "validator": {
+    "@type": "validator.config.global",
+    "zero_state": {
+      "workchain": -1,
+      "shard": -9223372036854775808,
+      "seqno": 0,
+      "root_hash": "F6OpKZKqvqeFp6CQmFomXNMfMj2EnaUSOXN+Mh+wVWk=",
+      "file_hash": "XplPz01CXAps5qeSWUtxcyBfdAo5zVb1N979KLSKD24="
+    },
+    "init_block": {
+      "workchain": -1,
+      "shard": -9223372036854775808,
+      "seqno": 46894135,
+      "root_hash": "MEjmmhLPlG68mbTPnKYcP/Sz/MiMQBV2OsASBOzBv58=",
+      "file_hash": "u9rAtFQ+kUFEnOs3w8Y7punMTiyQTXf1bRfkSs8dG+0="
+    },
+    "hardforks": [
+      {
+        "workchain": -1,
+        "shard": -9223372036854775808,
+        "seqno": 8536841,
+        "root_hash": "08Kpc9XxrMKC6BF/FeNHPS3MEL1/Vi/fQU/C9ELUrkc=",
+        "file_hash": "t/9VBPODF7Zdh4nsnA49dprO69nQNMqYL+zk5bCjV/8="
+      }
+    ]
+  }
 }
