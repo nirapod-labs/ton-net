@@ -13,8 +13,8 @@
 //! alignment: the balance becomes noise and the status reads as frozen. Both an account
 //! with storage extra and one without are pinned here so the ambiguity stays closed.
 
-use ton_net_block::{Account, AccountStatus, Block, BlockError, Coins, Lookup, ShardState};
-use ton_net_cell::{parse_boc, Cell};
+use ton_net_block::{proof, Account, AccountStatus, Block, BlockError, Coins, Lookup, ShardState};
+use ton_net_cell::parse_boc;
 
 /// A basechain account with a balance and no code: the zero address.
 const UNINIT_ACCOUNT: &str = include_str!("fixtures/uninit-account.hex");
@@ -27,6 +27,13 @@ const STORAGE_EXTRA_ACCOUNT: &str = include_str!("fixtures/storage-extra-account
 
 /// The proof a liteserver returned for the config contract.
 const ACCOUNT_PROOF: &str = include_str!("fixtures/account-proof.hex");
+
+/// The root hash of the masterchain block that proof was read at.
+///
+/// `ton-net-cell` pins the same hash, where recomputing it from the pruned tree is what
+/// shows the level rules are right. Here it is the anchor the proof has to root at before
+/// anything below it is read.
+const PROOF_BLOCK_HASH: &str = "2f138b6a0e45ec466c1f44326f7d7d638c5f8514786f67160aa2fe2dd6ae0323";
 
 /// The balance an independent public API reported for the zero address.
 const UNINIT_BALANCE: u128 = 6_910_657_721_334;
@@ -119,35 +126,46 @@ fn an_active_account_decodes_to_the_code_and_data_served_for_it() {
     assert_eq!(data.hash(), expected_data[0].hash(), "data hash");
 }
 
-/// The tree a Merkle proof covers, for the root that reads as `expected`.
-fn covered<T>(roots: &[Cell], read: impl Fn(&Cell) -> Result<T, BlockError>) -> Option<T> {
-    roots
-        .iter()
-        .filter_map(|root| root.reference(0))
-        .find_map(|tree| read(tree).ok())
+/// The shard state the proof covers, reached through the checked chain.
+///
+/// Picking whichever root happens to decode would read a proof without ever requiring it
+/// to root anywhere, which is the mistake the engine exists to prevent. The state below is
+/// reached the same way a verified read reaches it: from the pinned block hash, through
+/// the block's state update, to the proof that covers that state.
+fn proved_state() -> ShardState {
+    let anchor: [u8; 32] = unhex(PROOF_BLOCK_HASH).try_into().expect("32 bytes");
+    let roots = parse_boc(&unhex(ACCOUNT_PROOF)).expect("the proof parses");
+    let state_hash =
+        proof::verify_block_state(&roots, &anchor).expect("a root covers the pinned block");
+    proof::verify_shard_state(&roots, &state_hash).expect("a root covers the state it leaves")
 }
 
 #[test]
 fn the_proof_walks_from_the_block_to_the_state_it_leaves() {
+    let anchor: [u8; 32] = unhex(PROOF_BLOCK_HASH).try_into().expect("32 bytes");
     let roots = parse_boc(&unhex(ACCOUNT_PROOF)).expect("the proof parses");
 
-    let block = covered(&roots, Block::from_cell).expect("a root covers the block");
-    let state = covered(&roots, ShardState::from_cell).expect("a root covers the shard state");
+    // The block's state update names a state, and a second root in the same bag covers
+    // exactly that state. Both links are checked by recomputing hashes, so a bag whose
+    // halves belong to different blocks does not get this far.
+    let state_hash =
+        proof::verify_block_state(&roots, &anchor).expect("a root covers the pinned block");
+    let state =
+        proof::verify_shard_state(&roots, &state_hash).expect("a root covers the named state");
+    assert_eq!(*state.cell().hash(), state_hash);
 
-    // The block names the state root, and the other proof root covers exactly that tree.
+    // An anchor the bag says nothing about gets no further than the first step.
+    let mut elsewhere = anchor;
+    elsewhere[0] ^= 1;
     assert_eq!(
-        block
-            .new_state_hash()
-            .expect("the block has a state update"),
-        *state.cell().hash(),
-        "the block's state update must name the state the proof covers"
+        proof::verify_block_state(&roots, &elsewhere),
+        Err(BlockError::ProofNotAnchored)
     );
 }
 
 #[test]
 fn the_accounts_dictionary_finds_the_account_the_proof_covers() {
-    let roots = parse_boc(&unhex(ACCOUNT_PROOF)).expect("the proof parses");
-    let state = covered(&roots, ShardState::from_cell).expect("a root covers the shard state");
+    let state = proved_state();
 
     let entry = state
         .account(&CONFIG_ACCOUNT_ID)
@@ -170,12 +188,12 @@ fn the_accounts_dictionary_finds_the_account_the_proof_covers() {
 }
 
 #[test]
-fn an_account_the_proof_does_not_cover_is_not_found() {
-    let roots = parse_boc(&unhex(ACCOUNT_PROOF)).expect("the proof parses");
-    let state = covered(&roots, ShardState::from_cell).expect("a root covers the shard state");
+fn an_account_the_proof_does_not_cover_reads_as_pruned_not_absent() {
+    let state = proved_state();
 
     // A proof prunes every branch but the one it covers, so a walk toward any other
-    // account runs into a placeholder and stops there, having learned nothing.
+    // account runs into a placeholder and stops there, having learned nothing. Reporting
+    // that as absence would let a server deny an account by refusing to prove anything.
     assert_eq!(
         state.account(&[0xAA; 32]).expect("the dictionary reads"),
         Lookup::Pruned
