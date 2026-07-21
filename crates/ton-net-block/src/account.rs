@@ -5,6 +5,12 @@ use ton_net_cell::{parse_boc, Cell, Slice};
 use crate::coins::Coins;
 use crate::error::BlockError;
 
+/// The `StorageExtraInfo` tag for an account carrying no storage extra.
+const STORAGE_EXTRA_NONE: u64 = 0b000;
+
+/// The `StorageExtraInfo` tag for an account carrying a dictionary hash.
+const STORAGE_EXTRA_INFO: u64 = 0b001;
+
 /// An account's status, with the contents that only some statuses have.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
@@ -175,14 +181,24 @@ fn skip_anycast(slice: &mut Slice<'_>) -> Result<(), BlockError> {
 
 /// Steps over the storage statistics that sit between the address and the balance.
 ///
-/// `StorageUsed` carries three counters, cells, bits, and public cells. The public-cells
-/// counter has come and gone across TON versions, and getting it wrong shifts everything
-/// after it: a decode without it puts `last_paid` decades in the past and the balance
-/// becomes noise. Mainnet still carries it, checked against a real account whose balance
-/// an independent source reports.
+/// `StorageUsed` is two counters, cells and bits, then `StorageExtraInfo`: a three-bit
+/// tag that is either `none` or carries a 256-bit dictionary hash. An older layout put a
+/// third counter, public cells, where the tag now sits.
+///
+/// The two are indistinguishable on most accounts, which makes this the wrong thing to
+/// conclude from one sample. A `VarUInteger 7` holding zero is a three-bit length of
+/// zero, and the `none` tag is three zero bits, so every account without storage extra
+/// decodes identically either way. An account that has storage extra tells them apart,
+/// and reading it as a counter there costs 256 bits of alignment: the balance becomes
+/// noise and the status reads as frozen. This layout is checked against such an account,
+/// whose balance an independent source reports.
 fn skip_storage_info(slice: &mut Slice<'_>) -> Result<(), BlockError> {
-    for _ in 0..3 {
-        slice.load_var_uint(7)?;
+    slice.load_var_uint(7)?; // cells
+    slice.load_var_uint(7)?; // bits
+    match slice.load_uint(3)? {
+        STORAGE_EXTRA_NONE => {}
+        STORAGE_EXTRA_INFO => slice.skip_bits(256)?, // dict_hash
+        _ => return Err(BlockError::Malformed("account storage extra")),
     }
     slice.skip_bits(32)?; // last_paid
     if slice.load_bit()? {

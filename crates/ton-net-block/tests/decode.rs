@@ -5,25 +5,34 @@
 //! public API independent of that liteserver, so a decode that drifts is caught rather
 //! than agreeing with itself.
 //!
-//! The storage layout is the reason this matters. `StorageUsed` carries a public-cells
-//! counter that has come and gone across TON versions, and reading it wrongly shifts
-//! every field after it: the balance below was decoded both ways, and only the layout
-//! kept here reproduced the balance the independent source reported.
+//! The storage layout is the reason this matters. Between the address and the balance
+//! sits `StorageExtraInfo`, whose `none` case is three zero bits, exactly what an older
+//! layout's public-cells counter looks like when it holds zero. Most accounts therefore
+//! decode the same either way, so one sample cannot tell the two apart. An account that
+//! does carry storage extra can, and reading it as a counter there loses 256 bits of
+//! alignment: the balance becomes noise and the status reads as frozen. Both an account
+//! with storage extra and one without are pinned here so the ambiguity stays closed.
 
 use ton_net_block::{Account, AccountStatus, Block, BlockError, Coins, ShardState};
 use ton_net_cell::{parse_boc, Cell};
 
-/// A masterchain account with a balance and no code: the zero address.
+/// A basechain account with a balance and no code: the zero address.
 const UNINIT_ACCOUNT: &str = include_str!("fixtures/uninit-account.hex");
 
 /// A basechain account that is deployed and spent down to nothing.
 const ACTIVE_ACCOUNT: &str = include_str!("fixtures/active-account.hex");
+
+/// An account carrying storage extra, which the older storage layout misreads.
+const STORAGE_EXTRA_ACCOUNT: &str = include_str!("fixtures/storage-extra-account.hex");
 
 /// The proof a liteserver returned for the config contract.
 const ACCOUNT_PROOF: &str = include_str!("fixtures/account-proof.hex");
 
 /// The balance an independent public API reported for the zero address.
 const UNINIT_BALANCE: u128 = 6_910_657_721_334;
+
+/// The balance that same API reported for the storage-extra account.
+const STORAGE_EXTRA_BALANCE: u128 = 1_067_259_229_327;
 
 /// The logical time just after that account's last transaction.
 ///
@@ -77,6 +86,18 @@ fn a_balance_renders_as_exact_decimal_digits() {
     let elector = Coins::from_nanotons(1_309_278_166_029_167_874);
     assert!(elector.nanotons() > (1u128 << 53));
     assert_eq!(elector.to_string(), "1309278166029167874");
+}
+
+#[test]
+fn an_account_carrying_storage_extra_decodes_to_its_reported_balance() {
+    // The discriminating case for the storage layout. Read with a third counter in place
+    // of the storage-extra tag, this account's balance comes out as 14772718 and its
+    // status as frozen; the independent source says otherwise.
+    let account = Account::decode(&unhex(STORAGE_EXTRA_ACCOUNT)).expect("the account decodes");
+
+    assert_eq!(account.balance.nanotons(), STORAGE_EXTRA_BALANCE);
+    assert!(account.is_active());
+    assert_ne!(account.balance.nanotons(), 14_772_718);
 }
 
 #[test]
