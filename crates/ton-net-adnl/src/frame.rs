@@ -62,6 +62,12 @@ pub enum FrameError {
     #[error("frame body too short")]
     BodyTooShort,
 
+    /// The payload was larger than one frame carries, so the frame it asked for is one
+    /// no peer following the same ceiling would read. Nothing was sealed and the send
+    /// keystream did not move.
+    #[error("payload of {0} bytes does not fit one frame")]
+    PayloadTooLarge(usize),
+
     /// The frame checksum did not match its nonce and payload, so the frame is corrupt.
     #[error("frame checksum mismatch")]
     Checksum,
@@ -94,16 +100,32 @@ impl SessionCiphers {
     /// The returned bytes are `length ++ nonce ++ payload ++ checksum`, encrypted in
     /// place. The nonce is supplied by the caller so this stays a pure function; a real
     /// session draws a fresh one from a CSPRNG for every frame and never repeats it.
-    pub fn seal(&mut self, nonce: &[u8; 32], payload: &[u8]) -> Vec<u8> {
+    ///
+    /// # Errors
+    ///
+    /// Returns [`FrameError::PayloadTooLarge`] if the frame the payload asks for is past
+    /// the ceiling [`open_len`](Self::open_len) accepts.
+    pub fn seal(&mut self, nonce: &[u8; 32], payload: &[u8]) -> Result<Vec<u8>, FrameError> {
+        // The read side refuses a body outside MIN_FRAME..=MAX_FRAME, so a larger frame
+        // is one no peer holding to the same ceiling would read, and past four gibibytes
+        // the four-byte length wraps and stops describing the body it frames. Refusing
+        // here, before anything is sealed, leaves the send keystream where it was;
+        // refusing after would desynchronize the stream instead.
+        let body = payload.len().saturating_add(MIN_FRAME);
+        if body > MAX_FRAME {
+            return Err(FrameError::PayloadTooLarge(payload.len()));
+        }
+        // The body is at most MAX_FRAME, so its low four bytes carry all of it.
+        let [a, b, c, d, ..] = body.to_le_bytes();
+
         let checksum = sha256(&[nonce, payload]);
-        let len = (32 + payload.len() + 32) as u32;
-        let mut frame = Vec::with_capacity(4 + len as usize);
-        frame.extend_from_slice(&len.to_le_bytes());
+        let mut frame = Vec::with_capacity(4 + body);
+        frame.extend_from_slice(&[a, b, c, d]);
         frame.extend_from_slice(nonce);
         frame.extend_from_slice(payload);
         frame.extend_from_slice(&checksum);
         self.tx.apply_keystream(&mut frame);
-        frame
+        Ok(frame)
     }
 
     /// Decrypts the four-byte length prefix of the next frame and returns the body
@@ -163,7 +185,13 @@ mod tests {
     fn params() -> [u8; 160] {
         let mut params = [0u8; 160];
         for (i, byte) in params.iter_mut().enumerate() {
-            *byte = (i as u8).wrapping_mul(7).wrapping_add(1);
+            #[allow(
+                clippy::cast_possible_truncation,
+                reason = "params is a fixed [u8; 160], so enumerate() bounds i to 0..160, well within u8::MAX"
+            )]
+            {
+                *byte = (i as u8).wrapping_mul(7).wrapping_add(1);
+            }
         }
         params
     }
@@ -178,7 +206,7 @@ mod tests {
         }
     }
 
-    fn open(dec: &mut SessionCiphers, frame: Vec<u8>) -> Result<Vec<u8>, FrameError> {
+    fn open(dec: &mut SessionCiphers, frame: &[u8]) -> Result<Vec<u8>, FrameError> {
         let mut prefix = [0u8; 4];
         prefix.copy_from_slice(&frame[..4]);
         dec.open_len(&mut prefix)?;
@@ -191,8 +219,8 @@ mod tests {
         let params = params();
         let mut client = SessionCiphers::from_params(&params);
         let mut server = peer(&params);
-        let frame = client.seal(&[0x5a; 32], b"masterchain please");
-        assert_eq!(open(&mut server, frame).unwrap(), b"masterchain please");
+        let frame = client.seal(&[0x5a; 32], b"masterchain please").unwrap();
+        assert_eq!(open(&mut server, &frame).unwrap(), b"masterchain please");
     }
 
     #[test]
@@ -200,9 +228,33 @@ mod tests {
         let params = params();
         let mut client = SessionCiphers::from_params(&params);
         let mut server = peer(&params);
-        let frame = client.seal(&[0; 32], b"");
+        let frame = client.seal(&[0; 32], b"").unwrap();
         assert_eq!(frame.len(), 4 + MIN_FRAME);
-        assert_eq!(open(&mut server, frame).unwrap(), b"");
+        assert_eq!(open(&mut server, &frame).unwrap(), b"");
+    }
+
+    #[test]
+    fn a_payload_past_the_ceiling_is_refused_without_moving_the_keystream() {
+        // The read side already refuses a body over MAX_FRAME, so sealing one produces a
+        // frame that no peer holding to the same ceiling would read. What makes the
+        // refusal worth testing is the second half: the keystream must not have moved,
+        // or the next frame would open out of position and the session would be lost.
+        let params = params();
+        let mut client = SessionCiphers::from_params(&params);
+        let mut server = peer(&params);
+
+        let oversized = vec![0u8; MAX_FRAME - MIN_FRAME + 1];
+        assert!(matches!(
+            client.seal(&[7; 32], &oversized),
+            Err(FrameError::PayloadTooLarge(_))
+        ));
+
+        // One byte under is the largest frame that is still readable, so the ceiling is
+        // where it says it is rather than somewhere near it.
+        let largest = vec![0u8; MAX_FRAME - MIN_FRAME];
+        let frame = client.seal(&[7; 32], &largest).unwrap();
+        assert_eq!(frame.len(), 4 + MAX_FRAME);
+        assert_eq!(open(&mut server, &frame).unwrap(), largest);
     }
 
     #[test]
@@ -210,10 +262,10 @@ mod tests {
         let params = params();
         let mut client = SessionCiphers::from_params(&params);
         let mut server = peer(&params);
-        let first = client.seal(&[1; 32], b"first");
-        let second = client.seal(&[2; 32], b"second");
-        assert_eq!(open(&mut server, first).unwrap(), b"first");
-        assert_eq!(open(&mut server, second).unwrap(), b"second");
+        let first = client.seal(&[1; 32], b"first").unwrap();
+        let second = client.seal(&[2; 32], b"second").unwrap();
+        assert_eq!(open(&mut server, &first).unwrap(), b"first");
+        assert_eq!(open(&mut server, &second).unwrap(), b"second");
     }
 
     #[test]
@@ -221,11 +273,11 @@ mod tests {
         let params = params();
         let mut client = SessionCiphers::from_params(&params);
         let mut server = peer(&params);
-        let _first = client.seal(&[1; 32], b"first");
-        let second = client.seal(&[2; 32], b"second");
+        let _first = client.seal(&[1; 32], b"first").unwrap();
+        let second = client.seal(&[2; 32], b"second").unwrap();
         // The server is still at the first frame's keystream position, so the second
         // frame cannot open there.
-        assert!(open(&mut server, second).is_err());
+        assert!(open(&mut server, &second).is_err());
     }
 
     #[test]
@@ -233,10 +285,10 @@ mod tests {
         let params = params();
         let mut client = SessionCiphers::from_params(&params);
         let mut server = peer(&params);
-        let mut frame = client.seal(&[9; 32], b"balance");
+        let mut frame = client.seal(&[9; 32], b"balance").unwrap();
         frame[10] ^= 0x01; // flip a byte inside the body
         assert!(matches!(
-            open(&mut server, frame),
+            open(&mut server, &frame),
             Err(FrameError::Checksum)
         ));
     }
@@ -246,10 +298,10 @@ mod tests {
         let params = params();
         let mut client = SessionCiphers::from_params(&params);
         let mut server = peer(&params);
-        let mut frame = client.seal(&[9; 32], b"x");
+        let mut frame = client.seal(&[9; 32], b"x").unwrap();
         frame[3] ^= 0xff; // flip the top byte of the length into an implausible size
         assert!(matches!(
-            open(&mut server, frame),
+            open(&mut server, &frame),
             Err(FrameError::ImplausibleLength(_))
         ));
     }
@@ -265,7 +317,7 @@ mod tests {
             }
             peer(&other)
         };
-        let frame = client.seal(&[3; 32], b"hello");
-        assert!(open(&mut stranger, frame).is_err());
+        let frame = client.seal(&[3; 32], b"hello").unwrap();
+        assert!(open(&mut stranger, &frame).is_err());
     }
 }

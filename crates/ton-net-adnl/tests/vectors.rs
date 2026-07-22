@@ -10,10 +10,15 @@
 //! of the key, that the encrypted tail decrypts back to the parameters, that a tampered
 //! frame is rejected) live in the crate's unit tests.
 
+use std::fmt::Write as _;
+
 use ton_net_adnl::{client_handshake, HandshakeSecrets};
 
 fn hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|b| format!("{b:02x}")).collect()
+    bytes.iter().fold(String::new(), |mut out, b| {
+        let _ = write!(out, "{b:02x}");
+        out
+    })
 }
 
 fn unhex32(s: &str) -> [u8; 32] {
@@ -30,7 +35,13 @@ const SERVER_KEY: &str = "9f85439d2094b92a639c2c9493d7b740e39dea8d08b525986d39d6
 fn secrets() -> HandshakeSecrets {
     let mut params = [0u8; 160];
     for (i, byte) in params.iter_mut().enumerate() {
-        *byte = (i as u8).wrapping_mul(3).wrapping_add(5);
+        #[allow(
+            clippy::cast_possible_truncation,
+            reason = "params is a fixed [u8; 160], so enumerate() bounds i to 0..160, well within u8::MAX"
+        )]
+        {
+            *byte = (i as u8).wrapping_mul(3).wrapping_add(5);
+        }
     }
     HandshakeSecrets {
         key_seed: [0x11; 32],
@@ -58,7 +69,7 @@ fn handshake_packet_matches_the_pinned_vector() {
 fn a_sealed_frame_matches_the_pinned_vector() {
     let hs = client_handshake(&unhex32(SERVER_KEY), &secrets()).unwrap();
     let mut ciphers = hs.ciphers;
-    let frame = ciphers.seal(&[0x22; 32], b"getMasterchainInfo");
+    let frame = ciphers.seal(&[0x22; 32], b"getMasterchainInfo").unwrap();
 
     // length prefix (4) + nonce (32) + payload (18) + checksum (32).
     assert_eq!(frame.len(), 4 + 32 + 18 + 32);
