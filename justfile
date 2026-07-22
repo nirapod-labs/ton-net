@@ -81,9 +81,16 @@ test-live:
 
 # How much of the bundled mainnet snapshot the network still recognises: how many of its
 # liteservers answer, and how far its pinned block has fallen behind. Dials every server,
-# so it takes about a minute.
+# so it takes about a minute. Neither number is drift in this copy; for that, see
+# check-config.
 test-snapshot:
     cargo test -p ton-net --test snapshot -- --ignored --nocapture
+
+# Whether the bundled configuration still matches the one TON publishes. This is the
+# question a refresh can answer, unlike the lag test-snapshot reports, which is the age of
+# the upstream anchor.
+check-config:
+    node scripts/check-config-drift.mjs
 
 # The full walk from the block the config pins. Minutes, and tens of megabytes.
 test-sync:

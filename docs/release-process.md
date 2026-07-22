@@ -31,16 +31,22 @@ claiming to be the same library at different numbers.
    have done, whether any published version carried it, and what now refuses it.
 4. The measured numbers in the README still match. A sync benchmark that has
    drifted is a claim that has gone stale.
-5. `just test-snapshot` passes, and its output is read rather than only its exit
-   code. It reports how many of the bundled liteservers still answer and how far
-   the pinned block has fallen behind the head. Both decay with the network rather
-   than with a commit, and a published crate cannot be replaced, so a snapshot that
-   had already decayed on release day is a patch release rather than a fix.
+5. `just check-config` passes, and `just test-snapshot` passes with its output read
+   rather than only its exit code.
 
-   Refreshing it means taking the current published mainnet configuration into
-   `crates/ton-net/src/mainnet.config.json`. That moves the default trust anchor,
-   so the walk from the new pinned block has to be run before the release, not
-   after: `just test-sync`.
+   These answer different questions, and the difference decides whether there is
+   any work to do. `check-config` compares the bundled configuration against the
+   one TON publishes, which is the only part a refresh can fix. `test-snapshot`
+   reports how many bundled liteservers answer and how far the pinned block sits
+   behind the head, and neither of those is drift in this copy: the pinned block
+   is the one TON publishes, TON rotates it rarely, and a lag of tens of millions
+   of blocks is the age of the upstream anchor. A refresh against an unchanged
+   upstream copies the same bytes back, dead liteservers included.
+
+   Refreshing, when `check-config` reports a difference, means taking the
+   published configuration into `crates/ton-net/src/mainnet.config.json`. If the
+   init block moved, that moves the default trust anchor, so the walk from the new
+   pinned block has to be run before the release, not after: `just test-sync`.
 6. The binding matrix is green on a dispatch from `main`, including both jobs that
    load a musl binary on musl. That workflow runs on a tag, a schedule and a
    dispatch, so no ordinary commit exercises it, and the first time it ran it

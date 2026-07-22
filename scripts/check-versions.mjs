@@ -3,7 +3,7 @@
 
 // Holds one version across two registries.
 //
-// The library ships as six crates on crates.io and nine packages on npm, built
+// The library ships as six crates on crates.io and eight packages on npm, built
 // from one commit but published by two toolchains that know nothing about each
 // other. Nothing mechanical keeps their version strings equal: release-plz moves
 // the Cargo side, napi moves the npm side, and neither reads the other. Left
