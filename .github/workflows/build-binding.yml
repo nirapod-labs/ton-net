@@ -30,6 +30,18 @@ concurrency:
   group: build-binding-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  # One image for both musl legs. The digest is the multi-architecture index rather
+  # than one platform's manifest, so each runner resolves its own architecture from
+  # the same pin.
+  #
+  # Pinned by digest for the reason the actions above it are pinned by commit: this
+  # container compiles a binary that gets published, so a moving tag is somebody
+  # else's code arriving in a release without a commit here. The smoke container
+  # further down is deliberately not pinned, because it only loads an artifact that
+  # already exists and is handed no token.
+  MUSL_BUILD_IMAGE: rust@sha256:3c38f3f82c2f3d73da3b38e18d279393a04cb43ddded0e35088a8c3324d40900 # 1.97.1-alpine3.24
+
 jobs:
   build:
     # A fork has no reason to spend a weekly matrix on this.
@@ -48,44 +60,31 @@ jobs:
             runner: ubuntu-latest
           - target: x86_64-unknown-linux-musl
             runner: ubuntu-latest
+            musl: true
           - target: aarch64-unknown-linux-gnu
             runner: ubuntu-24.04-arm
           - target: aarch64-unknown-linux-musl
             runner: ubuntu-24.04-arm
+            musl: true
           - target: x86_64-pc-windows-msvc
             runner: windows-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # The musl legs bring their own toolchain and their own Node inside the container
+      # further down, so installing either on the host would be waste.
       - uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
+        if: ${{ !matrix.musl }}
         with:
           toolchain: stable
           targets: ${{ matrix.target }}
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        if: ${{ !matrix.musl }}
         with:
           key: ${{ matrix.target }}
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        if: ${{ !matrix.musl }}
         with:
           node-version: 22
-
-      # BOTH MUSL TARGETS ARE BROKEN HERE, and this is where that is recorded until
-      # they are built somewhere that can build them.
-      #
-      # rustc names `cc` as the linker for x86_64-unknown-linux-musl and
-      # `aarch64-linux-musl-gcc` for the arm64 one. On a glibc host `cc` is the glibc
-      # driver, so the x64 build succeeds and produces a shared object carrying the
-      # glibc interpreter: `ld-linux-x86-64.so.2`, which no musl system has. It is a
-      # musl artifact in name only, and it would fail to load for everyone who
-      # installed it. The musl smoke job below is what says so.
-      #
-      # The arm64 target fails outright, and it fails honestly: the cross wrapper it
-      # asks for is a real musl linker. Supplying it via musl-tools moves the failure
-      # to a `libgcc_s.so.1` its sysroot does not carry, which is what a genuine musl
-      # link needs and a Debian musl sysroot does not have. Pointing arm64 at `cc`
-      # instead was tried and is wrong for the reason above: it turns a loud failure
-      # into a quiet wrong answer.
-      #
-      # The fix is to build these two where the toolchain, the libc and libgcc already
-      # agree, which is an Alpine container, not to keep adjusting a glibc host.
 
       # Not `npm ci`. The optional dependencies name the per-platform packages,
       # and npm refuses a clean install while they have no lockfile entries,
@@ -93,12 +92,52 @@ jobs:
       # optional dependency it cannot resolve. This becomes `npm ci` once the
       # first release puts those packages on the registry.
       - name: install
+        if: ${{ !matrix.musl }}
         working-directory: bindings/node
         run: npm install
 
       - name: build
+        if: ${{ !matrix.musl }}
         working-directory: bindings/node
         run: npx napi build --platform --release --target ${{ matrix.target }}
+
+      # The musl targets build inside Alpine because the runner is glibc, and a musl
+      # target linked on a glibc host is a musl artifact in name only.
+      #
+      # rustc names `cc` as the linker for x86_64-unknown-linux-musl. On a glibc host
+      # `cc` is the glibc driver, so that build succeeded and produced a shared object
+      # needing `ld-linux-x86-64.so.2`, which no musl system has. Inside Alpine the
+      # same `cc` is the musl driver and the same command produces one needing
+      # `libc.musl-x86_64.so.1`. No rustflags are involved: napi-rs sets
+      # `-C target-feature=-crt-static` for these targets, and measured here it
+      # changes nothing, producing the same build id either way.
+      #
+      # arm64 needs the linker named, and that is the difference from the attempt
+      # reverted in 2f97a28 rather than a repeat of it. rustc asks for
+      # `aarch64-linux-musl-gcc` on that target even when the host is already
+      # aarch64-musl and Alpine's own driver is `cc`, so the override is right in the
+      # container and wrong outside it, where `cc` is glibc. It is set for both legs
+      # and read only by the arm64 one, since cargo reads the variable that names the
+      # target being built.
+      #
+      # The container is entered with `docker run` rather than `container:`, because a
+      # JavaScript action is executed by the runner's own Node, which is linked against
+      # glibc and does not run inside Alpine. Checkout, upload and the guard stay on the
+      # host; only the compile moves.
+      - name: build in an alpine container
+        if: ${{ matrix.musl }}
+        run: |
+          docker run --rm \
+            --volume "$PWD:/build" \
+            --workdir /build/bindings/node \
+            --env TARGET=${{ matrix.target }} \
+            --env CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER=cc \
+            "$MUSL_BUILD_IMAGE" \
+            sh -euc '
+              apk add --no-cache nodejs npm musl-dev
+              npm install
+              npx napi build --platform --release --target "$TARGET"
+            '
 
       # The loader picks a binary by filename, so a build that produced the wrong
       # one, or nothing, has to fail here rather than at somebody's install.
@@ -158,20 +197,35 @@ jobs:
 
   # A musl binary that builds is not a musl binary that runs, and every other job
   # here is on glibc, so loading it anywhere else proves nothing about it. Two of
-  # the seven published binaries are musl and neither had ever been loaded.
+  # the seven published binaries are musl, and this is the only job that loads
+  # either one.
+  #
+  # Each architecture loads on a runner of its own, so neither is emulated and the
+  # `node:22-alpine` tag resolves to the matching image on each. Running both matters:
+  # the two targets failed for different reasons and could regress separately.
   #
   # The container is only for the load. Checkout and download stay on the host,
   # because a JavaScript action is executed by the runner's own Node, which is
   # linked against glibc and does not run inside an Alpine container.
   smoke-musl:
-    name: the musl binary loads on musl
+    name: the ${{ matrix.arch }} musl binary loads on musl
     needs: build
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            runner: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-musl
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: binding-x86_64-unknown-linux-musl
+          name: binding-${{ matrix.target }}
           path: bindings/node
       # The gate test imports the generated loader and nothing else, so it needs no
       # install: the loader is plain JavaScript over `fs`, and it picks the musl

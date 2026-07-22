@@ -77,6 +77,11 @@ them.
 - `Slice::load_bytes` refuses a byte count whose bit count overflows a `usize`.
   The multiplication wrapped, the length check passed on the wrapped value, and
   the allocation that followed was made against the count as given.
+- The Node binding's two musl binaries are built on musl. Both had been built on
+  the glibc runner: the x64 one linked against glibc and needed
+  `ld-linux-x86-64.so.2`, which no musl system carries, and the arm64 one did not
+  link at all. They are built inside Alpine now, and each one is loaded on a
+  runner of its own architecture rather than assumed to work.
 
 ### Changed
 
