@@ -476,7 +476,6 @@ impl IntoIterator for &Dict {
     type Item = Result<(Vec<u8>, DictEntry), CellError>;
     type IntoIter = DictIter;
 
-    /// Delegates to [`Dict::iter`].
     fn into_iter(self) -> Self::IntoIter {
         self.iter()
     }

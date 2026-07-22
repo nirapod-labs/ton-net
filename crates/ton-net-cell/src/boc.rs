@@ -260,9 +260,6 @@ pub fn parse_boc(bytes: &[u8]) -> Result<Vec<Cell>, CellError> {
         }
     }
 
-    // ref_size is validated above to be at most 4, so each of these reads at most four
-    // bytes and the result is under 2^32, which fits usize on every target this crate
-    // supports.
     #[allow(
         clippy::cast_possible_truncation,
         reason = "ref_size is at most 4, so this is under 2^32"

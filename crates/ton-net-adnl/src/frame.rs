@@ -107,10 +107,9 @@ impl SessionCiphers {
     /// the ceiling [`open_len`](Self::open_len) accepts.
     pub fn seal(&mut self, nonce: &[u8; 32], payload: &[u8]) -> Result<Vec<u8>, FrameError> {
         // The read side refuses a body outside MIN_FRAME..=MAX_FRAME, so a larger frame
-        // is one no peer holding to the same ceiling would read, and past four gibibytes
-        // the four-byte length wraps and stops describing the body it frames. Refusing
-        // here, before anything is sealed, leaves the send keystream where it was;
-        // refusing after would desynchronize the stream instead.
+        // is one no peer holding to the same ceiling would read. Refusing here, before
+        // anything is sealed, leaves the send keystream where it was; refusing after
+        // would desynchronize the stream instead.
         let body = payload.len().saturating_add(MIN_FRAME);
         if body > MAX_FRAME {
             return Err(FrameError::PayloadTooLarge(payload.len()));
@@ -235,10 +234,8 @@ mod tests {
 
     #[test]
     fn a_payload_past_the_ceiling_is_refused_without_moving_the_keystream() {
-        // The read side already refuses a body over MAX_FRAME, so sealing one produces a
-        // frame that no peer holding to the same ceiling would read. What makes the
-        // refusal worth testing is the second half: the keystream must not have moved,
-        // or the next frame would open out of position and the session would be lost.
+        // The keystream must not have moved, or the next frame opens out of position and
+        // the session is lost.
         let params = params();
         let mut client = SessionCiphers::from_params(&params);
         let mut server = peer(&params);
@@ -249,8 +246,7 @@ mod tests {
             Err(FrameError::PayloadTooLarge(_))
         ));
 
-        // One byte under is the largest frame that is still readable, so the ceiling is
-        // where it says it is rather than somewhere near it.
+        // One byte under is the largest readable frame, so the ceiling is exact.
         let largest = vec![0u8; MAX_FRAME - MIN_FRAME];
         let frame = client.seal(&[7; 32], &largest).unwrap();
         assert_eq!(frame.len(), 4 + MAX_FRAME);

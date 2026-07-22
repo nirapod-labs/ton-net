@@ -136,15 +136,10 @@ impl<'a> Slice<'a> {
         Ok(value)
     }
 
-    // The four readers below narrow through the big-endian bytes rather than a cast.
-    // `load_uint(n)` cannot return more than `n` bits, so the high bytes are always zero
-    // and the conversion is total. Writing it this way says so, and leaves no cast for a
-    // later reader to have to prove safe.
+    // load_uint(n) cannot return more than n bits, so the high bytes are zero and the
+    // narrowing below is total.
 
     /// Reads eight bits as a `u8`.
-    ///
-    /// The width is in the name rather than in an argument, so a fixed-width TL-B field
-    /// arrives as the type it actually has and no caller narrows a `u64` back down.
     ///
     /// # Errors
     ///
