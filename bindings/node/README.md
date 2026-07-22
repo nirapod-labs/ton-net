@@ -43,9 +43,11 @@ throws rather than returning something unverified.
 
 ## Paying for the walk once
 
-A first sync walks every key block published since the pinned one, which is
-minutes and tens of megabytes. Saving the block it ended on turns the next run
-into a single link.
+A first sync walks every key block published since the pinned one. Measured
+against mainnet on 2026-07-22, that was 1246 links over 78 replies and a little
+over two minutes; read it as a scale rather than a constant, since the link count
+climbs with the chain. Saving the block it ended on turns the next run into a
+single link, in about a second.
 
 ```js
 const client = await TonClient.connect(Config.mainnet());

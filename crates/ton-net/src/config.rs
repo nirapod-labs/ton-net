@@ -40,11 +40,21 @@ impl Config {
     /// Returns a config for TON mainnet from a bundled snapshot, taken 2026-07-21.
     ///
     /// The snapshot is a point-in-time copy of the public mainnet config and can go stale
-    /// as liteservers rotate. To use a current config, fetch `global.config.json` and pass
-    /// it to [`Config::from_json`].
+    /// as liteservers rotate. To use a current server list, fetch `global.config.json` and
+    /// pass it to [`Config::from_json`].
     ///
-    /// Its [`init_block`](Self::init_block) is at masterchain sequence number 46894135,
-    /// which is where a first sync starts walking. That block is what the network
+    /// Read that sentence narrowly, because the file carries two things whose trust
+    /// requirements are opposite. The liteserver list needs none: every answer a server
+    /// gives is checked against a proof, so a hostile one can stall or lie and the lie is
+    /// refused. The [`init_block`](Self::init_block) is the other case. It is the anchor
+    /// every later proof is measured against, so a fetched one moves this client's root of
+    /// trust to whoever served it, and every proof then verifies cleanly against whatever
+    /// chain that party invented. Fetching a config therefore trusts the source for the
+    /// anchor as well as for the servers, which is a different decision from refreshing a
+    /// server list and worth making deliberately.
+    ///
+    /// The bundled [`init_block`](Self::init_block) is at masterchain sequence number
+    /// 46894135, which is where a first sync starts walking. That block is what the network
     /// publishes rather than one this library chose, and the further it recedes the
     /// longer a first sync takes, so refreshing this snapshot belongs to cutting a
     /// release rather than to housekeeping.

@@ -70,6 +70,17 @@ precedence = "aggregate"
 SPDX-FileCopyrightText = "2026 Nirapod Labs"
 SPDX-License-Identifier = "Apache-2.0"
 
+# The third-party notice file is generated from the dependency graph by
+# `just licenses`. What belongs to this project is the compilation: which crates
+# are reached on a shipped target, and how the notices are laid out. The license
+# texts inside are their own authors', each carrying its own attribution in place,
+# which is the entire point of the file, so nothing here claims them.
+[[annotations]]
+path = ["THIRD-PARTY-LICENSES.md"]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2026 Nirapod Labs"
+SPDX-License-Identifier = "Apache-2.0"
+
 # The mainnet network configuration comes from the TON Foundation unchanged, so it
 # is the one file here that is somebody else's. It is held under its own identifier
 # rather than swept into the project license.
