@@ -248,6 +248,108 @@ impl<'a> Slice<'a> {
             Ok(None)
         }
     }
+
+    /// Reads `n` bits as a two's-complement signed integer.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CellError::TooWide`] if `n` is over 64, or
+    /// [`CellError::NotEnoughBits`] if the slice has fewer than `n` bits left.
+    pub fn load_int(&mut self, n: u32) -> Result<i64, CellError> {
+        if n > i64::BITS {
+            return Err(CellError::TooWide {
+                requested: n,
+                width: i64::BITS,
+            });
+        }
+        if n == 0 {
+            return Ok(0);
+        }
+        let raw = self.load_uint(n)?;
+        // Sign-extend from the top bit of the field. Shifting a full-width value left by
+        // zero and back is the identity, so the 64-bit case needs no special handling.
+        #[allow(clippy::cast_possible_wrap)]
+        let shifted = (raw << (i64::BITS - n)) as i64;
+        Ok(shifted >> (i64::BITS - n))
+    }
+
+    /// Reads an amount in nanotons, which TON encodes as `VarUInteger 16`.
+    ///
+    /// # Errors
+    ///
+    /// As [`load_var_uint`](Slice::load_var_uint).
+    pub fn load_coins(&mut self) -> Result<u128, CellError> {
+        self.load_var_uint(16)
+    }
+
+    /// Reads `n` bits as an unsigned integer without advancing.
+    ///
+    /// # Errors
+    ///
+    /// As [`load_uint`](Slice::load_uint).
+    pub fn preload_uint(&mut self, n: u32) -> Result<u64, CellError> {
+        let saved = self.bit;
+        let value = self.load_uint(n);
+        self.bit = saved;
+        value
+    }
+
+    /// Reads one bit without advancing.
+    ///
+    /// # Errors
+    ///
+    /// As [`load_bit`](Slice::load_bit).
+    pub fn preload_bit(&mut self) -> Result<bool, CellError> {
+        let saved = self.bit;
+        let value = self.load_bit();
+        self.bit = saved;
+        value
+    }
+
+    /// Looks at the next reference without taking it.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CellError::NotEnoughRefs`] if the slice has no reference left.
+    pub fn peek_ref(&self) -> Result<&'a Cell, CellError> {
+        self.cell
+            .refs()
+            .get(self.next_ref)
+            .ok_or(CellError::NotEnoughRefs)
+    }
+
+    /// Skips `n` references.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CellError::NotEnoughRefs`] if the slice has fewer than `n` left.
+    pub fn skip_refs(&mut self, n: usize) -> Result<(), CellError> {
+        if n > self.remaining_refs() {
+            return Err(CellError::NotEnoughRefs);
+        }
+        self.next_ref += n;
+        Ok(())
+    }
+
+    /// Copies everything left into a builder.
+    ///
+    /// # Errors
+    ///
+    /// As the stores it performs; what a slice holds always fits one cell.
+    pub fn to_builder(&self) -> Result<crate::Builder, CellError> {
+        let mut builder = crate::Builder::new();
+        builder.store_slice(self.clone())?;
+        Ok(builder)
+    }
+
+    /// Copies everything left into a new cell.
+    ///
+    /// # Errors
+    ///
+    /// As [`to_builder`](Slice::to_builder).
+    pub fn to_cell(&self) -> Result<Cell, CellError> {
+        self.to_builder()?.build()
+    }
 }
 
 #[cfg(test)]

@@ -192,3 +192,85 @@ proptest! {
         let _ = parse_boc(&bytes[..cut]);
     }
 }
+
+/// A tree assembled by the builder rather than by the crate-private constructor.
+///
+/// The generators above shape `Cell::from_parts` arguments directly, which is the right
+/// reach for properties about parsing. These go the other way: through the public API a
+/// caller has, so the completion tag, the capacity checks and the level mask are the
+/// ones a caller actually meets.
+fn built_tree() -> impl Strategy<Value = Cell> {
+    let leaf = data_and_bits().prop_map(|(bytes, bits)| {
+        let mut b = crate::Builder::new();
+        for index in 0..bits {
+            let byte = bytes.get(usize::from(index / 8)).copied().unwrap_or(0);
+            b.store_bit((byte >> (7 - (index % 8))) & 1 == 1).unwrap();
+        }
+        b.build().unwrap()
+    });
+    leaf.prop_recursive(3, 16, 3, |inner| {
+        (data_and_bits(), proptest::collection::vec(inner, 0..=4)).prop_map(
+            |((bytes, bits), refs)| {
+                let mut b = crate::Builder::new();
+                for index in 0..bits {
+                    let byte = bytes.get(usize::from(index / 8)).copied().unwrap_or(0);
+                    b.store_bit((byte >> (7 - (index % 8))) & 1 == 1).unwrap();
+                }
+                for cell in refs {
+                    b.store_ref(cell).unwrap();
+                }
+                b.build().unwrap()
+            },
+        )
+    })
+}
+
+proptest! {
+    /// An integer the builder stores is the integer a slice reads back.
+    #[test]
+    fn integers_round_trip_through_the_builder(value in any::<u64>(), bits in 1u32..=64) {
+        let value = if bits == 64 { value } else { value & ((1u64 << bits) - 1) };
+        let mut b = crate::Builder::new();
+        b.store_uint(value, bits).unwrap();
+        prop_assert_eq!(b.build().unwrap().parse().load_uint(bits).unwrap(), value);
+    }
+
+    /// A signed integer survives the sign extension in both directions.
+    #[test]
+    fn signed_integers_round_trip_through_the_builder(value in any::<i64>(), bits in 1u32..=64) {
+        // Bring the value into the range this width holds by keeping its low bits and
+        // sign-extending them. Wrapping by arithmetic overflows near the top of the
+        // range, which is where the cases worth generating are.
+        #[allow(clippy::cast_possible_wrap, clippy::cast_sign_loss)]
+        let value = (((value as u64) << (64 - bits)) as i64) >> (64 - bits);
+        let mut b = crate::Builder::new();
+        b.store_int(value, bits).unwrap();
+        prop_assert_eq!(b.build().unwrap().parse().load_int(bits).unwrap(), value);
+    }
+
+    /// An amount survives the variable-length encoding, whose byte count must be minimal.
+    #[test]
+    fn coins_round_trip_through_the_builder(value in any::<u128>()) {
+        // `VarUInteger 16` carries fifteen bytes.
+        let value = value >> 8;
+        let mut b = crate::Builder::new();
+        b.store_coins(value).unwrap();
+        prop_assert_eq!(b.build().unwrap().parse().load_coins().unwrap(), value);
+    }
+
+    /// A built tree keeps its identity through the serializer.
+    #[test]
+    fn a_built_tree_keeps_its_identity(root in built_tree()) {
+        let bytes = serialize_boc(std::slice::from_ref(&root)).unwrap();
+        let parsed = parse_boc(&bytes).unwrap();
+        prop_assert_eq!(parsed.len(), 1);
+        prop_assert_eq!(parsed[0].repr_hash(), root.repr_hash());
+    }
+
+    /// Copying a slice into a builder reproduces the cell it came from.
+    #[test]
+    fn a_slice_copied_into_a_builder_rebuilds_its_cell(root in built_tree()) {
+        let copy = root.parse().to_cell().unwrap();
+        prop_assert_eq!(copy.repr_hash(), root.repr_hash());
+    }
+}

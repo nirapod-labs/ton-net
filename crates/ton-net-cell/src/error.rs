@@ -72,4 +72,24 @@ pub enum CellError {
         /// The width of the target integer.
         width: u32,
     },
+
+    /// A store asked for more bits than the cell has room for.
+    ///
+    /// The store fails rather than truncating. A short write produces a cell with a
+    /// different hash, and since a hash is an identity here rather than a checksum,
+    /// nothing downstream would report the difference as an error.
+    #[error("cell has {available} bits free, {requested} requested")]
+    NoRoomForBits {
+        /// The number of bits the store asked for.
+        requested: usize,
+        /// The number of bits the cell had free.
+        available: usize,
+    },
+
+    /// A store asked for a reference the cell has no room for.
+    #[error("cell already holds its {limit} references")]
+    NoRoomForRefs {
+        /// The limit that was reached.
+        limit: usize,
+    },
 }

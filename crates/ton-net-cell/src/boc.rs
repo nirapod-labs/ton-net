@@ -5,17 +5,11 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::cell::{Cell, CellType};
+use crate::cell::{Cell, CellType, MAX_BITS, MAX_REFS};
 use crate::error::CellError;
 
 /// The four bytes every bag of cells begins with.
 const MAGIC: [u8; 4] = [0xb5, 0xee, 0x9c, 0x72];
-
-/// The most data bits a cell may hold.
-const MAX_BITS: u16 = 1023;
-
-/// The most references a cell may hold.
-const MAX_REFS: usize = 4;
 
 /// The most cells [`parse_boc`] will read from one bag.
 ///

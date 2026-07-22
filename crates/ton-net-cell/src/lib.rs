@@ -65,6 +65,7 @@
 #![deny(rustdoc::broken_intra_doc_links)]
 
 mod boc;
+mod builder;
 mod cell;
 mod error;
 mod slice;
@@ -76,7 +77,8 @@ mod slice;
 mod proptests;
 
 pub use boc::{parse_boc, serialize_boc, MAX_CELLS, MAX_DEPTH};
-pub use cell::{Cell, CellType};
+pub use builder::Builder;
+pub use cell::{Cell, CellType, MAX_BITS, MAX_REFS};
 pub use error::CellError;
 pub use slice::Slice;
 

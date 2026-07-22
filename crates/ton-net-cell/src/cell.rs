@@ -11,6 +11,12 @@ use sha2::{Digest, Sha256};
 use crate::error::CellError;
 use crate::slice::Slice;
 
+/// The most data bits a cell may hold.
+pub const MAX_BITS: u16 = 1023;
+
+/// The most references a cell may hold.
+pub const MAX_REFS: usize = 4;
+
 /// The kind of a cell.
 ///
 /// An ordinary cell is plain data and references. The four exotic kinds carry a meaning
