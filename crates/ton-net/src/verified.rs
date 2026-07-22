@@ -38,8 +38,8 @@ impl<T> Verified<T> {
     /// Records that `value` was proven against `anchor`.
     ///
     /// Private on purpose: see the note on the type.
-    pub(crate) fn new(value: T, anchor: BlockIdExt) -> Verified<T> {
-        Verified { value, anchor }
+    pub(crate) fn new(value: T, anchor: BlockIdExt) -> Self {
+        Self { value, anchor }
     }
 
     /// The verified value.

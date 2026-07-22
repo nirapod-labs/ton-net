@@ -43,7 +43,7 @@ fn cells(c: &mut Criterion) {
         BenchmarkId::new("serialize", proof.len()),
         &roots,
         |b, roots| {
-            b.iter(|| serialize_boc(std::hint::black_box(roots)).expect("a parsed tree serializes"))
+            b.iter(|| serialize_boc(std::hint::black_box(roots)).expect("a parsed tree serializes"));
         },
     );
 
@@ -55,7 +55,7 @@ fn cells(c: &mut Criterion) {
             b.iter(|| {
                 let roots = parse_boc(std::hint::black_box(bytes)).expect("the fixture parses");
                 serialize_boc(&roots).expect("a parsed tree serializes")
-            })
+            });
         },
     );
 

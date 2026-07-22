@@ -65,8 +65,8 @@ pub struct Account {
 impl Account {
     /// An account that does not exist.
     #[must_use]
-    pub fn nonexistent() -> Account {
-        Account {
+    pub fn nonexistent() -> Self {
+        Self {
             balance: Coins::ZERO,
             status: AccountStatus::Nonexistent,
             last_trans_lt: 0,
@@ -82,15 +82,15 @@ impl Account {
     ///
     /// Returns [`BlockError::Cell`] if the bytes are not a bag of cells, or
     /// [`BlockError::Malformed`] if the cell does not read as an account.
-    pub fn decode(state: &[u8]) -> Result<Account, BlockError> {
+    pub fn decode(state: &[u8]) -> Result<Self, BlockError> {
         if state.is_empty() {
-            return Ok(Account::nonexistent());
+            return Ok(Self::nonexistent());
         }
         let roots = parse_boc(state)?;
         let root = roots
             .first()
             .ok_or(BlockError::Malformed("account state has no root cell"))?;
-        Account::from_cell(root)
+        Self::from_cell(root)
     }
 
     /// Decodes an account from its state cell.
@@ -99,11 +99,11 @@ impl Account {
     ///
     /// Returns [`BlockError::Malformed`] if the cell does not read as an account, or
     /// [`BlockError::Cell`] if it ends early.
-    pub fn from_cell(cell: &Cell) -> Result<Account, BlockError> {
+    pub fn from_cell(cell: &Cell) -> Result<Self, BlockError> {
         let mut slice = cell.parse();
         if !slice.load_bit()? {
             // account_none: the address holds nothing.
-            return Ok(Account::nonexistent());
+            return Ok(Self::nonexistent());
         }
 
         skip_address(&mut slice)?;
@@ -116,7 +116,7 @@ impl Account {
         let _ = slice.load_maybe_ref()?;
         let status = load_status(&mut slice)?;
 
-        Ok(Account {
+        Ok(Self {
             balance,
             status,
             last_trans_lt,

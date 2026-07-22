@@ -50,29 +50,29 @@ impl CellType {
     #[must_use]
     pub fn tag(self) -> Option<u8> {
         match self {
-            CellType::Ordinary => None,
-            CellType::PrunedBranch => Some(0x01),
-            CellType::LibraryReference => Some(0x02),
-            CellType::MerkleProof => Some(0x03),
-            CellType::MerkleUpdate => Some(0x04),
+            Self::Ordinary => None,
+            Self::PrunedBranch => Some(0x01),
+            Self::LibraryReference => Some(0x02),
+            Self::MerkleProof => Some(0x03),
+            Self::MerkleUpdate => Some(0x04),
         }
     }
 
     /// The kind an exotic cell's leading data byte names, or `None` if it names none.
     #[must_use]
-    pub fn from_tag(tag: u8) -> Option<CellType> {
+    pub fn from_tag(tag: u8) -> Option<Self> {
         match tag {
-            0x01 => Some(CellType::PrunedBranch),
-            0x02 => Some(CellType::LibraryReference),
-            0x03 => Some(CellType::MerkleProof),
-            0x04 => Some(CellType::MerkleUpdate),
+            0x01 => Some(Self::PrunedBranch),
+            0x02 => Some(Self::LibraryReference),
+            0x03 => Some(Self::MerkleProof),
+            0x04 => Some(Self::MerkleUpdate),
             _ => None,
         }
     }
 
     /// Whether this kind covers another tree, so its content sits one level down.
     fn is_merkle(self) -> bool {
-        matches!(self, CellType::MerkleProof | CellType::MerkleUpdate)
+        matches!(self, Self::MerkleProof | Self::MerkleUpdate)
     }
 }
 
@@ -178,17 +178,17 @@ impl Cell {
     pub(crate) fn from_parts(
         data: Vec<u8>,
         bits: u16,
-        refs: Vec<Cell>,
+        refs: Vec<Self>,
         cell_type: CellType,
         level_mask: u8,
-    ) -> Result<Cell, CellError> {
+    ) -> Result<Self, CellError> {
         if level_mask != implied_mask(cell_type, &refs, level_mask) {
             return Err(CellError::Malformed(
                 "cell level mask is not the one its children imply",
             ));
         }
         let (hashes, depths) = compute(&data, bits, &refs, cell_type, level_mask)?;
-        Ok(Cell {
+        Ok(Self {
             inner: Arc::new(Inner {
                 data,
                 bits,
@@ -219,13 +219,13 @@ impl Cell {
 
     /// The cell's references, at most four.
     #[must_use]
-    pub fn refs(&self) -> &[Cell] {
+    pub fn refs(&self) -> &[Self] {
         &self.inner.refs
     }
 
     /// The reference at `index`, or `None` if the cell has no such reference.
     #[must_use]
-    pub fn reference(&self, index: usize) -> Option<&Cell> {
+    pub fn reference(&self, index: usize) -> Option<&Self> {
         self.inner.refs.get(index)
     }
 
@@ -465,7 +465,7 @@ impl PartialEq for Cell {
     ///
     /// A pruned branch is deliberately not equal to the subtree it replaced, even though
     /// they share a level-zero hash.
-    fn eq(&self, other: &Cell) -> bool {
+    fn eq(&self, other: &Self) -> bool {
         self.repr_hash() == other.repr_hash()
     }
 }

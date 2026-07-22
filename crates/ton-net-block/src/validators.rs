@@ -101,7 +101,7 @@ impl ValidatorSet {
     /// parameter is inconsistent, [`BlockError::NotCovered`] if the proof prunes away
     /// the parameter or any descriptor in the subset, and
     /// [`BlockError::WrongConstructor`] if a tag is not what it should be.
-    pub fn from_config(config: &Cell) -> Result<ValidatorSet, BlockError> {
+    pub fn from_config(config: &Cell) -> Result<Self, BlockError> {
         let entry = match Dict::from_root(Some(config.clone()), 32)?
             .get(&CURRENT_VALIDATORS.to_be_bytes())?
         {
@@ -115,7 +115,7 @@ impl ValidatorSet {
         };
         // Every configuration parameter is stored behind a reference, so the entry's
         // own slice holds the pointer rather than the value.
-        ValidatorSet::from_cell(entry.slice()?.load_ref()?)
+        Self::from_cell(entry.slice()?.load_ref()?)
     }
 
     /// Reads a validator set from the cell holding configuration parameter 34.
@@ -123,7 +123,7 @@ impl ValidatorSet {
     /// # Errors
     ///
     /// As [`from_config`](Self::from_config), less the dictionary lookup.
-    pub fn from_cell(param: &Cell) -> Result<ValidatorSet, BlockError> {
+    pub fn from_cell(param: &Cell) -> Result<Self, BlockError> {
         let mut s = param.parse();
         let extended = match s.load_uint(8)? {
             VALIDATORS_EXT_TAG => true,
@@ -188,7 +188,7 @@ impl ValidatorSet {
             ));
         }
 
-        Ok(ValidatorSet {
+        Ok(Self {
             utime_since,
             utime_until,
             total,

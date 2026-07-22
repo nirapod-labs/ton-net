@@ -58,14 +58,14 @@ struct Read {
 }
 
 impl Read {
-    fn parse(text: &str) -> Read {
+    fn parse(text: &str) -> Self {
         let field = |name: &str| -> &str {
             text.lines()
                 .find_map(|line| line.strip_prefix(name)?.strip_prefix('='))
                 .unwrap_or_else(|| panic!("fixture has no {name}"))
                 .trim()
         };
-        Read {
+        Self {
             workchain: field("workchain").parse().expect("workchain"),
             account_id: hash(field("account_id")),
             block_root_hash: hash(field("block_root_hash")),
@@ -430,7 +430,7 @@ fn an_account_whose_contents_were_pruned_away_is_refused() {
         root.hash(),
         "the edit has to be invisible to the hash, or it proves nothing"
     );
-    assert!(rebuilt[0].refs().iter().all(|c| c.is_exotic()));
+    assert!(rebuilt[0].refs().iter().all(ton_net_cell::Cell::is_exotic));
 
     assert_eq!(
         verify_account(&read.with_state(&forged)),
@@ -571,10 +571,10 @@ impl Edits {
         read: &Read,
         field: impl Fn(&Read) -> &Vec<u8>,
         rebuild: impl for<'a> Fn(&'a Read, &'a [u8]) -> AccountRead<'a>,
-    ) -> Edits {
+    ) -> Self {
         let expected = verify_account(&read.as_read()).expect("the untampered read verifies");
         let original = field(read).clone();
-        let mut edits = Edits {
+        let mut edits = Self {
             tried: 0,
             refused: 0,
         };
@@ -643,7 +643,7 @@ fn no_edit_to_a_proof_changes_the_answer() {
 #[test]
 fn no_edit_to_the_account_state_changes_the_answer() {
     let read = Read::parse(BASECHAIN);
-    let edits = Edits::sweep(&read, |r| &r.state, |r, bytes| r.with_state(bytes));
+    let edits = Edits::sweep(&read, |r| &r.state, Read::with_state);
     assert!(edits.tried > 3000, "only {} edits were tried", edits.tried);
     // Every byte of an account state is hashed into the hash the proof binds, so unlike a
     // proof there is nothing here that does not matter.

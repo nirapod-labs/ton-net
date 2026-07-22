@@ -20,7 +20,7 @@ use ton_net_tl::{adnl, deserialize, lite, serialize, signed, TlError};
 fn crc32(s: &str) -> u32 {
     let mut crc: u32 = 0xFFFF_FFFF;
     for &b in s.as_bytes() {
-        crc ^= b as u32;
+        crc ^= u32::from(b);
         for _ in 0..8 {
             let m = (crc & 1).wrapping_neg();
             crc = (crc >> 1) ^ (0xEDB8_8320 & m);

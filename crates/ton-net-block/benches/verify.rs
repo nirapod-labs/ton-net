@@ -48,7 +48,7 @@ fn verification(c: &mut Criterion) {
         b.iter(|| {
             verify_chain(std::hint::black_box(&from), std::hint::black_box(&proof))
                 .expect("the fixture verifies")
-        })
+        });
     });
     group.finish();
 }

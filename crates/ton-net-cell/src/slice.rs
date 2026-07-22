@@ -49,7 +49,7 @@ pub struct Slice<'a> {
 
 impl<'a> Slice<'a> {
     /// Opens a cursor at the start of `cell`.
-    pub(crate) fn new(cell: &'a Cell) -> Slice<'a> {
+    pub(crate) fn new(cell: &'a Cell) -> Self {
         Slice {
             cell,
             bit: 0,

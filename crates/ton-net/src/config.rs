@@ -31,7 +31,7 @@ pub struct Config {
 
 /// One liteserver: an address ready to dial and its public key.
 #[derive(Debug, Clone)]
-pub(crate) struct LiteServer {
+pub struct LiteServer {
     pub(crate) addr: String,
     pub(crate) key: [u8; 32],
 }
@@ -63,8 +63,8 @@ impl Config {
     // test in this module holds it there. Returning a Result would put a failure no
     // caller can cause, and none can act on, into the first call most programs make.
     #[expect(clippy::expect_used, reason = "a checked-in file, held by a test")]
-    pub fn mainnet() -> Config {
-        Config::from_json(include_str!("mainnet.config.json"))
+    pub fn mainnet() -> Self {
+        Self::from_json(include_str!("mainnet.config.json"))
             .expect("the bundled mainnet config parses")
     }
 
@@ -84,7 +84,7 @@ impl Config {
     /// Returns [`Error::Config`] if the JSON is malformed, has no liteserver list, a
     /// liteserver has an unsupported key type or a key that is not 32 bytes, or the init
     /// block's hashes are not 32 base64 bytes.
-    pub fn from_json(json: &str) -> Result<Config, Error> {
+    pub fn from_json(json: &str) -> Result<Self, Error> {
         let raw: RawConfig =
             serde_json::from_str(json).map_err(|e| Error::Config(e.to_string()))?;
         if raw.liteservers.is_empty() {
@@ -124,7 +124,7 @@ impl Config {
             None => None,
         };
 
-        Ok(Config {
+        Ok(Self {
             liteservers,
             init_block,
             max_head_age: DEFAULT_MAX_HEAD_AGE,
@@ -153,7 +153,7 @@ impl Config {
     /// only freshness signal there is. Setting this to zero refuses every head, which is
     /// a way to say the check is not wanted only if the caller means it.
     #[must_use]
-    pub fn with_max_head_age(mut self, seconds: u32) -> Config {
+    pub fn with_max_head_age(mut self, seconds: u32) -> Self {
         self.max_head_age = seconds;
         self
     }

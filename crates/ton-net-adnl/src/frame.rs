@@ -260,7 +260,7 @@ mod tests {
         // A peer from unrelated parameters, standing in for a failed handshake.
         let mut stranger = {
             let mut other = params();
-            for byte in other.iter_mut() {
+            for byte in &mut other {
                 *byte = !*byte;
             }
             peer(&other)

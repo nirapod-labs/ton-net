@@ -451,13 +451,13 @@ struct Link {
 }
 
 impl Link {
-    fn parse(text: &str) -> Link {
+    fn parse(text: &str) -> Self {
         let proof: ton_net_tl::lite::PartialBlockProof =
             ton_net_tl::deserialize(&unhex(text)).expect("the fixture decodes");
         match proof.steps.into_iter().next().expect("one step") {
             ton_net_tl::lite::BlockLink::Forward {
                 from, config_proof, ..
-            } => Link {
+            } => Self {
                 from_root_hash: from.root_hash,
                 config_proof,
             },
@@ -476,14 +476,14 @@ struct Read {
 }
 
 impl Read {
-    fn parse(text: &str) -> Read {
+    fn parse(text: &str) -> Self {
         let field = |name: &str| -> &str {
             text.lines()
                 .find_map(|line| line.strip_prefix(name)?.strip_prefix('='))
                 .unwrap_or_else(|| panic!("fixture has no {name}"))
                 .trim()
         };
-        Read {
+        Self {
             account_id: hash32(field("account_id")),
             block_root_hash: hash32(field("block_root_hash")),
             shard_block_root_hash: hash32(field("shard_block_root_hash")),

@@ -67,7 +67,7 @@ impl Client {
     ///
     /// Returns [`Error::Transport`] if no liteserver is reachable, or [`Error::Handshake`]
     /// if the last one reached rejects the handshake.
-    pub async fn connect(config: &Config) -> Result<Client, Error> {
+    pub async fn connect(config: &Config) -> Result<Self, Error> {
         let mut last_error: Option<Error> = None;
         for server in config.liteservers() {
             let transport = match TcpTransport::connect(&server.addr).await {
@@ -79,7 +79,7 @@ impl Client {
             };
             match LiteClient::connect(transport, &server.key).await {
                 Ok(lite) => {
-                    return Ok(Client {
+                    return Ok(Self {
                         lite,
                         anchor: None,
                         init_block: config.init_block().cloned(),
@@ -106,8 +106,8 @@ impl Client {
     ///
     /// As [`connect`](Self::connect), plus [`Error::Sync`] if the server cannot prove a
     /// chain from `anchor`, and [`Error::Stale`] if what it leads to is too old.
-    pub async fn connect_from(config: &Config, anchor: &BlockIdExt) -> Result<Client, Error> {
-        let mut client = Client::connect(config).await?;
+    pub async fn connect_from(config: &Config, anchor: &BlockIdExt) -> Result<Self, Error> {
+        let mut client = Self::connect(config).await?;
         client.anchor = Some(anchor.clone());
         client.sync().await?;
         Ok(client)

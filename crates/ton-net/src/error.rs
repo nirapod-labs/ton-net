@@ -169,20 +169,20 @@ impl ErrorCode {
     #[must_use]
     pub fn as_str(self) -> &'static str {
         match self {
-            ErrorCode::Transport => "TRANSPORT",
-            ErrorCode::Handshake => "HANDSHAKE",
-            ErrorCode::Timeout => "TIMEOUT",
-            ErrorCode::ConnectionLost => "CONNECTION_LOST",
-            ErrorCode::LiteServer => "LITESERVER",
-            ErrorCode::Decode => "DECODE",
-            ErrorCode::Address => "ADDRESS",
-            ErrorCode::Config => "CONFIG",
-            ErrorCode::Cell => "CELL",
-            ErrorCode::Proof => "PROOF",
-            ErrorCode::Sync => "SYNC",
-            ErrorCode::Stale => "STALE",
-            ErrorCode::ClockBehind => "CLOCK_BEHIND",
-            ErrorCode::InvalidArgument => "INVALID_ARGUMENT",
+            Self::Transport => "TRANSPORT",
+            Self::Handshake => "HANDSHAKE",
+            Self::Timeout => "TIMEOUT",
+            Self::ConnectionLost => "CONNECTION_LOST",
+            Self::LiteServer => "LITESERVER",
+            Self::Decode => "DECODE",
+            Self::Address => "ADDRESS",
+            Self::Config => "CONFIG",
+            Self::Cell => "CELL",
+            Self::Proof => "PROOF",
+            Self::Sync => "SYNC",
+            Self::Stale => "STALE",
+            Self::ClockBehind => "CLOCK_BEHIND",
+            Self::InvalidArgument => "INVALID_ARGUMENT",
         }
     }
 }
@@ -204,19 +204,19 @@ impl Error {
     #[must_use]
     pub fn code(&self) -> ErrorCode {
         match self {
-            Error::Transport(_) => ErrorCode::Transport,
-            Error::Handshake => ErrorCode::Handshake,
-            Error::Timeout => ErrorCode::Timeout,
-            Error::ConnectionLost => ErrorCode::ConnectionLost,
-            Error::LiteServer { .. } => ErrorCode::LiteServer,
-            Error::Decode(_) => ErrorCode::Decode,
-            Error::Address(_) => ErrorCode::Address,
-            Error::Config(_) => ErrorCode::Config,
-            Error::Cell(_) => ErrorCode::Cell,
-            Error::Proof(_) => ErrorCode::Proof,
-            Error::Sync(_) => ErrorCode::Sync,
-            Error::Stale { .. } => ErrorCode::Stale,
-            Error::ClockBehind { .. } => ErrorCode::ClockBehind,
+            Self::Transport(_) => ErrorCode::Transport,
+            Self::Handshake => ErrorCode::Handshake,
+            Self::Timeout => ErrorCode::Timeout,
+            Self::ConnectionLost => ErrorCode::ConnectionLost,
+            Self::LiteServer { .. } => ErrorCode::LiteServer,
+            Self::Decode(_) => ErrorCode::Decode,
+            Self::Address(_) => ErrorCode::Address,
+            Self::Config(_) => ErrorCode::Config,
+            Self::Cell(_) => ErrorCode::Cell,
+            Self::Proof(_) => ErrorCode::Proof,
+            Self::Sync(_) => ErrorCode::Sync,
+            Self::Stale { .. } => ErrorCode::Stale,
+            Self::ClockBehind { .. } => ErrorCode::ClockBehind,
         }
     }
 
@@ -228,8 +228,8 @@ impl Error {
     /// conversion below says so. Out of `Client::account_reported` there was no proof to
     /// fail, so the same failure is only bytes that did not read, and calling it a proof
     /// failure would report a check that never ran.
-    pub(crate) fn decoding(error: ton_net_block::BlockError) -> Error {
-        Error::Cell(error.to_string())
+    pub(crate) fn decoding(error: ton_net_block::BlockError) -> Self {
+        Self::Cell(error.to_string())
     }
 }
 
@@ -247,7 +247,7 @@ impl From<ton_net_block::BlockError> for Error {
     /// A read that verified nothing must not use this. It has a classifier of its own, so
     /// a failure out of one stays a failure to read bytes.
     fn from(error: ton_net_block::BlockError) -> Self {
-        Error::Proof(error.to_string())
+        Self::Proof(error.to_string())
     }
 }
 
@@ -255,7 +255,7 @@ impl From<ton_net_adnl::TransportError> for Error {
     fn from(error: ton_net_adnl::TransportError) -> Self {
         // A connect timeout reads as unreachable at this layer: the deadline for a whole
         // call is separate and surfaces as `Timeout`.
-        Error::Transport(error.to_string())
+        Self::Transport(error.to_string())
     }
 }
 
@@ -264,14 +264,14 @@ impl From<ton_net_adnl::AdnlError> for Error {
         use ton_net_adnl::AdnlError;
         match error {
             AdnlError::Transport(transport) => transport.into(),
-            AdnlError::Handshake(_) => Error::Handshake,
+            AdnlError::Handshake(_) => Self::Handshake,
             // Kept apart from the rest because the remedy differs: this connection is
             // finished and no retry on it will work, where a framing failure may be one
             // bad answer.
-            AdnlError::Desynchronized => Error::ConnectionLost,
+            AdnlError::Desynchronized => Self::ConnectionLost,
             // A framing, checksum, or malformed-message failure is a decode failure at
             // this layer.
-            other => Error::Decode(other.to_string()),
+            other => Self::Decode(other.to_string()),
         }
     }
 }
@@ -281,9 +281,9 @@ impl From<ton_net_lite::LiteError> for Error {
         use ton_net_lite::LiteError;
         match error {
             LiteError::Adnl(adnl) => adnl.into(),
-            LiteError::LiteServer { code, message } => Error::LiteServer { code, message },
-            LiteError::Decode(decode) => Error::Decode(decode.to_string()),
-            other => Error::Decode(other.to_string()),
+            LiteError::LiteServer { code, message } => Self::LiteServer { code, message },
+            LiteError::Decode(decode) => Self::Decode(decode.to_string()),
+            other => Self::Decode(other.to_string()),
         }
     }
 }

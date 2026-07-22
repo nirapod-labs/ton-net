@@ -57,7 +57,7 @@ impl<T> Lookup<T> {
     /// The value, if the key was found.
     pub fn found(self) -> Option<T> {
         match self {
-            Lookup::Found(value) => Some(value),
+            Self::Found(value) => Some(value),
             _ => None,
         }
     }
@@ -273,8 +273,8 @@ impl Dict {
     /// # Errors
     ///
     /// Returns [`CellError::Malformed`] if a key that wide could not label a cell.
-    pub fn new(key_bits: u16) -> Result<Dict, CellError> {
-        Dict::from_root(None, key_bits)
+    pub fn new(key_bits: u16) -> Result<Self, CellError> {
+        Self::from_root(None, key_bits)
     }
 
     /// A dictionary rooted at the cell a `HashmapE` points at, or empty when it points at
@@ -283,11 +283,11 @@ impl Dict {
     /// # Errors
     ///
     /// Returns [`CellError::Malformed`] if a key that wide could not label a cell.
-    pub fn from_root(root: Option<Cell>, key_bits: u16) -> Result<Dict, CellError> {
+    pub fn from_root(root: Option<Cell>, key_bits: u16) -> Result<Self, CellError> {
         if key_bits > MAX_BITS {
             return Err(CellError::Malformed("dictionary key wider than a cell"));
         }
-        Ok(Dict { root, key_bits })
+        Ok(Self { root, key_bits })
     }
 
     /// The root cell, or nothing when the dictionary is empty.

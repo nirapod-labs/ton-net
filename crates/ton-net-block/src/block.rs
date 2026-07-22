@@ -76,12 +76,12 @@ impl Block {
     ///
     /// Returns [`BlockError::WrongConstructor`] if the cell is not a block, or
     /// [`BlockError::Cell`] if it ends early.
-    pub fn from_cell(cell: &Cell) -> Result<Block, BlockError> {
+    pub fn from_cell(cell: &Cell) -> Result<Self, BlockError> {
         let tag = cell.parse().load_uint(32)? as u32;
         if tag != BLOCK_TAG {
             return Err(BlockError::WrongConstructor { expected: "block" });
         }
-        Ok(Block { cell: cell.clone() })
+        Ok(Self { cell: cell.clone() })
     }
 
     /// Reads the block a Merkle proof covers, requiring the proof to root at `root_hash`.
@@ -97,12 +97,12 @@ impl Block {
     /// [`BlockError::ProofNotAnchored`] or [`BlockError::ProofInconsistent`] if the
     /// proof does not check out against `root_hash`, and
     /// [`BlockError::WrongConstructor`] if what it covers is not a block.
-    pub fn from_proof(proof: &[u8], root_hash: &[u8; 32]) -> Result<Block, BlockError> {
+    pub fn from_proof(proof: &[u8], root_hash: &[u8; 32]) -> Result<Self, BlockError> {
         let roots = ton_net_cell::parse_boc(proof)?;
         let root = roots
             .first()
             .ok_or(BlockError::Malformed("a proof with no root cell"))?;
-        Block::from_cell(verify_merkle_proof(root, root_hash)?)
+        Self::from_cell(verify_merkle_proof(root, root_hash)?)
     }
 
     /// Reads the block's header.

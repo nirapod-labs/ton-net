@@ -91,14 +91,14 @@ impl ShardState {
     ///
     /// Returns [`BlockError::WrongConstructor`] if the cell is not a shard state, or
     /// [`BlockError::Cell`] if it ends early.
-    pub fn from_cell(cell: &Cell) -> Result<ShardState, BlockError> {
+    pub fn from_cell(cell: &Cell) -> Result<Self, BlockError> {
         let tag = cell.parse().load_uint(32)? as u32;
         if tag != SHARD_STATE_TAG {
             return Err(BlockError::WrongConstructor {
                 expected: "shard_state",
             });
         }
-        Ok(ShardState { cell: cell.clone() })
+        Ok(Self { cell: cell.clone() })
     }
 
     /// The root cell of the state.
@@ -234,7 +234,7 @@ pub struct ShardDescr {
 
 impl ShardDescr {
     /// Reads a shard descriptor from a slice positioned at its constructor tag.
-    fn load(slice: &mut Slice<'_>) -> Result<ShardDescr, BlockError> {
+    fn load(slice: &mut Slice<'_>) -> Result<Self, BlockError> {
         let tag = slice.load_uint(4)?;
         if !SHARD_DESCR_TAGS.contains(&tag) {
             return Err(BlockError::WrongConstructor {
@@ -246,7 +246,7 @@ impl ShardDescr {
         let bytes = slice.load_bytes(32)?;
         let mut root_hash = [0u8; 32];
         root_hash.copy_from_slice(&bytes);
-        Ok(ShardDescr { seq_no, root_hash })
+        Ok(Self { seq_no, root_hash })
     }
 }
 
@@ -266,14 +266,14 @@ impl McStateExtra {
     /// # Errors
     ///
     /// Returns [`BlockError::WrongConstructor`] if the cell is not a masterchain extra.
-    pub fn from_cell(cell: &Cell) -> Result<McStateExtra, BlockError> {
+    pub fn from_cell(cell: &Cell) -> Result<Self, BlockError> {
         let tag = cell.parse().load_uint(16)?;
         if tag != MC_STATE_EXTRA_TAG {
             return Err(BlockError::WrongConstructor {
                 expected: "masterchain_state_extra",
             });
         }
-        Ok(McStateExtra { cell: cell.clone() })
+        Ok(Self { cell: cell.clone() })
     }
 
     /// Finds the shard whose address range holds an account, and what it last recorded.

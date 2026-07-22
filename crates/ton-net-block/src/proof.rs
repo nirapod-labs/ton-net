@@ -78,7 +78,7 @@ impl<'a> AccountRead<'a> {
         account_id: &'a [u8; 32],
         proof: &'a [u8],
         state: &'a [u8],
-    ) -> AccountRead<'a> {
+    ) -> Self {
         AccountRead {
             trusted_block_hash,
             workchain: MASTERCHAIN,
@@ -98,7 +98,7 @@ impl<'a> AccountRead<'a> {
         shard_proof: &'a [u8],
         proof: &'a [u8],
         state: &'a [u8],
-    ) -> AccountRead<'a> {
+    ) -> Self {
         AccountRead {
             trusted_block_hash,
             workchain,

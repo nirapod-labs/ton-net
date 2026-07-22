@@ -276,7 +276,7 @@ fn a_config_proof_covers_only_the_parameter_it_answers_for() {
     let block = Block::from_proof(&link.config_proof, &link.from.root_hash).expect("it roots");
     let config = block.config().expect("a key block carries a configuration");
 
-    let params = Dict::from_root(Some(config.clone()), 32).expect("a 32-bit dictionary");
+    let params = Dict::from_root(Some(config), 32).expect("a 32-bit dictionary");
     assert!(matches!(
         params
             .get(&PREVIOUS_VALIDATORS.to_be_bytes())

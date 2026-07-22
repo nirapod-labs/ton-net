@@ -274,8 +274,7 @@ mod tests {
             assert!(
                 matches!(
                     client_handshake(&key, &secrets()),
-                    Err(HandshakeError::DegenerateSharedSecret)
-                        | Err(HandshakeError::InvalidServerKey)
+                    Err(HandshakeError::DegenerateSharedSecret | HandshakeError::InvalidServerKey)
                 ),
                 "a key of small order was accepted: {key:02x?}"
             );

@@ -47,8 +47,8 @@ pub struct Builder {
 impl Builder {
     /// A builder holding nothing.
     #[must_use]
-    pub fn new() -> Builder {
-        Builder {
+    pub fn new() -> Self {
+        Self {
             data: Vec::new(),
             bits: 0,
             refs: Vec::new(),
@@ -101,7 +101,7 @@ impl Builder {
     /// # Errors
     ///
     /// Returns [`CellError::NoRoomForBits`] if the cell is full.
-    pub fn store_bit(&mut self, bit: bool) -> Result<&mut Builder, CellError> {
+    pub fn store_bit(&mut self, bit: bool) -> Result<&mut Self, CellError> {
         self.room_for(1)?;
         if self.bits % 8 == 0 {
             self.data.push(0);
@@ -125,7 +125,7 @@ impl Builder {
     /// no room. A value that does not fit is refused rather than truncated: the cell it
     /// would produce is a different cell, with a different hash, and nothing downstream
     /// would say so.
-    pub fn store_uint(&mut self, value: u64, bits: u32) -> Result<&mut Builder, CellError> {
+    pub fn store_uint(&mut self, value: u64, bits: u32) -> Result<&mut Self, CellError> {
         if bits > u64::BITS {
             return Err(CellError::TooWide {
                 requested: bits,
@@ -151,7 +151,7 @@ impl Builder {
     ///
     /// As [`store_uint`](Builder::store_uint), with the range check taken over the signed
     /// range that `bits` bits can hold.
-    pub fn store_int(&mut self, value: i64, bits: u32) -> Result<&mut Builder, CellError> {
+    pub fn store_int(&mut self, value: i64, bits: u32) -> Result<&mut Self, CellError> {
         if bits == 0 || bits > i64::BITS {
             return Err(CellError::TooWide {
                 requested: bits,
@@ -181,7 +181,7 @@ impl Builder {
     /// # Errors
     ///
     /// As [`store_uint`](Builder::store_uint), over 128 bits rather than 64.
-    pub fn store_uint128(&mut self, value: u128, bits: u32) -> Result<&mut Builder, CellError> {
+    pub fn store_uint128(&mut self, value: u128, bits: u32) -> Result<&mut Self, CellError> {
         if bits > u128::BITS {
             return Err(CellError::TooWide {
                 requested: bits,
@@ -224,7 +224,7 @@ impl Builder {
     /// assert_eq!(b.bits_used(), 12);
     /// # Ok::<(), ton_net_cell::CellError>(())
     /// ```
-    pub fn store_var_uint(&mut self, value: u128, max: u32) -> Result<&mut Builder, CellError> {
+    pub fn store_var_uint(&mut self, value: u128, max: u32) -> Result<&mut Self, CellError> {
         if max < 2 {
             return Err(CellError::Malformed(
                 "variable integer needs a max above one",
@@ -257,7 +257,7 @@ impl Builder {
     /// # Errors
     ///
     /// As [`store_var_uint`](Builder::store_var_uint).
-    pub fn store_coins(&mut self, nanotons: u128) -> Result<&mut Builder, CellError> {
+    pub fn store_coins(&mut self, nanotons: u128) -> Result<&mut Self, CellError> {
         self.store_var_uint(nanotons, 16)
     }
 
@@ -266,7 +266,7 @@ impl Builder {
     /// # Errors
     ///
     /// Returns [`CellError::NoRoomForBits`] if they do not fit.
-    pub fn store_same_bit(&mut self, bit: bool, count: u16) -> Result<&mut Builder, CellError> {
+    pub fn store_same_bit(&mut self, bit: bool, count: u16) -> Result<&mut Self, CellError> {
         self.room_for(count)?;
         for _ in 0..count {
             self.store_bit(bit)?;
@@ -279,7 +279,7 @@ impl Builder {
     /// # Errors
     ///
     /// Returns [`CellError::NoRoomForBits`] if they do not fit.
-    pub fn store_bits(&mut self, bits: &[bool]) -> Result<&mut Builder, CellError> {
+    pub fn store_bits(&mut self, bits: &[bool]) -> Result<&mut Self, CellError> {
         let count = u16::try_from(bits.len()).unwrap_or(u16::MAX);
         self.room_for(count)?;
         for bit in bits {
@@ -297,7 +297,7 @@ impl Builder {
     /// # Errors
     ///
     /// Returns [`CellError::NotEnoughBits`] if the builder holds fewer than `bits`.
-    pub fn truncate_bits(&mut self, bits: u16) -> Result<&mut Builder, CellError> {
+    pub fn truncate_bits(&mut self, bits: u16) -> Result<&mut Self, CellError> {
         if bits > self.bits {
             return Err(CellError::NotEnoughBits {
                 requested: usize::from(bits),
@@ -319,7 +319,7 @@ impl Builder {
     /// # Errors
     ///
     /// Returns [`CellError::NoRoomForBits`] if they do not fit.
-    pub fn store_bytes(&mut self, bytes: &[u8]) -> Result<&mut Builder, CellError> {
+    pub fn store_bytes(&mut self, bytes: &[u8]) -> Result<&mut Self, CellError> {
         let bits =
             u16::try_from(bytes.len().saturating_mul(8)).map_err(|_| CellError::NoRoomForBits {
                 requested: bytes.len().saturating_mul(8),
@@ -337,7 +337,7 @@ impl Builder {
     /// # Errors
     ///
     /// Returns [`CellError::NoRoomForRefs`] if the cell already holds [`MAX_REFS`].
-    pub fn store_ref(&mut self, cell: Cell) -> Result<&mut Builder, CellError> {
+    pub fn store_ref(&mut self, cell: Cell) -> Result<&mut Self, CellError> {
         if self.refs.len() >= MAX_REFS {
             return Err(CellError::NoRoomForRefs { limit: MAX_REFS });
         }
@@ -352,7 +352,7 @@ impl Builder {
     /// As [`store_bit`](Builder::store_bit) and [`store_ref`](Builder::store_ref). The
     /// bit and the reference are checked for room together, so a failure leaves the
     /// builder as it was rather than holding a set bit with nothing behind it.
-    pub fn store_maybe_ref(&mut self, cell: Option<Cell>) -> Result<&mut Builder, CellError> {
+    pub fn store_maybe_ref(&mut self, cell: Option<Cell>) -> Result<&mut Self, CellError> {
         match cell {
             Some(cell) => {
                 if self.refs.len() >= MAX_REFS {
@@ -376,7 +376,7 @@ impl Builder {
     ///
     /// As the stores it performs. The slice is taken by value, so a caller keeps the
     /// original cursor if they need it.
-    pub fn store_slice(&mut self, mut slice: Slice<'_>) -> Result<&mut Builder, CellError> {
+    pub fn store_slice(&mut self, mut slice: Slice<'_>) -> Result<&mut Self, CellError> {
         let bits = u16::try_from(slice.remaining_bits()).unwrap_or(MAX_BITS);
         self.room_for(bits)?;
         if slice.remaining_refs() > self.refs_left() {
@@ -396,7 +396,7 @@ impl Builder {
     /// # Errors
     ///
     /// As the stores it performs.
-    pub fn store_builder(&mut self, other: &Builder) -> Result<&mut Builder, CellError> {
+    pub fn store_builder(&mut self, other: &Self) -> Result<&mut Self, CellError> {
         self.room_for(other.bits)?;
         if other.refs.len() > self.refs_left() {
             return Err(CellError::NoRoomForRefs { limit: MAX_REFS });

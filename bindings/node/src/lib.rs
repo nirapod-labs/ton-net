@@ -136,16 +136,17 @@ pub struct Config {
 impl Config {
     /// Returns a config for TON mainnet from a bundled snapshot.
     #[napi(factory, catch_unwind)]
-    pub fn mainnet() -> Config {
-        Config {
+    #[must_use] 
+    pub fn mainnet() -> Self {
+        Self {
             inner: ton_net::Config::mainnet(),
         }
     }
 
     /// Parses a config from the TON `global.config.json` format.
     #[napi(factory, catch_unwind)]
-    pub fn from_json(json: String) -> Result<Config> {
-        Ok(Config {
+    pub fn from_json(json: String) -> Result<Self> {
+        Ok(Self {
             inner: ton_net::Config::from_json(&json).map_err(to_js)?,
         })
     }
@@ -162,8 +163,8 @@ impl Config {
     /// proven read at all.
     #[napi(catch_unwind)]
     #[must_use]
-    pub fn with_max_head_age(&self, seconds: u32) -> Config {
-        Config {
+    pub fn with_max_head_age(&self, seconds: u32) -> Self {
+        Self {
             inner: self.inner.clone().with_max_head_age(seconds),
         }
     }
@@ -322,10 +323,10 @@ pub struct TonClient {
 impl TonClient {
     /// Connects to a liteserver from the config and completes the ADNL handshake.
     #[napi]
-    pub async fn connect(config: &Config) -> Result<TonClient> {
+    pub async fn connect(config: &Config) -> Result<Self> {
         let network = config.inner.clone();
         let client = ton_net::Client::connect(&network).await.map_err(to_js)?;
-        Ok(TonClient {
+        Ok(Self {
             inner: Arc::new(Mutex::new(client)),
         })
     }
@@ -338,13 +339,13 @@ impl TonClient {
     /// client believes. The binding stores nothing and picks no location; a `BlockId` is
     /// an object with two buffers, and where it lives is the caller's decision.
     #[napi]
-    pub async fn connect_from(config: &Config, anchor: BlockId) -> Result<TonClient> {
+    pub async fn connect_from(config: &Config, anchor: BlockId) -> Result<Self> {
         let network = config.inner.clone();
         let start = block_id_ext(&anchor)?;
         let client = ton_net::Client::connect_from(&network, &start)
             .await
             .map_err(to_js)?;
-        Ok(TonClient {
+        Ok(Self {
             inner: Arc::new(Mutex::new(client)),
         })
     }

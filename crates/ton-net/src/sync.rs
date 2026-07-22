@@ -69,7 +69,7 @@ const MAX_CLOCK_SKEW: u64 = 300;
 /// The order matters. Everything here is a count or a length read straight off the wire,
 /// so it costs nothing, and it runs before the cell engine parses a proof or the curve
 /// arithmetic touches a signature.
-pub(crate) fn within_bounds(reply: &PartialBlockProof) -> Result<(), Error> {
+pub fn within_bounds(reply: &PartialBlockProof) -> Result<(), Error> {
     use ton_net_lite::BlockLink;
 
     if reply.steps.len() > MAX_LINKS_PER_REPLY {
@@ -120,14 +120,14 @@ pub(crate) fn within_bounds(reply: &PartialBlockProof) -> Result<(), Error> {
 /// Strict progress is the third bound and the one that catches a server which answers
 /// forever without getting anywhere: an unfinished reply that leaves the anchor where it
 /// was ends the sync rather than going round again.
-pub(crate) struct Walk {
+pub struct Walk {
     rounds: usize,
     links: usize,
 }
 
 impl Walk {
-    pub(crate) fn new() -> Walk {
-        Walk {
+    pub(crate) fn new() -> Self {
+        Self {
             rounds: 0,
             links: 0,
         }
@@ -175,7 +175,7 @@ pub struct SyncReport {
 }
 
 /// Refuses a step that does not raise the anchor.
-pub(crate) fn advanced(before: &BlockIdExt, after: &BlockIdExt) -> Result<(), Error> {
+pub fn advanced(before: &BlockIdExt, after: &BlockIdExt) -> Result<(), Error> {
     if after.seqno <= before.seqno {
         return Err(Error::Sync(format!(
             "a reply left the anchor at {}, so the walk cannot end",
@@ -191,7 +191,7 @@ pub(crate) fn advanced(before: &BlockIdExt, after: &BlockIdExt) -> Result<(), Er
 /// that a block is real and was committed by the validators, and says nothing at all
 /// about when it was handed over, so a server replaying a genuine block from last year
 /// passes every other check in this library and fails only here.
-pub(crate) fn fresh_enough(gen_utime: u32, limit_seconds: u32) -> Result<(), Error> {
+pub fn fresh_enough(gen_utime: u32, limit_seconds: u32) -> Result<(), Error> {
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |since| since.as_secs());
@@ -231,7 +231,7 @@ pub(crate) fn fresh_enough(gen_utime: u32, limit_seconds: u32) -> Result<(), Err
 ///
 /// A zero bound refuses every head by design, so a walk under one is allowed its first
 /// reply and fails as stale, which is the failure the caller asked for.
-pub(crate) fn worth_continuing(
+pub fn worth_continuing(
     elapsed: std::time::Duration,
     limit_seconds: u32,
 ) -> Result<(), Error> {

@@ -56,14 +56,14 @@ impl Address {
     /// assert_eq!(a.workchain(), -1);
     /// # Ok::<(), ton_net::Error>(())
     /// ```
-    pub fn parse(s: &str) -> Result<Address, Error> {
+    pub fn parse(s: &str) -> Result<Self, Error> {
         if let Some((workchain, account)) = s.split_once(':') {
             return Self::parse_raw(s, workchain, account);
         }
         Self::parse_user_friendly(s)
     }
 
-    fn parse_raw(whole: &str, workchain: &str, account: &str) -> Result<Address, Error> {
+    fn parse_raw(whole: &str, workchain: &str, account: &str) -> Result<Self, Error> {
         let workchain: i32 = workchain
             .parse()
             .map_err(|_| Error::Address(format!("invalid workchain in `{whole}`")))?;
@@ -72,7 +72,7 @@ impl Address {
             .ok_or_else(|| {
                 Error::Address(format!("account id is not 32 hex bytes in `{whole}`"))
             })?;
-        Ok(Address {
+        Ok(Self {
             workchain,
             account_id,
             bounceable: true,
@@ -80,7 +80,7 @@ impl Address {
         })
     }
 
-    fn parse_user_friendly(s: &str) -> Result<Address, Error> {
+    fn parse_user_friendly(s: &str) -> Result<Self, Error> {
         // tag (1) ++ workchain (1) ++ account id (32) ++ crc16 (2)
         // Held as an array rather than a length-checked vector, so every field below is a
         // constant range the compiler settles rather than a bound taken on trust.
@@ -109,7 +109,7 @@ impl Address {
         let workchain = i32::from(raw[1] as i8);
         let mut account_id = [0u8; 32];
         account_id.copy_from_slice(&raw[2..34]);
-        Ok(Address {
+        Ok(Self {
             workchain,
             account_id,
             bounceable: tag & NON_BOUNCEABLE == 0,
@@ -152,7 +152,7 @@ impl Address {
 
 impl PartialEq for Address {
     /// Equal when they name the same account. The sending hints are not the account.
-    fn eq(&self, other: &Address) -> bool {
+    fn eq(&self, other: &Self) -> bool {
         self.workchain == other.workchain && self.account_id == other.account_id
     }
 }

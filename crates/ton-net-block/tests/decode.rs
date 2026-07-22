@@ -209,10 +209,10 @@ fn a_cell_that_is_not_a_shard_state_is_refused() {
     // The Merkle roots themselves are not shard states.
     assert!(matches!(
         ShardState::from_cell(&roots[0]),
-        Err(BlockError::WrongConstructor { .. }) | Err(BlockError::Cell(_))
+        Err(BlockError::WrongConstructor { .. } | BlockError::Cell(_))
     ));
     assert!(matches!(
         Block::from_cell(&roots[0]),
-        Err(BlockError::WrongConstructor { .. }) | Err(BlockError::Cell(_))
+        Err(BlockError::WrongConstructor { .. } | BlockError::Cell(_))
     ));
 }
