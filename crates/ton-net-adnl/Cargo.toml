@@ -32,3 +32,6 @@ tokio = { workspace = true, features = ["net", "io-util", "time"] }
 # from the liteserver TL types.
 tokio = { workspace = true, features = ["rt", "macros"] }
 ton-net-tl.workspace = true
+
+[lints]
+workspace = true

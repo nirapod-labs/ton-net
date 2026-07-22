@@ -31,3 +31,6 @@ proptest.workspace = true
 [[bench]]
 name = "cells"
 harness = false
+
+[lints]
+workspace = true
