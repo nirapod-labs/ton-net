@@ -13,7 +13,7 @@
 //   2. Add NOTICE to the files allowlist. npm ships a LICENSE whether or not an
 //      allowlist mentions it; NOTICE gets no such treatment.
 //   3. Rewrite the per-platform readme. The generated one points at the package
-//      name prefix, which here is `@ton-net/core` and is not a package anyone can
+//      name prefix, which here is `@nirapod-labs/ton-net` and is not a package anyone can
 //      install. The package to install is `ton-net`.
 //
 // All three are applied rather than edited in, so regenerating the directories

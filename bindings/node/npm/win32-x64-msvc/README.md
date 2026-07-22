@@ -1,4 +1,4 @@
-# `@ton-net/core-win32-x64-msvc`
+# `@nirapod-labs/ton-net-win32-x64-msvc`
 
 The prebuilt **win32-x64-msvc** binary for [`ton-net`](https://www.npmjs.com/package/ton-net).
 

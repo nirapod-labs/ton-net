@@ -1,5 +1,5 @@
 {
-  "name": "@ton-net/core-linux-x64-gnu",
+  "name": "@nirapod-labs/ton-net-linux-x64-gnu",
   "version": "0.3.0",
   "cpu": [
     "x64"

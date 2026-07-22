@@ -1,5 +1,5 @@
 {
-  "name": "@ton-net/core-win32-x64-msvc",
+  "name": "@nirapod-labs/ton-net-win32-x64-msvc",
   "version": "0.3.0",
   "cpu": [
     "x64"
