@@ -146,6 +146,39 @@ From then on a release workflow mints its own token per run. It needs
 the npm side a CLI new enough to speak OIDC, which also attaches provenance
 without being asked.
 
+## Configuring the publishers, once
+
+Fourteen registrations, made on each registry by an owner, after that package's
+first version exists.
+
+**crates.io**, on each of the six crates:
+
+| Field | Value |
+|---|---|
+| GitHub username or organization | `nirapod-labs` |
+| Repository name | `ton-net` |
+| Workflow filename | `release.yml` |
+| Environment | `release` |
+
+**npm**, on each of the eight packages:
+
+| Field | Value |
+|---|---|
+| Organization or user | `nirapod-labs` |
+| Repository | `ton-net` |
+| Workflow filename | `release.yml` |
+| Environment | `release` |
+| Allowed actions | `npm publish` |
+
+Two things that are easy to miss. The allowed-actions row is required for any npm
+configuration made after 20 May 2026, and a configuration without it publishes
+nothing. The workflow filename is matched, so renaming `release.yml` breaks all
+fourteen until each is edited.
+
+**The GitHub environment** named `release` must exist first, since both registries
+match on it. Create it under Settings, Environments, with a required reviewer and
+its deployment rule narrowed to the tag pattern `v*`. Leave its secrets empty.
+
 ## What is signed, and what is only attested
 
 Three different things, and only the first is a signature in the sense the word

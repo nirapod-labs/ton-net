@@ -135,10 +135,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      # npm speaks OIDC from 11.5.1, and the runner's bundled npm is older than that
-      # for the life of a given node image, so the version is raised explicitly rather
-      # than assumed. It also attaches provenance without being asked, which is what
-      # ties a published tarball to the run and the commit that built it.
+      # Trusted publishing needs node 22.14.0 and npm 11.5.1.
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 22
