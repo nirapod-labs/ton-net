@@ -134,6 +134,8 @@ jobs:
     permissions:
       contents: read
       id-token: write
+      # Reading another workflow's artifacts.
+      actions: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -147,11 +149,37 @@ jobs:
       # Built by build-binding.yml, which fires on the same tag. Publishing what that
       # matrix produced rather than rebuilding here means the binaries that were loaded
       # and smoke tested are the binaries that ship.
+      #
+      # That is a different workflow, and download-artifact only sees the current run
+      # unless it is told which run to look in. Matching on the commit rather than the
+      # tag name means a moved tag cannot pick up a build of something else.
+      - name: find the build that produced the binaries
+        id: build
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          # Both workflows start on the same push, so this one is usually still running.
+          for _ in $(seq 60); do
+            run=$(gh run list --workflow build-binding.yml --commit "$GITHUB_SHA" \
+                    --limit 1 --json databaseId,status,conclusion \
+                    --jq '.[0] | select(.status=="completed" and .conclusion=="success") | .databaseId')
+            if [ -n "$run" ]; then
+              echo "run-id=$run" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            sleep 30
+          done
+          echo "::error::no successful build-binding run for $GITHUB_SHA"
+          exit 1
+
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           path: bindings/node/artifacts
-          pattern: bindings-*
+          pattern: binding-*
           merge-multiple: true
+          run-id: ${{ steps.build.outputs.run-id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: place each binary in its platform package
         working-directory: bindings/node
