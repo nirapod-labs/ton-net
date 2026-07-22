@@ -17,6 +17,12 @@ mutants.out.old/
 # comments a caller reads in an editor, so leaving them untracked would put the
 # whole JavaScript surface outside review. CI regenerates and fails on a diff.
 
+# What the resume examples persist. The whole point of that example is that the file
+# is the next run's root of trust, so committing one would be committing a trust
+# anchor nobody chose.
+anchor.txt
+anchor.json
+
 # The license, the notice and the third-party notices are copied into every
 # publishable package before the tarball is built, because Apache-2.0 requires a
 # redistribution to carry them and an npm consumer never sees the repository root.
