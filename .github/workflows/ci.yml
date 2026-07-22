@@ -262,6 +262,16 @@ jobs:
       - name: packages are publishable
         working-directory: bindings/node
         run: npm run check-package
+      # The Rust examples are compiled by clippy, which reaches every target. Nothing
+      # reached these, so they are at least parsed. It is the weaker of the two checks
+      # and still catches what matters most about a stale example, which is that a reader
+      # trusts one more than they trust their own guess.
+      - name: examples parse
+        working-directory: bindings/node
+        run: |
+          for example in examples/*.mjs; do
+            node --check "$example"
+          done
       # The gate test reaches mainnet and skips if no liteserver is reachable. It walks
       # the chain either way; what the schedule adds is the walk from the block the config
       # pins, which runs over every key block published since.
