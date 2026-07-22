@@ -214,11 +214,73 @@ fn store_label(into: &mut Builder, label: &[bool], max: u16) -> Result<(), CellE
     Ok(())
 }
 
-/// Builds a leaf: the whole remaining key as a label, then the value.
-fn leaf(key: &[bool], value: &Builder, max: u16) -> Result<Cell, CellError> {
+/// What a dictionary node carries between its label and its value.
+///
+/// A plain node carries nothing there; an augmented one carries a summary of everything
+/// below it. That is the only difference between the two, so the descent, the split and
+/// the rebuild below are written once over this rather than twice.
+trait Shape {
+    /// The summary a node carries, or `()` where it carries none.
+    type Extra;
+
+    /// Writes the summary, after the label and before the value.
+    fn write_extra(&self, extra: &Self::Extra, into: &mut Builder) -> Result<(), CellError>;
+
+    /// Refuses a fork carrying anything this shape has no reading for.
+    ///
+    /// The cursor sits just past the label. Data neither shape accounts for would be
+    /// dropped by a rebuild, so it is refused before one starts.
+    fn check_fork(&self, slice: &mut Slice<'_>) -> Result<(), CellError>;
+
+    /// The summary a fork over these two children carries.
+    ///
+    /// Both are read back off the cells rather than carried down from the walk, because a
+    /// summary from before the change describes the subtree that used to be there.
+    fn fork_extra(&self, left: &Cell, right: &Cell, below: u16)
+        -> Result<Self::Extra, CellError>;
+}
+
+/// The plain shape: a node holds its label and its value and nothing between them.
+struct Plain;
+
+impl Shape for Plain {
+    type Extra = ();
+
+    fn write_extra(&self, _extra: &(), _into: &mut Builder) -> Result<(), CellError> {
+        Ok(())
+    }
+
+    fn check_fork(&self, slice: &mut Slice<'_>) -> Result<(), CellError> {
+        if slice.remaining_bits() == 0 {
+            return Ok(());
+        }
+        Err(CellError::Malformed(
+            "a dictionary fork carrying data past its label",
+        ))
+    }
+
+    fn fork_extra(&self, _left: &Cell, _right: &Cell, _below: u16) -> Result<(), CellError> {
+        Ok(())
+    }
+}
+
+/// What a leaf holds, in the order it holds it.
+struct Entry<'a, S: Shape> {
+    extra: &'a S::Extra,
+    value: &'a Builder,
+}
+
+/// Builds a leaf: the whole remaining key as a label, then what the leaf holds.
+fn leaf<S: Shape>(
+    shape: &S,
+    key: &[bool],
+    entry: &Entry<'_, S>,
+    max: u16,
+) -> Result<Cell, CellError> {
     let mut cell = Builder::new();
     store_label(&mut cell, key, max)?;
-    cell.store_builder(value)?;
+    shape.write_extra(entry.extra, &mut cell)?;
+    cell.store_builder(entry.value)?;
     cell.build()
 }
 
@@ -231,18 +293,31 @@ struct Step {
 }
 
 impl Step {
+    /// The key bits still to spend at either of this fork's children.
+    fn below(&self) -> u16 {
+        #[allow(
+            clippy::cast_possible_truncation,
+            reason = "read_label bounds label.len() to at most remaining, and a fork is only recorded where the label is shorter still, so this fits a u16"
+        )]
+        let spent = self.label.len() as u16;
+        self.remaining - spent - 1
+    }
+
     /// Rebuilds this fork with `child` in place of the branch the walk took.
-    fn rebuild(&self, child: &Cell) -> Result<Cell, CellError> {
+    fn rebuild<S: Shape>(&self, shape: &S, child: &Cell) -> Result<Cell, CellError> {
+        let sibling = self.node.reference(1 - self.branch).ok_or(NO_BRANCH)?;
+        let (left, right) = if self.branch == 0 {
+            (child, sibling)
+        } else {
+            (sibling, child)
+        };
+
         let mut fork = Builder::new();
         store_label(&mut fork, &self.label, self.remaining)?;
-        for branch in 0..2 {
-            let cell = if branch == self.branch {
-                child.clone()
-            } else {
-                self.node.reference(branch).ok_or(NO_BRANCH)?.clone()
-            };
-            fork.store_ref(cell)?;
-        }
+        let extra = shape.fork_extra(left, right, self.below())?;
+        shape.write_extra(&extra, &mut fork)?;
+        fork.store_ref(left.clone())?;
+        fork.store_ref(right.clone())?;
         fork.build()
     }
 }
@@ -403,25 +478,37 @@ impl Dict {
     /// [`CellError::NoRoomForBits`] if the label and the value do not fit one cell.
     pub fn set(&mut self, key: &[u8], value: &Builder) -> Result<(), CellError> {
         let bits = self.key_of(key)?;
+        let entry = Entry {
+            extra: &(),
+            value,
+        };
         let Some(root) = self.root.clone() else {
-            self.root = Some(leaf(&bits, value, self.key_bits)?);
+            self.root = Some(leaf(&Plain, &bits, &entry, self.key_bits)?);
             return Ok(());
         };
 
-        let walk = descend(root, self.key_bits, &bits)?;
+        let walk = descend(&Plain, root, self.key_bits, &bits)?;
         let tail = rest(&bits, walk.consumed);
         let bottom = match walk.diverged {
             // The key leaves this edge partway along it, so the edge becomes a fork over
             // the run they share, with the old subtree on one side and the new leaf on
             // the other.
-            Some(at) => split(&walk.node, &walk.label, at, walk.remaining, tail, value)?,
+            Some(at) => split(
+                &Plain,
+                &walk.node,
+                &walk.label,
+                at,
+                walk.remaining,
+                tail,
+                &entry,
+            )?,
             // The key is spent, so this is its leaf and the value replaces what was there.
-            None => leaf(tail, value, walk.remaining)?,
+            None => leaf(&Plain, tail, &entry, walk.remaining)?,
         };
 
         // Nothing is assigned until the whole path is rebuilt, so a value too large for a
         // leaf leaves the dictionary as it was rather than half written.
-        self.root = Some(rebuild(walk.path, bottom)?);
+        self.root = Some(rebuild(&Plain, walk.path, bottom)?);
         Ok(())
     }
 
@@ -438,7 +525,7 @@ impl Dict {
             return Ok(false);
         };
 
-        let mut walk = descend(root, self.key_bits, &bits)?;
+        let mut walk = descend(&Plain, root, self.key_bits, &bits)?;
         if walk.diverged.is_some() {
             return Ok(false);
         }
@@ -450,7 +537,7 @@ impl Dict {
             self.root = None;
             return Ok(true);
         };
-        self.root = Some(rebuild(walk.path, collapse(&parent)?)?);
+        self.root = Some(rebuild(&Plain, walk.path, collapse(&parent)?)?);
         Ok(true)
     }
 
@@ -504,7 +591,12 @@ struct Walk {
 /// read under the key bits still to spend, so it can never claim more than are left, and
 /// a fork is only descended when its label is shorter than that, which is what leaves
 /// room for the bit that picks the branch.
-fn descend(root: Cell, key_bits: u16, bits: &[bool]) -> Result<Walk, CellError> {
+fn descend<S: Shape>(
+    shape: &S,
+    root: Cell,
+    key_bits: u16,
+    bits: &[bool],
+) -> Result<Walk, CellError> {
     let mut path: Vec<Step> = Vec::new();
     let mut node = root;
     let mut remaining = key_bits;
@@ -533,7 +625,7 @@ fn descend(root: Cell, key_bits: u16, bits: &[bool]) -> Result<Walk, CellError> 
             });
         }
 
-        require_plain_fork(&slice)?;
+        shape.check_fork(&mut slice)?;
         let branch = usize::from(bits.get(consumed + len).copied().unwrap_or(false));
         let child = node.reference(branch).ok_or(NO_BRANCH)?.clone();
         path.push(Step {
@@ -561,32 +653,19 @@ fn diverges(label: &[bool], key: &[bool]) -> Option<usize> {
         .position(|(left, right)| left != right)
 }
 
-/// Refuses a fork carrying anything past its label.
-///
-/// A plain fork is a label and two references. Data after the label is the summary an
-/// augmented dictionary keeps, and copying one forward over a changed subtree would
-/// describe the old subtree.
-fn require_plain_fork(slice: &Slice<'_>) -> Result<(), CellError> {
-    if slice.remaining_bits() == 0 {
-        return Ok(());
-    }
-    Err(CellError::Malformed(
-        "a dictionary fork carrying data past its label",
-    ))
-}
-
 /// Splits `node` at `at`, where its label and the key part company.
 ///
 /// The old node keeps everything below the divergence and is relabelled with what is left
 /// of its label; the new leaf takes the other branch; a fresh fork over their common
 /// prefix stands where the old node stood.
-fn split(
+fn split<S: Shape>(
+    shape: &S,
     node: &Cell,
     label: &[bool],
     at: usize,
     remaining: u16,
     key: &[bool],
-    value: &Builder,
+    entry: &Entry<'_, S>,
 ) -> Result<Cell, CellError> {
     #[allow(
         clippy::cast_possible_truncation,
@@ -601,15 +680,20 @@ fn split(
     kept.store_slice(slice)?;
     let kept = kept.build()?;
 
-    let fresh = leaf(rest(key, at + 1), value, below)?;
+    let fresh = leaf(shape, rest(key, at + 1), entry, below)?;
 
-    let mut fork = Builder::new();
-    store_label(&mut fork, label.get(..at).unwrap_or(&[]), remaining)?;
+    // The old node's label decides which side it lands on: the bit they disagree on is
+    // its bit, so the new leaf takes the other branch.
     let (left, right) = if label.get(at).copied().unwrap_or(false) {
         (fresh, kept)
     } else {
         (kept, fresh)
     };
+
+    let mut fork = Builder::new();
+    store_label(&mut fork, label.get(..at).unwrap_or(&[]), remaining)?;
+    let extra = shape.fork_extra(&left, &right, below)?;
+    shape.write_extra(&extra, &mut fork)?;
     fork.store_ref(left)?;
     fork.store_ref(right)?;
     fork.build()
@@ -624,13 +708,8 @@ fn collapse(parent: &Step) -> Result<Cell, CellError> {
 
     let mut label = parent.label.clone();
     label.push(parent.branch == 0);
-    #[allow(
-        clippy::cast_possible_truncation,
-        reason = "parent.label was read by read_label under parent.remaining as its max, so parent.label.len() <= parent.remaining, which is a u16, so this fits"
-    )]
-    let below = parent.remaining - parent.label.len() as u16 - 1;
     let mut slice = sibling.parse();
-    label.extend_from_slice(&read_label(&mut slice, below)?);
+    label.extend_from_slice(&read_label(&mut slice, parent.below())?);
 
     let mut merged = Builder::new();
     store_label(&mut merged, &label, parent.remaining)?;
@@ -639,9 +718,9 @@ fn collapse(parent: &Step) -> Result<Cell, CellError> {
 }
 
 /// Rebuilds every fork on the path, from the deepest up to the root.
-fn rebuild(mut path: Vec<Step>, mut child: Cell) -> Result<Cell, CellError> {
+fn rebuild<S: Shape>(shape: &S, mut path: Vec<Step>, mut child: Cell) -> Result<Cell, CellError> {
     while let Some(step) = path.pop() {
-        child = step.rebuild(&child)?;
+        child = step.rebuild(shape, &child)?;
     }
     Ok(child)
 }
