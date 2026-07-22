@@ -69,7 +69,7 @@ type Result<T> = napi::Result<T>;
 /// because napi fixes the status of anything returned from an async function to its own
 /// enum, and every call here is async. When that changes, the code moves to `error.code`
 /// and this prefix stays where it is.
-fn to_js(error: ton_net::Error) -> napi::Error {
+fn to_js(error: &ton_net::Error) -> napi::Error {
     // The names come from the core rather than from a table kept here. This was a match
     // per variant ending in a wildcard, and the wildcard was the defect: a variant added
     // to the facade would have gone on compiling and arrived in JavaScript as UNKNOWN.
@@ -89,7 +89,7 @@ fn to_js(error: ton_net::Error) -> napi::Error {
 ///
 /// Carries napi's own `InvalidArg` status as well as the message prefix, since this one
 /// failure is the caller's rather than the network's and `error.code` can say so.
-fn invalid(reason: String) -> napi::Error {
+fn invalid(reason: &str) -> napi::Error {
     // Spelled by the core even though no core error carries it, so that this binding and
     // the ones after it name the caller's own mistake the same way.
     let code = ton_net::ErrorCode::InvalidArgument.as_str();
@@ -136,7 +136,7 @@ pub struct Config {
 impl Config {
     /// Returns a config for TON mainnet from a bundled snapshot.
     #[napi(factory, catch_unwind)]
-    #[must_use] 
+    #[must_use]
     pub fn mainnet() -> Self {
         Self {
             inner: ton_net::Config::mainnet(),
@@ -144,10 +144,21 @@ impl Config {
     }
 
     /// Parses a config from the TON `global.config.json` format.
+    ///
+    /// # Errors
+    ///
+    /// Throws `CONFIG: ` if `json` is malformed, has no liteserver list, a liteserver
+    /// names an unsupported key type or a key that is not 32 bytes, or a block hash in
+    /// the init block is not 32 base64 bytes.
     #[napi(factory, catch_unwind)]
+    #[allow(
+        clippy::needless_pass_by_value,
+        reason = "napi factory exported to JavaScript; the argument type is published \
+                  and cannot become a borrow"
+    )]
     pub fn from_json(json: String) -> Result<Self> {
         Ok(Self {
-            inner: ton_net::Config::from_json(&json).map_err(to_js)?,
+            inner: ton_net::Config::from_json(&json).map_err(|e| to_js(&e))?,
         })
     }
 
@@ -322,10 +333,17 @@ pub struct TonClient {
 #[napi]
 impl TonClient {
     /// Connects to a liteserver from the config and completes the ADNL handshake.
+    ///
+    /// # Errors
+    ///
+    /// Throws `TRANSPORT: ` if no liteserver in `config` is reachable, or `HANDSHAKE: `
+    /// if the last one reached rejects the handshake.
     #[napi]
     pub async fn connect(config: &Config) -> Result<Self> {
         let network = config.inner.clone();
-        let client = ton_net::Client::connect(&network).await.map_err(to_js)?;
+        let client = ton_net::Client::connect(&network)
+            .await
+            .map_err(|e| to_js(&e))?;
         Ok(Self {
             inner: Arc::new(Mutex::new(client)),
         })
@@ -338,13 +356,21 @@ impl TonClient {
     /// worth. Anything that can write to where a caller keeps one can choose what this
     /// client believes. The binding stores nothing and picks no location; a `BlockId` is
     /// an object with two buffers, and where it lives is the caller's decision.
+    ///
+    /// # Errors
+    ///
+    /// Throws `INVALID_ARGUMENT: ` if `anchor`'s shard is not 16 hex digits or either of
+    /// its hashes is not 32 bytes; `TRANSPORT: ` if no liteserver is reachable;
+    /// `HANDSHAKE: ` if the handshake fails; `SYNC: ` if the server cannot prove a chain
+    /// from `anchor`; or `STALE: ` if the block that chain leads to is older than the
+    /// config's freshness bound.
     #[napi]
     pub async fn connect_from(config: &Config, anchor: BlockId) -> Result<Self> {
         let network = config.inner.clone();
         let start = block_id_ext(&anchor)?;
         let client = ton_net::Client::connect_from(&network, &start)
             .await
-            .map_err(to_js)?;
+            .map_err(|e| to_js(&e))?;
         Ok(Self {
             inner: Arc::new(Mutex::new(client)),
         })
@@ -364,22 +390,45 @@ impl TonClient {
     /// Without an anchor the walk starts at the config's init block, which is a first
     /// sync and runs over every key block published since: minutes and tens of megabytes
     /// against mainnet. With one it is a link or two.
+    ///
+    /// # Errors
+    ///
+    /// Throws `CONFIG: ` if there is neither a stored anchor nor an init block, `SYNC: `
+    /// if the proof chain does not check out or the server will not finish it, `STALE: `
+    /// if the head it leads to is older than the config's freshness bound, or a transport
+    /// code (`TRANSPORT: `, `TIMEOUT: `, `DECODE: `, `LITESERVER: `, or
+    /// `CONNECTION_LOST: `) if a read along the way fails.
     #[napi]
     pub async fn sync(&self) -> Result<SyncReport> {
-        let mut client = self.inner.lock().await;
-        let report = client.sync().await.map_err(to_js)?;
-        Ok(SyncReport {
+        let report = {
+            let mut client = self.inner.lock().await;
+            client.sync().await.map_err(|e| to_js(&e))?
+        };
+        #[allow(
+            clippy::cast_possible_truncation,
+            reason = "napi carries no usize, and a sync fails past 4096 links and 512 rounds"
+        )]
+        let sync_report = SyncReport {
             head: block_id(&report.head),
             links: report.links as u32,
             rounds: report.rounds as u32,
-        })
+        };
+        Ok(sync_report)
     }
 
     /// Reads the liteserver's current masterchain head.
+    ///
+    /// # Errors
+    ///
+    /// Throws `TIMEOUT: ` if the query does not complete in time, `LITESERVER: ` if the
+    /// server returns an error of its own, `DECODE: ` if the response does not decode, or
+    /// `TRANSPORT: ` on a socket failure.
     #[napi]
     pub async fn masterchain_info(&self) -> Result<ReportedMasterchainInfo> {
-        let mut client = self.inner.lock().await;
-        let reported = client.masterchain_info().await.map_err(to_js)?;
+        let reported = {
+            let mut client = self.inner.lock().await;
+            client.masterchain_info().await.map_err(|e| to_js(&e))?
+        };
         let proof = Buffer::from(reported.proof().to_vec());
         Ok(ReportedMasterchainInfo {
             value: block_id(&reported.into_value().last),
@@ -396,14 +445,24 @@ impl TonClient {
     ///
     /// Every call walks. A caller reading several accounts should `sync()` once and pass
     /// that head to `accountAt` rather than pay for a walk per account.
+    ///
+    /// # Errors
+    ///
+    /// Throws `ADDRESS: ` if `address` does not parse; `CONFIG: ` if there is nothing to
+    /// start a walk from; `SYNC: ` if the proof chain does not check out; `STALE: ` if
+    /// the head it reaches is older than the config's freshness bound; `PROOF: ` if the
+    /// account does not bind to that head; or a transport code if a read along the way
+    /// fails.
     #[napi]
     pub async fn account(&self, address: String) -> Result<VerifiedAccount> {
-        let parsed = ton_net::Address::parse(&address).map_err(to_js)?;
-        let mut client = self.inner.lock().await;
-        let verified = client.account(&parsed).await.map_err(to_js)?;
+        let parsed = ton_net::Address::parse(&address).map_err(|e| to_js(&e))?;
+        let verified = {
+            let mut client = self.inner.lock().await;
+            client.account(&parsed).await.map_err(|e| to_js(&e))?
+        };
         Ok(VerifiedAccount {
             anchor: block_id(verified.anchor()),
-            value: account(verified.into_value()),
+            value: account(&verified.into_value()),
         })
     }
 
@@ -412,14 +471,27 @@ impl TonClient {
     /// The result is the server's word: the proof it sent comes back alongside,
     /// unchecked. It is named for what it is, because the proven read is the one a caller
     /// lands on without choosing and this is the exception.
+    ///
+    /// # Errors
+    ///
+    /// Throws `ADDRESS: ` if `address` does not parse; `TIMEOUT: ` if a query does not
+    /// complete in time; `LITESERVER: ` if the server returns an error; `DECODE: ` if a
+    /// response does not decode; `CELL: ` if the account state does not read as an
+    /// account; or `TRANSPORT: ` on a socket failure. Never `PROOF: `, since this call
+    /// checks no proof.
     #[napi]
     pub async fn account_reported(&self, address: String) -> Result<ReportedAccount> {
-        let parsed = ton_net::Address::parse(&address).map_err(to_js)?;
-        let mut client = self.inner.lock().await;
-        let reported = client.account_reported(&parsed).await.map_err(to_js)?;
+        let parsed = ton_net::Address::parse(&address).map_err(|e| to_js(&e))?;
+        let reported = {
+            let mut client = self.inner.lock().await;
+            client
+                .account_reported(&parsed)
+                .await
+                .map_err(|e| to_js(&e))?
+        };
         let proof = Buffer::from(reported.proof().to_vec());
         Ok(ReportedAccount {
-            value: account(reported.into_value()),
+            value: account(&reported.into_value()),
             proof,
         })
     }
@@ -437,15 +509,28 @@ impl TonClient {
     /// server agrees with itself. The two sources that mean something are a block this
     /// client proved, from `sync()` or `anchor()`, and a block the caller trusts
     /// independently.
+    ///
+    /// # Errors
+    ///
+    /// Throws `INVALID_ARGUMENT: ` if `trusted`'s shard is not 16 hex digits or either
+    /// hash is not 32 bytes; `ADDRESS: ` if `address` does not parse; `PROOF: ` if
+    /// `trusted` is not a masterchain block, a proof does not check out, or the account
+    /// does not bind to `trusted`; or `TIMEOUT: `, `LITESERVER: `, `DECODE: `, or
+    /// `TRANSPORT: ` as the read fails.
     #[napi]
     pub async fn account_at(&self, address: String, trusted: BlockId) -> Result<VerifiedAccount> {
-        let parsed = ton_net::Address::parse(&address).map_err(to_js)?;
+        let parsed = ton_net::Address::parse(&address).map_err(|e| to_js(&e))?;
         let anchor = block_id_ext(&trusted)?;
-        let mut client = self.inner.lock().await;
-        let verified = client.account_at(&parsed, &anchor).await.map_err(to_js)?;
+        let verified = {
+            let mut client = self.inner.lock().await;
+            client
+                .account_at(&parsed, &anchor)
+                .await
+                .map_err(|e| to_js(&e))?
+        };
         Ok(VerifiedAccount {
             anchor: block_id(verified.anchor()),
-            value: account(verified.into_value()),
+            value: account(&verified.into_value()),
         })
     }
 
@@ -454,16 +539,28 @@ impl TonClient {
     /// The bytes come back as the server sent them, unchecked and undecoded. This is the
     /// way out for a caller who wants to keep the proofs, check them elsewhere, or check
     /// them against an anchor obtained later, with `verifyAccount`.
+    ///
+    /// # Errors
+    ///
+    /// Throws `INVALID_ARGUMENT: ` if `block`'s shard is not 16 hex digits or either hash
+    /// is not 32 bytes; `ADDRESS: ` if `address` does not parse; `TIMEOUT: ` if the query
+    /// does not complete in time; `LITESERVER: ` if the server returns an error;
+    /// `DECODE: ` if the response does not decode; or `TRANSPORT: ` on a socket failure.
     #[napi]
     pub async fn account_state(
         &self,
         address: String,
         block: BlockId,
     ) -> Result<ReportedAccountState> {
-        let parsed = ton_net::Address::parse(&address).map_err(to_js)?;
+        let parsed = ton_net::Address::parse(&address).map_err(|e| to_js(&e))?;
         let at = block_id_ext(&block)?;
-        let mut client = self.inner.lock().await;
-        let reported = client.account_state(&parsed, &at).await.map_err(to_js)?;
+        let reported = {
+            let mut client = self.inner.lock().await;
+            client
+                .account_state(&parsed, &at)
+                .await
+                .map_err(|e| to_js(&e))?
+        };
         let proof = Buffer::from(reported.proof().to_vec());
         let state = reported.into_value();
         Ok(ReportedAccountState {
@@ -488,9 +585,16 @@ impl TonClient {
 /// The check reaches no network and depends on nothing but its argument, so the same
 /// bytes always give the same answer. It throws if the proof does not root at the trusted
 /// hash, or if the account does not bind to it.
+///
+/// # Errors
+///
+/// Throws `ADDRESS: ` if `read.address` does not parse; `INVALID_ARGUMENT: ` if
+/// `trustedRootHash` is not 32 bytes, or if `shardProof` is missing for an address
+/// outside the masterchain; `PROOF: ` if the proof does not root at the trusted hash or
+/// the account does not bind to it; or `CELL: ` if the bytes are not cells at all.
 #[napi(catch_unwind)]
 pub fn verify_account(read: AccountRead) -> Result<Account> {
-    let parsed = ton_net::Address::parse(&read.address).map_err(to_js)?;
+    let parsed = ton_net::Address::parse(&read.address).map_err(|e| to_js(&e))?;
     let anchor = hash(&read.trusted_root_hash, "trustedRootHash")?;
     let shard_proof = read.shard_proof.unwrap_or_default();
 
@@ -500,9 +604,7 @@ pub fn verify_account(read: AccountRead) -> Result<Account> {
         // Without it there is no step tying the shard to the trusted block. Saying so
         // beats letting empty bytes fail later as bytes that are not cells, which points
         // at the wrong thing.
-        return Err(invalid(
-            "shardProof is required outside the masterchain".to_string(),
-        ));
+        return Err(invalid("shardProof is required outside the masterchain"));
     } else {
         ton_net::AccountRead::in_shard(
             &anchor,
@@ -513,11 +615,13 @@ pub fn verify_account(read: AccountRead) -> Result<Account> {
             &read.state,
         )
     };
-    Ok(account(ton_net::verify_account(&checked).map_err(to_js)?))
+    Ok(account(
+        &ton_net::verify_account(&checked).map_err(|e| to_js(&e))?,
+    ))
 }
 
 /// Maps a decoded account across the boundary.
-fn account(account: ton_net::Account) -> Account {
+fn account(account: &ton_net::Account) -> Account {
     use ton_net::AccountStatus;
 
     let status = match &account.status {
@@ -579,13 +683,13 @@ fn block_id(id: &ton_net::BlockIdExt) -> BlockId {
 fn block_id_ext(id: &BlockId) -> Result<ton_net::BlockIdExt> {
     let shard = id.shard.strip_prefix("0x").unwrap_or(&id.shard);
     if shard.len() != 16 || !shard.bytes().all(|c| c.is_ascii_hexdigit()) {
-        return Err(invalid(format!(
+        return Err(invalid(&format!(
             "shard must be 16 hex digits, got {:?}",
             id.shard
         )));
     }
     let shard = u64::from_str_radix(shard, 16)
-        .map_err(|_| invalid(format!("shard is not a hex u64: {:?}", id.shard)))?;
+        .map_err(|_| invalid(&format!("shard is not a hex u64: {:?}", id.shard)))?;
     Ok(ton_net::BlockIdExt::new(
         id.workchain,
         shard,
@@ -598,7 +702,7 @@ fn block_id_ext(id: &BlockId) -> Result<ton_net::BlockIdExt> {
 /// Reads a 32-byte hash out of a Buffer, naming the field when the length is wrong.
 fn hash(bytes: &[u8], field: &str) -> Result<[u8; HASH_LEN]> {
     <[u8; HASH_LEN]>::try_from(bytes).map_err(|_| {
-        invalid(format!(
+        invalid(&format!(
             "{field} must be {HASH_LEN} bytes, got {}",
             bytes.len()
         ))
