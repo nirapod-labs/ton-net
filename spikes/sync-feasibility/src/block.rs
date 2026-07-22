@@ -10,7 +10,8 @@
 use std::collections::HashMap;
 
 use sha2::{Digest, Sha256};
-use ton_net_block::{dict, proof::verify_merkle_proof, Lookup};
+use ton_net_block::{proof::verify_merkle_proof, Lookup};
+use ton_net_cell::Dict;
 use ton_net_cell::{parse_boc, Cell, Slice};
 
 /// `block#11ef55aa`
@@ -177,7 +178,8 @@ pub fn validator_set(config_proof: &[u8], root_hash: &[u8; 32]) -> Result<Valida
     s.skip_bits(256).map_err(cell_err)?; // config_addr
     let config_root = s.load_ref().map_err(cell_err)?;
 
-    let entry = match dict::lookup(config_root, 32, &CURRENT_VALIDATORS.to_be_bytes())
+    let entry = match Dict::from_root(Some(config_root.clone()), 32)
+        .and_then(|params| params.get(&CURRENT_VALIDATORS.to_be_bytes()))
         .map_err(|e| format!("config dictionary: {e}"))?
     {
         Lookup::Found(entry) => entry,
@@ -227,10 +229,12 @@ fn read_validator_set(param: &Cell) -> Result<ValidatorSet, Error> {
     // The masterchain set is the head of the list. The reference implementation may
     // permute those entries with a seeded generator, but the permutation is over
     // exactly these, so membership and weight are the same either way.
+    let entries = Dict::from_root(Some(list.clone()), 16).map_err(cell_err)?;
     let mut weights = HashMap::with_capacity(main as usize);
     let mut total_weight = 0u64;
     for index in 0..main {
-        let entry = match dict::lookup(list, 16, &index.to_be_bytes())
+        let entry = match entries
+            .get(&index.to_be_bytes())
             .map_err(|e| format!("validator {index}: {e}"))?
         {
             Lookup::Found(entry) => entry,
