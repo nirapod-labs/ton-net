@@ -111,9 +111,14 @@ Ordered by dependency first and value second.
 ### v0.4.0: Cell engine to full capability
 
 The critical path, and nothing else can start ahead of it. Builders
-and slices, the five dictionary variants, augmented dictionaries, prefix
-dictionaries, usage trees, virtualization, lazy and large BoC handling, and Merkle
-proof **creation** rather than verification alone.
+and slices, the plain and augmented dictionaries with their write paths, usage
+trees, virtualization, lazy and large BoC handling, and Merkle proof **creation**
+rather than verification alone.
+
+Prefix dictionaries are not here. Nothing this client decodes uses one, no fixture
+anywhere holds one, and a variant that can only be tested against itself is worth
+less than one held to mainnet bytes. Their consumer is the `PFXDICT` opcode family,
+so they land with the TVM below and the emulator that can grade them.
 
 The wallet, the full TL-B set and the TVM each depend on it.
 
@@ -182,6 +187,9 @@ them, and the corpus is captured from mainnet and re-derived against the emulato
 rather than taken from elsewhere. BLS12-381 and secp256k1 come from `blst` and the
 libsecp256k1 bindings rather than being hand-written. Each opcode declares its minimum
 `global_version` and an inventory test asserts the table is complete.
+
+Prefix dictionaries land here, with the `PFXDICT` opcodes that are the only thing
+on TON that reads one, and against an emulator that can say whether they are right.
 
 Expect no user-visible progress until the harness runs. That is the correct shape
 of this milestone.
