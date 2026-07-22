@@ -102,10 +102,15 @@ pub struct Config {
     inner: ton_net::Config,
 }
 
+// Every synchronous entry point in this crate carries `catch_unwind`, and the asynchronous
+// ones do not need it: a panic crossing the `extern "C"` frame kills the embedding process
+// rather than failing one call, and napi already wraps each poll of an async function. The
+// lints on the core crates make a panic unlikely rather than impossible, and by their own
+// terms they do not reach arithmetic or a dependency's unwrap.
 #[napi]
 impl Config {
     /// Returns a config for TON mainnet from a bundled snapshot.
-    #[napi(factory)]
+    #[napi(factory, catch_unwind)]
     pub fn mainnet() -> Config {
         Config {
             inner: ton_net::Config::mainnet(),
@@ -113,7 +118,7 @@ impl Config {
     }
 
     /// Parses a config from the TON `global.config.json` format.
-    #[napi(factory)]
+    #[napi(factory, catch_unwind)]
     pub fn from_json(json: String) -> Result<Config> {
         Ok(Config {
             inner: ton_net::Config::from_json(&json).map_err(to_js)?,
@@ -130,7 +135,7 @@ impl Config {
     ///
     /// Zero refuses every head, which is a way to say the client should not proceed on a
     /// proven read at all.
-    #[napi]
+    #[napi(catch_unwind)]
     #[must_use]
     pub fn with_max_head_age(&self, seconds: u32) -> Config {
         Config {
@@ -139,7 +144,7 @@ impl Config {
     }
 
     /// How old a proven head may be before a sync refuses it, in seconds.
-    #[napi(getter)]
+    #[napi(getter, catch_unwind)]
     #[must_use]
     pub fn max_head_age(&self) -> u32 {
         self.inner.max_head_age()
@@ -457,7 +462,7 @@ impl TonClient {
 /// The check reaches no network and depends on nothing but its argument, so the same
 /// bytes always give the same answer. It throws if the proof does not root at the trusted
 /// hash, or if the account does not bind to it.
-#[napi]
+#[napi(catch_unwind)]
 pub fn verify_account(read: AccountRead) -> Result<Account> {
     let parsed = ton_net::Address::parse(&read.address).map_err(to_js)?;
     let anchor = hash(&read.trusted_root_hash, "trustedRootHash")?;
