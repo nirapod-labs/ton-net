@@ -77,3 +77,10 @@ pub use validators::{Validator, ValidatorSet};
 /// The block identity and proof-chain types [`verify_chain`] reads, re-exported from
 /// ton-net-tl so a caller need not name that crate to check a chain.
 pub use ton_net_tl::lite::{BlockIdExt, BlockLink, PartialBlockProof};
+
+// The README ships to crates.io and cannot be replaced once a version is published,
+// so its examples are compiled here rather than trusted. Doc-only: this does not
+// appear in the rendered documentation.
+#[cfg(doctest)]
+#[doc = include_str!("../README.md")]
+struct Readme;

@@ -53,3 +53,10 @@ pub use ton_net_tl::lite::AccountId;
 /// The block-proof types [`LiteClient::block_proof`] answers with, re-exported from
 /// ton-net-tl so a caller need not name that crate to read a chain.
 pub use ton_net_tl::lite::{BlockLink, PartialBlockProof, Signature, SignatureSet};
+
+// The README ships to crates.io and cannot be replaced once a version is published,
+// so its examples are compiled here rather than trusted. Doc-only: this does not
+// appear in the rendered documentation.
+#[cfg(doctest)]
+#[doc = include_str!("../README.md")]
+struct Readme;

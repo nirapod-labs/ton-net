@@ -15,10 +15,10 @@ NET-ADR-004 fixed two things: a binding order that placed Node, browser, Python,
 Swift and Kotlin inside v1.0.0, and a versioning scheme of one lockstep library
 version mapped to each registry as the identity where the registry allows it.
 
-NET-ADR-008 changed the scope under both. Parity is roughly 101,000 lines of new
-core. Five binding surfaces multiply every core addition by five, and the
-comparison itself is the argument: tonutils-go reached 110,109 lines carrying no
-bindings whatsoever, which is how one maintainer got there in four years.
+NET-ADR-008 changed the scope under both. What v1.0.0 now covers is several times
+what exists, and five binding surfaces multiply every core addition by five. A core
+that size is not one a single maintainer can carry to completeness while chasing
+five of them.
 
 The versioning half needs replacing for a different reason. What NET-ADR-004
 describes is a single SemVer number and a registry mapping, which is the right

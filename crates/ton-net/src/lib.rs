@@ -132,3 +132,10 @@ pub use ton_net_block::{Account, AccountRead, AccountStatus, Coins};
 
 /// The cell types a decoded account carries, defined in ton-net-cell and surfaced here.
 pub use ton_net_cell::{Cell, CellType};
+
+// The README ships to crates.io and cannot be replaced once a version is published,
+// so its examples are compiled here rather than trusted. Doc-only: this does not
+// appear in the rendered documentation.
+#[cfg(doctest)]
+#[doc = include_str!("../README.md")]
+struct Readme;

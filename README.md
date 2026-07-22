@@ -7,14 +7,11 @@ Today that is TL, ADNL over TCP, the liteserver query layer, Merkle-proof
 verification, and key-block sync: enough to read an account and prove it against
 a block the client walked to itself, from Rust or from Node.
 
-**It is early.** Measured against tonutils-go, the fullest client that exists,
-ton-net covers **8 per cent** of the surface. Sending a transaction, wallets, the
-DHT, RLDP, overlays and a TVM are all still ahead, and so are the browser,
-Python, Swift and Kotlin bindings. What is here is finished and proven against
-mainnet; there is simply not much of it yet. The
-[roadmap](docs/roadmap.md) is the measured plan and
-[NET-ADR-008](docs/adr/NET-ADR-008-parity-scope.md) is where the number comes
-from.
+**It is early.** Sending a transaction, wallets, the DHT, RLDP, overlays and local
+contract execution are all still ahead, and so are the browser, Python, Swift and
+Kotlin bindings. What is here is finished and proven against mainnet; there is not
+much of it yet. The [roadmap](docs/roadmap.md) is the order it arrives in and
+[NET-ADR-008](docs/adr/NET-ADR-008-scope-and-write-path.md) is the scope.
 
 ---
 
@@ -27,9 +24,8 @@ in exactly two community languages.
 
 | Language | Full network client today |
 |---|---|
-| Go | tonutils-go |
-| Python | pytoniq |
-| C++ | the reference node (LGPL, not embeddable) |
+| Go, Python | a complete client exists |
+| C++ | the reference node, LGPL and not embeddable |
 | **Rust** | **nothing complete** |
 | **TypeScript / JS** | liteserver-over-TCP only; no DHT, no UDP, no proofs |
 | **Swift, Kotlin, Dart** | **nothing native; HTTP indexer or C++ FFI** |
@@ -72,10 +68,10 @@ release it lands in.
   result is trustless, not server-reported (v0.10.0). Until it lands a TON
   balance is a proven read and a jetton balance is not.
 
-v1.0.0 is feature parity with tonutils-go at commit `749603a`, plus full wallet
-support, across the Rust core and the Node binding. Parity is measured against
-that pinned commit, because a target that ships weekly is not a gate that can
-pass. See [NET-ADR-008](docs/adr/NET-ADR-008-parity-scope.md).
+v1.0.0 is the whole surface a TON client speaks, plus the write path, across the
+Rust core and the Node binding. What that surface is comes from TON's own schemas
+rather than from any implementation of them. See
+[NET-ADR-008](docs/adr/NET-ADR-008-scope-and-write-path.md).
 
 ---
 
@@ -85,8 +81,8 @@ The design is complete; code is phased. Read in order:
 
 1. [NET-ADR-001](docs/adr/NET-ADR-001-architecture.md): one Rust core with
    per-language bindings, and why not one implementation per language.
-2. [NET-ADR-008](docs/adr/NET-ADR-008-parity-scope.md): the scope, measured
-   against a pinned commit of the fullest client that exists.
+2. [NET-ADR-008](docs/adr/NET-ADR-008-scope-and-write-path.md): the scope, and why
+   the write path belongs in it.
 3. [NET-ADR-003](docs/adr/NET-ADR-003-dependencies.md): the crate selection, and
    why the mature dependency lines.
 4. [NET-ADR-009](docs/adr/NET-ADR-009-versioning-and-binding-sequence.md): one

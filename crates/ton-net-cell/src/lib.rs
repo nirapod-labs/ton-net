@@ -79,3 +79,10 @@ pub use boc::{parse_boc, serialize_boc, MAX_CELLS, MAX_DEPTH};
 pub use cell::{Cell, CellType};
 pub use error::CellError;
 pub use slice::Slice;
+
+// The README ships to crates.io and cannot be replaced once a version is published,
+// so its examples are compiled here rather than trusted. Doc-only: this does not
+// appear in the rendered documentation.
+#[cfg(doctest)]
+#[doc = include_str!("../README.md")]
+struct Readme;

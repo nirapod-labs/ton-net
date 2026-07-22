@@ -6,9 +6,9 @@ network client written once in Rust.
 TON's ADNL protocol over TCP: the handshake, the session key derivation, and the
 encrypted stream framing a liteserver connection runs on.
 
-The protocol logic is sans-I/O over a transport trait, so the same code runs on
-tokio TCP natively and on a WebSocket in a browser, where raw sockets do not
-exist.
+The protocol logic is sans-I/O over a transport trait. Today the one implementation
+is tokio TCP; the seam exists so a browser, which cannot open a raw socket, can
+supply a WebSocket instead without the protocol code knowing.
 
 ## Using it
 

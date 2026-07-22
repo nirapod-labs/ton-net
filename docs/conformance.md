@@ -88,7 +88,7 @@ produces. This measures execution fidelity, the one property a local TVM must ha
 
 During development, before the vector corpus is complete, every resolved address,
 every proof, and every block-sync walk is cross-checked live against the reference
-node and a known-good client (pytoniq, tonutils-go) until agreement is consistent.
+node and an independent client until agreement is consistent.
 Then the crutch is dropped and the pinned vectors carry the guarantee. This is the
 libsignal cross-version approach adapted: agreement is established against an
 external oracle first, then frozen into vectors that stand without it.

@@ -94,6 +94,20 @@ kind without matching prose:
 The code is in the message rather than in `error.code` because the async
 boundary in this binding pins the error type to Node's own status enum.
 
+## Knowing when the rules changed
+
+`verifyEpoch()` returns an integer that rises whenever the set of things this
+library accepts as proven changes. The package version cannot answer that, because
+the accept and reject boundary moves independently of any signature.
+
+```js
+import { verifyEpoch } from "ton-net";
+
+if (cached.epoch < verifyEpoch()) {
+  // this build accepts a different set of things; verify again
+}
+```
+
 ## What is still taken on trust
 
 Two things, and they are the whole list:

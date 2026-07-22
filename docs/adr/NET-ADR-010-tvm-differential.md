@@ -12,40 +12,26 @@ superseded-by: none
 ## Context
 
 NET-ADR-005 decided to include a TVM and to prefer adapting an existing
-permissively licensed Rust TVM over writing one, contingent on a validation gate.
-It recorded that candidates existed in the Everscale and TON-fork lineages, that
-none had been confirmed byte-exact against TON mainnet semantics, and that the
-Everscale virtual machine had diverged from TON's over time. It named the
-fallback, a port of the reference C++ semantics, as the larger effort.
+permissively licensed Rust one, contingent on a validation gate. It recorded that
+candidates existed in the Everscale and TON-fork lineages, that none had been
+confirmed byte-exact against TON mainnet semantics, and that the Everscale virtual
+machine had diverged from TON's over time. It named the fallback, a port of the
+reference C++ semantics, as the larger effort.
 
-The cost of that fallback is no longer an estimate. tonutils-go's TVM has been
-measured at commit `749603a`:
+Surveying what it takes to finish one changes the shape of the decision rather than
+only its size.
 
-| Part | Source | Tests |
-|---|---:|---:|
-| Opcodes, across eight packages | 27,112 | 54,594 |
-| Virtual machine core, transaction emulation, fees, actions, bounce | 9,648 | 102,397 |
-| BLS12-381 and secp256k1, vendored | 2,346 | 779 |
-| Cell engine it runs on | 20,392 | 18,556 |
+The expense is not writing the virtual machine. It is proving the virtual machine
+matches. In implementations that have got there, the opcode test corpus runs to
+roughly twice the opcode source, and almost all of it is differential: the same
+input through the reference emulator, and the results compared. A TVM without that
+harness is not a cheaper TVM, it is an unvalidated one, and an unvalidated TVM
+computing a balance differently from the network is worse than returning the
+server's answer and saying so.
 
-It landed as "partial TVM implementation" in March 2025 and is still taking fixes
-sixteen months later. Beside the code sit 13 MB of captured mainnet corpora,
-including a 9.5 MB replay-mismatch regression file.
-
-Two facts follow, and they change the decision rather than merely sizing it.
-
-The first is that the expense is not in writing the virtual machine. It is in
-proving the virtual machine matches. The opcode tests are twice the opcode source,
-and almost every one of them is named `*_cross_emulator_test.go`: they run the
-same input through the C++ emulator and compare. A TVM without that harness is not
-a cheaper TVM, it is an unvalidated one, and an unvalidated TVM computing a
-balance differently from the network is worse than returning the server's answer
-and saying so.
-
-The second is that the corpus is separable from the code. Test vectors are
-observations about TON, not an implementation of it, and tonutils-go is MIT
-licensed. The most expensive asset in that repository can be taken without taking
-a line of its logic.
+That also means the validation is owed whichever route is taken. Adapting an
+existing implementation saves the part that is cheap and owes the part that costs,
+over code whose divergences from TON are unknown.
 
 ## Decision
 
@@ -58,11 +44,10 @@ implementation. Opcodes land with their differential cases, never ahead of them.
 This inverts NET-ADR-005's ordering, which treated conformance as a gate at the
 end of the milestone.
 
-**Import the corpora, not the code.** tonutils-go's captured mainnet replay data,
-block fixtures and opcode matrices are taken under MIT with attribution recorded
-in `NOTICE` and `THIRD-PARTY-LICENSES.md`, and the SPDX headers name the origin.
-Expected values are re-derived against the C++ emulator where the harness can do
-it, so the corpus is used as input rather than as an oracle.
+**Capture the corpus, do not inherit it.** The replay cases are taken from mainnet
+and their expected values derived against the reference emulator. A corpus is only
+worth what its oracle is, and the emulator is the oracle either way, so borrowing
+one would still leave every value to re-derive.
 
 **Do not adapt an existing Rust TVM.** NET-ADR-005 preferred adaptation, and the
 measurement removes its premise. The saving adaptation offers is in the part that
@@ -71,11 +56,10 @@ machine whose divergences are unknown has to be differentially tested against th
 C++ emulator opcode by opcode, which is the same harness and the same corpus,
 against code nobody in this project wrote.
 
-**Use audited cryptographic crates rather than vendoring.** tonutils-go vendors
-1,998 lines of BLS12-381 and 348 of secp256k1. `blst` and the libsecp256k1
-bindings are reviewed implementations carrying far more scrutiny than either.
-For a library whose claim is verification, the provenance of the pairing code is
-part of the claim.
+**Use audited cryptographic crates rather than writing the primitives.** `blst`
+and the libsecp256k1 bindings carry far more scrutiny than anything written here
+would. For a library whose claim is verification, the provenance of the pairing
+code is part of the claim.
 
 **Gate opcodes on the TVM global version.** Each opcode declares its minimum
 `global_version`, the supported range is published in the support manifest
@@ -90,13 +74,12 @@ is carried forward unchanged.
 
 ## Alternatives considered
 
-- **Adapt an existing Rust TVM, as NET-ADR-005 preferred.** Rejected on the
-  measurement. Adaptation saves the cheap half and owes the expensive half, over
-  code whose divergences from TON are unknown and, for the Everscale lineage,
-  known to exist.
-- **Defer the TVM past v1.0.0.** Rejected under NET-ADR-008's parity bar. It was
-  also the recommendation that the scope analysis supported and that was declined
-  deliberately, so this record does not reopen it.
+- **Adapt an existing Rust TVM, as NET-ADR-005 preferred.** Rejected. Adaptation
+  saves the cheap half and owes the expensive half, over code whose divergences
+  from TON are unknown and, for the Everscale lineage, known to exist.
+- **Defer the TVM past v1.0.0.** Rejected under NET-ADR-008. Without it a
+  get-method result is the server's word, which is the largest remaining hole in an
+  otherwise verified client.
 - **Write the TVM first and validate at the end.** Rejected. It is how a virtual
   machine reaches "almost correct" and stays there, because the failures that
   matter are in opcodes nobody thought to write a case for. The harness only finds
@@ -104,10 +87,9 @@ is carried forward unchanged.
 - **Vendor the cryptographic primitives for control.** Rejected. Control over a
   pairing implementation is not an asset this project wants; a reviewed
   implementation is.
-- **Take tonutils-go's opcode implementations directly.** Rejected for the reasons
-  in NET-ADR-008: a garbage-collected pointer graph and an `any`-typed stack
-  translate into poor Rust, and the provenance of a security library's hot path
-  should be its own.
+- **Translate an implementation from another language.** Rejected. A
+  garbage-collected pointer graph and a dynamically typed stack become poor Rust,
+  and the provenance of a security library's hot path should be its own.
 
 ## Consequences
 
@@ -116,11 +98,8 @@ is carried forward unchanged.
   should be planned for rather than discovered.
 - CI gains a C++ toolchain and a pinned emulator build. It is the heaviest job in
   the pipeline and it is on the critical path for the milestone.
-- Attribution obligations are permanent. The corpus stays credited in `NOTICE` and
-  `THIRD-PARTY-LICENSES.md` for as long as it ships.
 - The cell engine must reach full capability first. The virtual machine runs on
-  builders, slices, dictionaries and virtualization that the current 2,138-line
-  cell crate does not have.
+  builders, slices, dictionaries and virtualization the cell crate does not have.
 - Opcodes are cheap to add once the harness exists, which makes the milestone's
   progress measurable in a way the previous plan's single end gate did not.
 
@@ -142,8 +121,8 @@ caller cannot mistake a computed answer for a trusted one.
 
 - The differential harness runs before the first opcode merges, and every opcode
   merges with its cases.
-- The imported corpus replays against the Rust implementation and the C++ emulator
-  and the results agree.
+- The captured corpus replays against the Rust implementation and the emulator and
+  the results agree.
 - An inventory test asserts every opcode declares a minimum global version.
 - The published support manifest names the supported `global_version` range, and
   it is checked against the opcode table rather than written by hand.

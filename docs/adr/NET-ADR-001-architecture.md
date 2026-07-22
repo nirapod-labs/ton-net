@@ -23,8 +23,8 @@ and Merkle-proof verification, validator-signature block sync, and a TVM. All of
 it parses attacker-controllable bytes off the open internet, and the proof and
 signature paths are where a subtle error silently defeats the whole guarantee.
 
-The landscape (NET-ADR-008 records it in full) shows the gap: a complete native
-client exists only in Go (tonutils-go) and Python (pytoniq); the C++ reference is
+The landscape shows the gap: a complete native client exists only in Go and
+Python; the C++ reference is
 LGPL and not embeddable; Rust has nothing complete; TypeScript has liteserver over
 TCP but no DHT, no UDP, no proofs; Swift, Kotlin and Dart have nothing native and
 fall back to an HTTP indexer or C++ FFI. No existing Rust crate can be wrapped:

@@ -52,3 +52,10 @@ pub mod signed;
 
 #[doc(no_inline)]
 pub use tl_proto::{deserialize, serialize, TlError, TlRead, TlResult, TlWrite};
+
+// The README ships to crates.io and cannot be replaced once a version is published,
+// so its examples are compiled here rather than trusted. Doc-only: this does not
+// appear in the rendered documentation.
+#[cfg(doctest)]
+#[doc = include_str!("../README.md")]
+struct Readme;
