@@ -68,36 +68,22 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      # Once the release pull request merges, the manifests carry a version the tags
-      # do not, and this closes that gap. `release.yml` wakes on the tag it pushes.
+      # The tag is deliberately not cut here.
       #
-      # The tag is cut here rather than by `release-plz release`, which also publishes:
-      # this job has no rights to mint a registry token and should not acquire any, and
-      # a tag standing without a publish is recoverable where the reverse is not.
-      # `git_release_enable` in release-plz.toml therefore governs a subcommand nothing
-      # runs; the GitHub release is created by `release.yml`, from the changelog.
-      #
-      # Idempotent because a push to main that is not a merged release is the common
-      # case: the tag either already exists or the version has not moved, and both
-      # mean there is nothing to do.
-      - name: tag a merged release
+      # v0.1.0 and v0.2.0 are both GPG signed by the maintainer, and a runner cannot
+      # reproduce that without holding the signing key, which is the long-lived
+      # credential this whole arrangement exists to avoid. A job that tagged from here
+      # would quietly replace a signed tag with an unsigned one, and the version after
+      # would be the first nobody could verify the provenance of.
+      - name: say what remains
         run: |
           set -euo pipefail
           version=$(node -p "require('./bindings/node/package.json').version")
-          if [ -z "$version" ]; then
-            echo "::error::no version in bindings/node/package.json"
-            exit 1
-          fi
           if git rev-parse -q --verify "refs/tags/v$version" >/dev/null; then
-            echo "v$version is already tagged; nothing to release"
+            echo "v$version is tagged; release.yml owns it from here"
             exit 0
           fi
-          # check-versions.mjs is what proves this one string is the version in all
-          # seven crates and all eight packages. Tagging on a tree it rejects would
-          # publish a version that means something different in each manifest.
+          # Proves this one string is the version in all seven crates and all eight
+          # packages before anyone signs a tag over it.
           node scripts/check-versions.mjs
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git tag -a "v$version" -m "ton-net v$version"
-          git push origin "v$version"
-          echo "tagged v$version"
+          echo "::notice::v$version is declared and untagged. Sign and push the tag to release it."

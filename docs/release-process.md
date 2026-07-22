@@ -74,7 +74,16 @@ branch:
    optional dependencies follow the bumped crates.
 3. Push. CI has to be green, including the version check and the publish dry-run.
 
-Merging the pull request tags the release. The tag is what publishes.
+Merging the pull request does not release anything. The tag does, and the tag is
+signed by hand:
+
+    gp athexweb3 git tag -s "v0.3.0" -m "ton-net v0.3.0"
+    gp athexweb3 git push origin "v0.3.0"
+
+A runner cannot sign that tag without holding the signing key, which is the
+long-lived credential trusted publishing exists to remove, so signing stays with
+the maintainer. It also means signing the tag and authorizing the publish are one
+act rather than two that can drift apart: the push is what wakes `release.yml`.
 
 ## Which file does what
 
@@ -82,11 +91,9 @@ Two workflows, split so that deciding to release and releasing are separate acts
 and a merge authorizes a publish rather than being one.
 
 - **`.github/workflows/release-plz.yml`** opens and updates the release pull
-  request on every push to `main`, and cuts the annotated tag once that pull
-  request has merged and the declared version is ahead of the tags. It reaches no
-  registry and holds no credential. The tag is cut with `git` rather than by
-  `release-plz release`, which would also publish; `git_release_enable` in
-  `release-plz.toml` therefore governs a subcommand nothing runs.
+  request on every push to `main`. It reaches no registry, holds no credential, and
+  does not tag. `git_release_enable` in `release-plz.toml` therefore governs a
+  subcommand nothing runs.
 - **`.github/workflows/release.yml`** wakes on the tag. It reruns the whole gate,
   because a tag is not evidence that the commit under it ever had a full run and
   crates.io yanks but never deletes. Then it publishes the six crates bottom up,
@@ -138,6 +145,26 @@ From then on a release workflow mints its own token per run. It needs
 `id-token: write`, `rust-lang/crates-io-auth-action` for the crates side, and on
 the npm side a CLI new enough to speak OIDC, which also attaches provenance
 without being asked.
+
+## What is signed, and what is only attested
+
+Three different things, and only the first is a signature in the sense the word
+usually carries:
+
+- **The git tag** is GPG signed by the maintainer, and `git tag -v` checks it. It
+  covers the commit, so it is the one link that says which source a release was cut
+  from.
+- **The npm tarballs** carry a Sigstore provenance attestation, produced by
+  `--provenance` and checkable with `npm audit signatures`. It is not a maintainer
+  signature: it is GitHub attesting that this tarball came out of this workflow at
+  this commit, which is a different and weaker claim, and a useful one.
+- **The crates** carry nothing. crates.io has no package signing, so there is no
+  GPG option to take and none is implied. The trusted publisher is the whole
+  provenance story on that side: what it establishes is that a version was uploaded
+  by a run of a named workflow in a named repository, and nothing about who wrote
+  it.
+
+The GitHub release is not itself signed. It names the tag, which is.
 
 Maven Central is the other exception and has no OIDC path at all: it needs a GPG
 signing key and a portal token held as repository secrets. That is the one place a
