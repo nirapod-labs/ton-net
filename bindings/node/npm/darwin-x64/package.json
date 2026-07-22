@@ -1,5 +1,5 @@
 {
-  "name": "@ton-net/core-darwin-x64",
+  "name": "@nirapod-labs/ton-net-darwin-x64",
   "version": "0.3.0",
   "cpu": [
     "x64"

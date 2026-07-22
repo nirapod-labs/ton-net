@@ -232,12 +232,12 @@ jobs:
       # binary here because it detects a musl libc, which is the half of the loader
       # nothing had exercised either.
       #
-      # The image is a moving tag where every action above is pinned to a commit,
-      # which is a deliberate exception rather than an oversight: Dependabot tracks
-      # an image named in a `container:` key or a Dockerfile and not one named
-      # inside a script, so a digest here would be a pin nothing updates. The trade
-      # is accepted because this container is handed no token and contributes
-      # nothing to a published artifact; it only loads one that already exists.
+      # unpinned image node:22-alpine: a moving tag where every action above is
+      # pinned to a commit, which is a deliberate exception rather than an oversight:
+      # Dependabot tracks an image named in a `container:` key or a Dockerfile and
+      # not one named inside a script, so a digest here would be a pin nothing
+      # updates. The trade is accepted because this container is handed no token and
+      # contributes nothing to a published artifact; it only loads one that exists.
       - name: load it on alpine
         run: |
           docker run --rm \

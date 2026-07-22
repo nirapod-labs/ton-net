@@ -1,4 +1,4 @@
-# `@ton-net/core-darwin-arm64`
+# `@nirapod-labs/ton-net-darwin-arm64`
 
 The prebuilt **darwin-arm64** binary for [`ton-net`](https://www.npmjs.com/package/ton-net).
 

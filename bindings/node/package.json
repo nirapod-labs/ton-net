@@ -41,17 +41,17 @@
     "node": ">= 18.17.0"
   },
   "optionalDependencies": {
-    "@ton-net/core-darwin-arm64": "0.3.0",
-    "@ton-net/core-darwin-x64": "0.3.0",
-    "@ton-net/core-linux-arm64-gnu": "0.3.0",
-    "@ton-net/core-linux-arm64-musl": "0.3.0",
-    "@ton-net/core-linux-x64-gnu": "0.3.0",
-    "@ton-net/core-linux-x64-musl": "0.3.0",
-    "@ton-net/core-win32-x64-msvc": "0.3.0"
+    "@nirapod-labs/ton-net-darwin-arm64": "0.3.0",
+    "@nirapod-labs/ton-net-darwin-x64": "0.3.0",
+    "@nirapod-labs/ton-net-linux-arm64-gnu": "0.3.0",
+    "@nirapod-labs/ton-net-linux-arm64-musl": "0.3.0",
+    "@nirapod-labs/ton-net-linux-x64-gnu": "0.3.0",
+    "@nirapod-labs/ton-net-linux-x64-musl": "0.3.0",
+    "@nirapod-labs/ton-net-win32-x64-msvc": "0.3.0"
   },
   "napi": {
     "binaryName": "ton-net",
-    "packageName": "@ton-net/core",
+    "packageName": "@nirapod-labs/ton-net",
     "targets": [
       "aarch64-apple-darwin",
       "x86_64-apple-darwin",

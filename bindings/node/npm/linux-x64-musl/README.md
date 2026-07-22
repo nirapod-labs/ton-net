@@ -1,4 +1,4 @@
-# `@ton-net/core-linux-x64-musl`
+# `@nirapod-labs/ton-net-linux-x64-musl`
 
 The prebuilt **linux-x64-musl** binary for [`ton-net`](https://www.npmjs.com/package/ton-net).
 

@@ -1,5 +1,5 @@
 {
-  "name": "@ton-net/core-linux-arm64-musl",
+  "name": "@nirapod-labs/ton-net-linux-arm64-musl",
   "version": "0.3.0",
   "cpu": [
     "arm64"
