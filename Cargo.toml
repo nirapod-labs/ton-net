@@ -61,6 +61,9 @@ serde_json = "1"
 criterion = { version = "0.8", default-features = false, features = [
   "cargo_bench_support",
 ] }
+# Property tests only. Default features off drops the fork and timeout support, which
+# runs each case in a subprocess; the properties here are pure and in-process.
+proptest = { version = "1", default-features = false, features = ["std"] }
 napi = { version = "3", default-features = false }
 napi-derive = "3"
 napi-build = "2"

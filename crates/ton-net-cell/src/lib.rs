@@ -69,6 +69,12 @@ mod cell;
 mod error;
 mod slice;
 
+// Building a cell goes through a crate-private constructor, deliberately: outside this
+// crate a cell can only come from parsing. So the properties over generated trees have
+// to sit inside the crate rather than in `tests/`.
+#[cfg(test)]
+mod proptests;
+
 pub use boc::{parse_boc, serialize_boc, MAX_CELLS, MAX_DEPTH};
 pub use cell::{Cell, CellType};
 pub use error::CellError;

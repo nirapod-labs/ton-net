@@ -36,6 +36,10 @@ Everything for 0.3.0. The heading moves when the release is cut.
   Simplex vote, whose candidate hash is now bound to the block a link claims.
 - `AdnlError::NoRandomness`. An operating system that will not supply randomness
   used to end the calling process; it now fails the call that needed it.
+- Property tests over the cell codec: the bag-of-cells round trip preserves a
+  cell's representation hash and its bytes, a parsed cell hashes to what its
+  own parts imply, arbitrary and truncated input is refused rather than fatal,
+  and a cell has exactly one accepted encoding.
 
 ### Fixed
 
