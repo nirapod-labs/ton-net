@@ -1,0 +1,29 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: 2026 Nirapod Labs
+
+# TOML formatting, so the manifests stop being hand-maintained. Nineteen TOML files
+# carry the workspace, the lint policy, the license policy and the release
+# configuration, and until this file existed each one was formatted by whoever
+# touched it last.
+#
+# The settings below are not preferences. `.editorconfig` already declared two-space
+# indentation for TOML and every file was using four, so the convention the repository
+# published and the convention it followed had drifted apart. This makes the declared
+# one true and keeps it that way.
+
+# The spikes are standalone projects with their own lockfiles, outside the workspace.
+# The other two are not ours to format: a dependency ships its own test fixtures.
+exclude = ["spikes/**", "**/target/**", "**/node_modules/**"]
+
+[formatting]
+# What `.editorconfig` says for `*.toml`. Stated here as well because taplo does not
+# read that file, so leaving it implicit would mean the two could drift again.
+indent_string = "  "
+
+# Key order in a manifest is meaning, not noise: `[package]` opens with name and
+# version, `[dependencies]` groups what belongs together, and deny.toml orders its
+# allow list to mirror about.toml. Sorting would destroy all three, so both
+# reordering passes stay off. They are taplo's defaults; named because a default
+# that matters is worth stating.
+reorder_keys = false
+reorder_arrays = false

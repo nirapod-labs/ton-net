@@ -34,13 +34,13 @@ ignore = []
 # Unicode-3.0 is here because unicode-ident carries it beside its permissive choice with
 # an AND rather than an OR, so it cannot be chosen away.
 allow = [
-    "Apache-2.0",
-    "Apache-2.0 WITH LLVM-exception",
-    "BSD-3-Clause",
-    "ISC",
-    "MIT",
-    "Unicode-3.0",
-    "Unlicense",
+  "Apache-2.0",
+  "Apache-2.0 WITH LLVM-exception",
+  "BSD-3-Clause",
+  "ISC",
+  "MIT",
+  "Unicode-3.0",
+  "Unlicense",
 ]
 
 [bans]
@@ -49,20 +49,20 @@ multiple-versions = "deny"
 # seventh entry is a decision somebody makes. A `skip-tree` over the crypto stack would
 # have swallowed the syn entry below without saying so.
 skip = [
-    # The RustCrypto stack sits at two generations in every artifact this project ships,
-    # and it is not fixable from here. curve25519-dalek 5, which verifies the block
-    # signatures, moved to the digest 0.11 line; tl-proto 0.5, which is the TL codec,
-    # still reaches sha2 0.10 on the digest 0.10 line. Holding this workspace's own sha2
-    # at 0.10 keeps it to one extra copy rather than three, which is what NET-ADR-003
-    # decided. It resolves when tl-proto crosses, and not before.
-    { crate = "block-buffer" },
-    { crate = "cpufeatures" },
-    { crate = "crypto-common" },
-    { crate = "digest" },
+  # The RustCrypto stack sits at two generations in every artifact this project ships,
+  # and it is not fixable from here. curve25519-dalek 5, which verifies the block
+  # signatures, moved to the digest 0.11 line; tl-proto 0.5, which is the TL codec,
+  # still reaches sha2 0.10 on the digest 0.10 line. Holding this workspace's own sha2
+  # at 0.10 keeps it to one extra copy rather than three, which is what NET-ADR-003
+  # decided. It resolves when tl-proto crosses, and not before.
+  { crate = "block-buffer" },
+  { crate = "cpufeatures" },
+  { crate = "crypto-common" },
+  { crate = "digest" },
 
-    # syn 2 and syn 3 both appear while the proc-macro ecosystem crosses that boundary.
-    # Build-time only: nothing in a published artifact links it.
-    { crate = "syn" },
+  # syn 2 and syn 3 both appear while the proc-macro ecosystem crosses that boundary.
+  # Build-time only: nothing in a published artifact links it.
+  { crate = "syn" },
 ]
 
 [sources]

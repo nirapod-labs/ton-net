@@ -1,0 +1,35 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: 2026 Nirapod Labs
+
+# Git hooks. Install once with `lefthook install`; `just hooks` does the same.
+#
+# What belongs here is decided by one rule: a hook may only run a check that is fast
+# and whose answer cannot change between the commit and CI. Formatting, spelling and
+# whether a config file parses all qualify. Compiling, testing and anything touching
+# the network do not, because a hook slow enough to be worth skipping teaches the
+# habit of skipping it, and `--no-verify` then costs nothing.
+#
+# So this is not a second gate. CI remains the authority and re-runs all of it; the
+# hook exists to move the cheap failures off a runner and into the second before the
+# commit, where a fix costs nothing.
+
+pre-commit:
+  parallel: true
+  commands:
+    # Only the staged files, so the hook stays proportional to the change.
+    rust:
+      glob: "*.rs"
+      run: cargo fmt -- --check {staged_files}
+    toml:
+      glob: "*.toml"
+      run: taplo fmt --check {staged_files}
+    spelling:
+      run: typos
+    # The check whose absence let a duplicate recipe reach main. It is one file and
+    # a few milliseconds, and nothing else in the repository reads it.
+    justfile:
+      glob: "justfile"
+      run: just --list > /dev/null
+    workflows:
+      glob: ".github/workflows/*.yml"
+      run: node scripts/check-workflows.mjs

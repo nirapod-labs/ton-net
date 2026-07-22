@@ -9,21 +9,21 @@ SPDX-PackageDownloadLocation = "https://github.com/nirapod-labs/ton-net"
 
 [[annotations]]
 path = [
-    ".gitignore",
-    ".mailmap",
-    "CHANGELOG.md",
-    "CONTRIBUTING.md",
-    "LICENSE",
-    "NOTICE",
-    "README.md",
-    "SECURITY.md",
-    "docs/**",
-    ".github/PULL_REQUEST_TEMPLATE.md",
-    "bindings/node/README.md",
-    "bindings/node/package.json",
-    "crates/*/README.md",
-    "spikes/*/README.md",
-    "spikes/sync-feasibility/.gitignore",
+  ".gitignore",
+  ".mailmap",
+  "CHANGELOG.md",
+  "CONTRIBUTING.md",
+  "LICENSE",
+  "NOTICE",
+  "README.md",
+  "SECURITY.md",
+  "docs/**",
+  ".github/PULL_REQUEST_TEMPLATE.md",
+  "bindings/node/README.md",
+  "bindings/node/package.json",
+  "crates/*/README.md",
+  "spikes/*/README.md",
+  "spikes/sync-feasibility/.gitignore",
 ]
 precedence = "aggregate"
 SPDX-FileCopyrightText = "2026 Nirapod Labs"
@@ -52,9 +52,9 @@ SPDX-License-Identifier = "Apache-2.0"
 # them without being overwritten on the next build.
 [[annotations]]
 path = [
-    "bindings/node/index.js",
-    "bindings/node/index.d.ts",
-    "bindings/node/npm/**",
+  "bindings/node/index.js",
+  "bindings/node/index.d.ts",
+  "bindings/node/npm/**",
 ]
 precedence = "aggregate"
 SPDX-FileCopyrightText = "2026 Nirapod Labs"
