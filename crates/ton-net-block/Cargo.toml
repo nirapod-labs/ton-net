@@ -37,7 +37,7 @@ thiserror.workspace = true
 # implementation. It does not ship, so the curve copy it pulls reaches no consumer.
 criterion.workspace = true
 ed25519-dalek = "3"
-rand_core = "0.9"
+rand_core = "0.10"
 
 [[bench]]
 name = "verify"
