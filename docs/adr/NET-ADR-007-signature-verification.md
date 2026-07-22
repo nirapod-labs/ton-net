@@ -1,7 +1,7 @@
 ---
 id: NET-ADR-007
 title: Verify ed25519 on the curve crate already in the tree, and match libsodium's acceptance rule
-status: proposed
+status: accepted
 date: 2026-07-21
 amends: NET-ADR-003
 supersedes: none

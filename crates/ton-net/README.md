@@ -64,8 +64,8 @@ Two things, and they are the whole list:
 
 Working today: the TL codec, ADNL over TCP, liteserver reads, cell and proof
 verification, and key-block sync. ADNL over UDP, the DHT, and a local TVM are the
-milestones ahead. See the [roadmap] and [NET-ADR-002] for what is deliberately out
-of scope.
+releases ahead. See the [roadmap] and [NET-ADR-008] for what is in scope and
+what is not.
 
 ## License
 
@@ -77,4 +77,4 @@ Apache-2.0. Copyright 2026 Nirapod Labs; maintained by athexweb3.
 [`ton-net-adnl`]: https://crates.io/crates/ton-net-adnl
 [`ton-net-lite`]: https://crates.io/crates/ton-net-lite
 [roadmap]: https://github.com/nirapod-labs/ton-net/blob/main/docs/roadmap.md
-[NET-ADR-002]: https://github.com/nirapod-labs/ton-net/blob/main/docs/adr/NET-ADR-002-scope.md
+[NET-ADR-008]: https://github.com/nirapod-labs/ton-net/blob/main/docs/adr/NET-ADR-008-parity-scope.md

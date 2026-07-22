@@ -1,10 +1,10 @@
 ---
 id: NET-ADR-002
 title: Scope is a complete TON client, node-only protocols excluded
-status: proposed
+status: superseded
 date: 2026-07-20
 supersedes: none
-superseded-by: none
+superseded-by: NET-ADR-008
 ---
 
 # NET-ADR-002: Scope is a complete TON client, node-only protocols excluded

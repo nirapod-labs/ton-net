@@ -248,7 +248,7 @@ proof code has a level-mask TODO. A correct ton-net implements the real
 ## Not provable, by construction
 
 - **`runSmcMethod` result:** proofs cover the account code, data, and c7, not the
-  computation. Trustless get-methods require the local TVM (NET-ADR-005).
+  computation. Trustless get-methods require the local TVM (NET-ADR-010).
 - **`sendMessage`:** broadcast into the mempool, returns only a status int.
   Trust-minimization means verifying the *effect* afterward (prove the resulting
   account state or transaction), not the send.

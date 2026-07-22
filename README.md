@@ -1,15 +1,20 @@
 # ton-net
 
-The complete TON network client, written once in Rust and available in every
-language.
+A TON network client written once in Rust, bound natively into other languages.
 
 ton-net speaks TON's own protocols directly, with no HTTP indexer in the path.
 Today that is TL, ADNL over TCP, the liteserver query layer, Merkle-proof
 verification, and key-block sync: enough to read an account and prove it against
-a block the client walked to itself. ADNL over UDP, the Kademlia DHT, and a TVM
-for local execution are the milestones still ahead. One correct implementation,
-exposed to Node, browsers, Swift, Kotlin, Dart, and Python through thin
-bindings.
+a block the client walked to itself, from Rust or from Node.
+
+**It is early.** Measured against tonutils-go, the fullest client that exists,
+ton-net covers **8 per cent** of the surface. Sending a transaction, wallets, the
+DHT, RLDP, overlays and a TVM are all still ahead, and so are the browser,
+Python, Swift and Kotlin bindings. What is here is finished and proven against
+mainnet; there is simply not much of it yet. The
+[roadmap](docs/roadmap.md) is the measured plan and
+[NET-ADR-008](docs/adr/NET-ADR-008-parity-scope.md) is where the number comes
+from.
 
 ---
 
@@ -33,36 +38,44 @@ Everyone else reaches TON through a centralized HTTP indexer (toncenter, tonapi)
 or by binding the LGPL C++ `tonlib` over FFI. The first is a single point of
 observation and failure; the second drags a heavy C++ build into every app.
 
-ton-net closes the gap for all of these at once. One permissively-licensed Rust
-core, bound natively into each ecosystem, so a Rust service, a browser dapp, an
-iOS wallet, an Android wallet, a Flutter app, and a Python script all talk to
-TON the same correct way, without an intermediary.
+ton-net exists to close that gap: one permissively-licensed Rust core, bound
+natively into each ecosystem, so a Rust service, a browser dapp, an iOS wallet,
+an Android wallet and a Python script eventually talk to TON the same correct
+way, without an intermediary. Rust and Node are the two that work today; the
+core reaches parity before the other bindings follow
+([NET-ADR-009](docs/adr/NET-ADR-009-versioning-and-binding-sequence.md)).
 
 ---
 
 ## What it does
 
-The full protocol surface a TON client needs, nothing node-only. Working where
-unmarked; the rest carries the release it lands in.
+The whole client protocol surface. Working where unmarked; the rest carries the
+release it lands in.
 
 - **TL codec** with CRC32-IEEE constructor tags, boxed and bare types.
-- **ADNL** over TCP (liteservers). UDP, peer-to-peer with channels, in v0.5.0.
+- **ADNL** over TCP (liteservers). UDP, peer-to-peer with channels, in v0.8.0.
 - **DHT**, read and write: resolve an ADNL address to an IP, publish a record
-  (v0.5.0).
+  (v0.8.0).
 - **Liteserver queries**: account state now; transactions, config, blocks, run a
-  get-method and send a message across v0.4.0 to v0.7.0.
+  get-method and send a message across v0.5.0 to v0.7.0.
 - **Proof verification**: BoC and exotic-cell hashing, the TL-B for the block
   structures, and the `check_*_proof` routines, so a liteserver answer is
   verified rather than trusted.
 - **Block sync**: a pinned key-block anchor, `getBlockProof` link-walking, and a
   two-thirds validator-signature check that anchors the current block.
+- **Cells at full capability**: builders, dictionaries, usage trees and Merkle
+  proof creation, not parsing alone (v0.4.0).
+- **The write path**: external messages, `sendMessage`, and wallets v1 through
+  v5R1 behind a signer seam, so key material stays outside the library (v0.5.0).
+- **RLDP, overlays and QUIC** (v0.9.0).
 - **TVM**: run a get-method locally against proven code and data, so a computed
-  result is trustless, not server-reported (v0.7.0). Until it lands a TON
+  result is trustless, not server-reported (v0.10.0). Until it lands a TON
   balance is a proven read and a jetton balance is not.
 
-Out of scope for v1.0.0 and deliberately so: RLDP, overlays, catchain, TON
-Storage, and TON Sites. These are node-level or separate products. See
-[NET-ADR-002](docs/adr/NET-ADR-002-scope.md).
+v1.0.0 is feature parity with tonutils-go at commit `749603a`, plus full wallet
+support, across the Rust core and the Node binding. Parity is measured against
+that pinned commit, because a target that ships weekly is not a gate that can
+pass. See [NET-ADR-008](docs/adr/NET-ADR-008-parity-scope.md).
 
 ---
 
@@ -72,14 +85,18 @@ The design is complete; code is phased. Read in order:
 
 1. [NET-ADR-001](docs/adr/NET-ADR-001-architecture.md): one Rust core with
    per-language bindings, and why not one implementation per language.
-2. [NET-ADR-002](docs/adr/NET-ADR-002-scope.md): the complete-client scope and
-   what is deliberately left out.
+2. [NET-ADR-008](docs/adr/NET-ADR-008-parity-scope.md): the scope, measured
+   against a pinned commit of the fullest client that exists.
 3. [NET-ADR-003](docs/adr/NET-ADR-003-dependencies.md): the crate selection, and
    why the mature dependency lines.
-4. [NET-ADR-004](docs/adr/NET-ADR-004-bindings-and-versioning.md): the binding
-   toolchains, their order, and how versions are kept honest.
-5. [NET-ADR-005](docs/adr/NET-ADR-005-tvm.md): the local TVM decision.
-6. [System design](docs/design/system-design.md), [architecture](docs/architecture.md),
+4. [NET-ADR-009](docs/adr/NET-ADR-009-versioning-and-binding-sequence.md): one
+   binding to v1.0.0, and versioning across six axes rather than one.
+5. [NET-ADR-010](docs/adr/NET-ADR-010-tvm-differential.md): the TVM, its measured
+   cost, and why the differential harness comes before the first opcode.
+6. [NET-ADR-006](docs/adr/NET-ADR-006-trust-anchor.md) and
+   [NET-ADR-007](docs/adr/NET-ADR-007-signature-verification.md): where trust
+   starts, and how signatures are checked.
+7. [System design](docs/design/system-design.md), [architecture](docs/architecture.md),
    [API design](docs/api-design.md), [conformance](docs/conformance.md),
    [protocol map](docs/protocol/wire-format.md), [roadmap](docs/roadmap.md).
 

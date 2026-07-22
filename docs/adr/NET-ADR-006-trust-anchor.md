@@ -1,7 +1,7 @@
 ---
 id: NET-ADR-006
 title: Take the trust anchor from the network config's pinned key block
-status: proposed
+status: accepted
 date: 2026-07-21
 supersedes: none
 superseded-by: none

@@ -1,7 +1,7 @@
 ---
 id: NET-ADR-003
 title: Depend on tl-proto and keep one copy of each crypto crate
-status: proposed
+status: accepted
 date: 2026-07-20
 supersedes: none
 superseded-by: none
@@ -72,7 +72,7 @@ dependencies, which keeps the crypto surface to one curve crate. It is verified
 against a TON mainnet liteserver in `spikes/adnl-feasibility`.
 
 The node binding uses napi-rs 3.x (`napi`, `napi-derive`, `napi-build`); its version
-and reasoning sit in NET-ADR-004.
+and reasoning sit in NET-ADR-009.
 
 Feed tl-proto the official TON schema files (`ton_api.tl`, `lite_api.tl` from
 `ton-blockchain/ton`), not Everscale's, wherever the forks diverged.
@@ -104,7 +104,7 @@ Feed tl-proto the official TON schema files (`ton_api.tl`, `lite_api.tl` from
   keeps the curve crate to one dependency instead of three.
 - **`async-trait` for the transport seam.** Rejected. The transport is a generic
   `T: Transport` with native `async fn` in the trait, not a boxed `dyn Transport`, so
-  no `async-trait` allocation or dependency is needed (NET-ADR-004, the v0.1.0 plan).
+  no `async-trait` allocation or dependency is needed (NET-ADR-009, the v0.1.0 plan).
 
 ## Consequences
 

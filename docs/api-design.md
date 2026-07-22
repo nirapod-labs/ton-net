@@ -4,7 +4,7 @@ The surface every binding exposes, and the conventions that keep it small,
 marshalable, and identical across languages. Grounded in the FFI patterns of
 libsignal, automerge, and matrix-rust-sdk.
 
-Governing decision: [NET-ADR-004](adr/NET-ADR-004-bindings-and-versioning.md).
+Governing decision: [NET-ADR-009](adr/NET-ADR-009-versioning-and-binding-sequence.md).
 
 ---
 

@@ -6,7 +6,7 @@ transport is a seam, how one core serves every language, and where the trust
 guarantee lives.
 
 Governing decisions: [NET-ADR-001](adr/NET-ADR-001-architecture.md) through
-[NET-ADR-005](adr/NET-ADR-005-tvm.md). Design:
+[NET-ADR-010](adr/NET-ADR-010-tvm-differential.md). Design:
 [system design](design/system-design.md). Wire detail:
 [protocol/wire-format.md](protocol/wire-format.md).
 
@@ -165,7 +165,8 @@ Not every tree exists at once; the layout is the target and the
 
 - Not a node. A client: it does not store the DHT, serve values, run consensus, or
   produce blocks. It consumes the two-thirds signatures, it does not cast them.
-- Not RLDP, overlays, TON Storage, or TON Sites (NET-ADR-002). Client scope only.
+- Not TON Storage, TON Sites, catchain or block production (NET-ADR-008). RLDP and
+  overlays are in scope as client protocols; running a node is not.
 - Not chain-agnostic. A dedicated TON library, TON-specific by design.
 - Not a trust-me client. It verifies; a consumer that wants the unverified fast
   path must ask for the explicitly-unverified type.

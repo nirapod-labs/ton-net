@@ -4,7 +4,7 @@ How a multi-language library stays one wire behavior, and how that behavior is
 pinned to the TON reference node rather than to itself.
 
 Governing decisions: [NET-ADR-001](adr/NET-ADR-001-architecture.md),
-[NET-ADR-004](adr/NET-ADR-004-bindings-and-versioning.md).
+[NET-ADR-009](adr/NET-ADR-009-versioning-and-binding-sequence.md).
 
 ---
 
@@ -59,7 +59,7 @@ cells, level masks, and the five `check_*_proof` routines against ground truth.
 and `get_public_key`, jetton `get_wallet_data`, DNS resolution, common contracts)
 over proven code and data, paired with the exact stack the reference node's TVM
 produces. This measures execution fidelity, the one property a local TVM must have
-(NET-ADR-005).
+(NET-ADR-010).
 
 ---
 

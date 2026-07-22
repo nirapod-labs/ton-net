@@ -2,7 +2,7 @@
 title: ton-net system design
 status: draft
 date: 2026-07-20
-adrs: NET-ADR-001, NET-ADR-002, NET-ADR-003, NET-ADR-004, NET-ADR-005
+adrs: NET-ADR-001, NET-ADR-003, NET-ADR-006, NET-ADR-007, NET-ADR-008, NET-ADR-009, NET-ADR-010
 ---
 
 # ton-net system design
@@ -11,9 +11,9 @@ adrs: NET-ADR-001, NET-ADR-002, NET-ADR-003, NET-ADR-004, NET-ADR-005
 
 Covers the full client stack: the Rust core (TL codec, ADNL transport over TCP
 and UDP, DHT, liteserver queries, proof engine, block-sync, TVM, config), the
-transport seam, and the binding boundary each language crosses. Does not cover
-the node-only protocols (RLDP, overlays, catchain, TON Storage, TON Sites), which
-are out of scope per NET-ADR-002.
+transport seam, and the binding boundary each language crosses. RLDP, overlays and
+QUIC are in scope as client protocols (NET-ADR-008); catchain, TON Storage, TON
+Sites and block production are not.
 
 ## Components
 
@@ -70,7 +70,7 @@ Bottom to top. Each has one responsibility and a boundary it does not cross.
   config params 28 and 34, and the two-thirds Ed25519 signature check over
   `ton.blockId`. Output: the current masterchain block hash, trusted.
 
-- **TVM**: runs a get-method locally over proven code, data and config (NET-ADR-005).
+- **TVM**: runs a get-method locally over proven code, data and config (NET-ADR-010).
   Consumes only proven inputs; produces a trust-minimized result distinct from a
   raw `runSmcMethod` response.
 
@@ -78,7 +78,7 @@ Bottom to top. Each has one responsibility and a boundary it does not cross.
   seed nodes, and the init block. Public data; no secret.
 
 - **Binding shims**: napi-rs, wasm-bindgen, UniFFI, flutter_rust_bridge, pyo3.
-  Marshalling only, zero behavior (NET-ADR-004).
+  Marshalling only, zero behavior (NET-ADR-009).
 
 ## Contracts
 
@@ -170,7 +170,7 @@ Almost none; the library is a client, not a node.
 - **Ephemeral, in-memory:** ADNL session and channel keys, sequence counters, the
   in-flight query window, a short-lived Kademlia routing view per lookup, and the
   synced trusted-block state. Discarded when the client closes. Storage class:
-  ephemeral (constitution §7); never persisted.
+  ephemeral; never persisted.
 - **Caller-provided, read-only:** the global config and the pinned init key-block.
   Public data, no secret.
 - **Never stored:** any user key, any wallet material, any query history. A

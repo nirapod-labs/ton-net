@@ -1,10 +1,10 @@
 ---
 id: NET-ADR-005
 title: Include a TVM for local get-method execution, adapting an existing Rust TVM if one fits
-status: proposed
+status: superseded
 date: 2026-07-20
 supersedes: none
-superseded-by: none
+superseded-by: NET-ADR-010
 ---
 
 # NET-ADR-005: Include a TVM for local get-method execution, adapting an existing Rust TVM if one fits

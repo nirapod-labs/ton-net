@@ -171,8 +171,8 @@ clock is right, and it is told, instead of being told nothing.
 - **Sending.** No signing, no broadcast, no key handling. When that arrives it
   is a different model.
 - **TVM execution.** Get-method results are the server's word today
-  (`ServerReported`); NET-ADR-005 covers what a local TVM would change.
-- **DHT.** Peer discovery is v0.5.0. Until then the server list is the
+  (`ServerReported`); NET-ADR-010 covers what a local TVM would change.
+- **DHT.** Peer discovery is v0.8.0. Until then the server list is the
   configuration's.
 - **Supply chain.** Covered by the dependency policy in `deny.toml`, the pinned
   actions, and the notices, not here.

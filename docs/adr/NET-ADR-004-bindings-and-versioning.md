@@ -1,10 +1,10 @@
 ---
 id: NET-ADR-004
 title: Binding order and a Rust-lockstep, per-artifact-published versioning scheme
-status: proposed
+status: superseded
 date: 2026-07-20
 supersedes: none
-superseded-by: none
+superseded-by: NET-ADR-009
 ---
 
 # NET-ADR-004: Binding order and a Rust-lockstep, per-artifact-published versioning scheme

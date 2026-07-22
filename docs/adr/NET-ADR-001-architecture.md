@@ -1,7 +1,7 @@
 ---
 id: NET-ADR-001
 title: One Rust core with per-language bindings, not one implementation per language
-status: proposed
+status: accepted
 date: 2026-07-20
 supersedes: none
 superseded-by: none
@@ -23,7 +23,7 @@ and Merkle-proof verification, validator-signature block sync, and a TVM. All of
 it parses attacker-controllable bytes off the open internet, and the proof and
 signature paths are where a subtle error silently defeats the whole guarantee.
 
-The landscape (NET-ADR-002 records it in full) shows the gap: a complete native
+The landscape (NET-ADR-008 records it in full) shows the gap: a complete native
 client exists only in Go (tonutils-go) and Python (pytoniq); the C++ reference is
 LGPL and not embeddable; Rust has nothing complete; TypeScript has liteserver over
 TCP but no DHT, no UDP, no proofs; Swift, Kotlin and Dart have nothing native and
@@ -78,7 +78,7 @@ node, pins the core and keeps the whole library to one observable wire behavior.
   crate, not six codebases in six languages.
 - FFI and per-target build and distribution complexity is the accepted cost:
   prebuilt Node binaries, a wasm bundle, mobile artifacts, and Python wheels are
-  real per-platform work, phased in NET-ADR-004, not delivered all at once.
+  real per-platform work, phased in NET-ADR-009, not delivered all at once.
 - The browser cannot do UDP, so it cannot do DHT directly. This is a protocol
   fact stated plainly in the design, not engineered around.
 - everscale-network's Apache-2.0 ADNL transport internals de-risk the lowest layer
@@ -90,7 +90,7 @@ node, pins the core and keeps the whole library to one observable wire behavior.
 ## Chain scope
 
 ton-net is a TON-specific library by nature: it speaks TON's protocols. This is
-not a Nirapod chain-agnostic core (constitution §3); it is a standalone community
+not a shared chain-agnostic core; it is a standalone community
 library whose entire purpose is TON. A consumer that wants chain-agnostic access
 puts ton-net behind its own seam. The chain-agnostic discipline applies to
 Nirapod product code, not to a dedicated TON library.
@@ -108,7 +108,7 @@ Primary security surface: the whole library runs on attacker-controllable input.
 The hardening targets are the TL deserializer (total, bounded, no panic; fuzzed),
 Merkle-proof and cell-hash verification (a wrong level-mask or a skipped check
 silently breaks the trust guarantee), and the validator-signature check in block
-sync. These are covered by NET-ADR-002 and the conformance design.
+sync. These are covered by NET-ADR-008 and the conformance design.
 
 ## Verification
 

@@ -1,212 +1,250 @@
 # Roadmap
 
 From v0.1.0 to v1.0.0. Each version ends in something usable and depends on no
-promise from a later one. v1.0.0 is the complete client (NET-ADR-002): TL, ADNL
-over TCP and UDP, DHT, liteserver, proof verification, block sync, and a TVM,
-across the core plus the primary bindings.
+promise from a later one.
 
-Governing decisions: [NET-ADR-001](adr/NET-ADR-001-architecture.md) through
-[NET-ADR-007](adr/NET-ADR-007-signature-verification.md).
+v1.0.0 is feature parity with tonutils-go at commit `749603a` (v1.18.0, MIT), plus
+full wallet support, across the Rust core and the Node binding
+([NET-ADR-008](adr/NET-ADR-008-parity-scope.md)). Parity is measured against that
+pinned commit and no other: upstream tags weekly, and a target that moves is not a
+gate that can pass.
+
+Governing decisions: [NET-ADR-001](adr/NET-ADR-001-architecture.md),
+[NET-ADR-003](adr/NET-ADR-003-dependencies.md),
+[NET-ADR-006](adr/NET-ADR-006-trust-anchor.md),
+[NET-ADR-007](adr/NET-ADR-007-signature-verification.md),
+[NET-ADR-008](adr/NET-ADR-008-parity-scope.md),
+[NET-ADR-009](adr/NET-ADR-009-versioning-and-binding-sequence.md),
+[NET-ADR-010](adr/NET-ADR-010-tvm-differential.md).
+
+---
+
+## Where this stands
+
+Measured at `749603a` against ton-net `c9cc8ee`, in source lines outside examples:
+
+| | tonutils-go | ton-net | coverage |
+|---|---:|---:|---:|
+| Core | 110,109 | 8,852 | **8.0%** |
+
+Both counts are tracked files only, tests excluded:
+`git ls-files '*.go' | grep -v '_test\.go$' | grep -v '^example/' | xargs wc -l`
+there, and `crates/*/src` here.
+
+Roughly 101,000 lines of Rust core remain after the savings the Rust cryptographic
+crates provide, and roughly 300,000 including tests at the ratio tonutils-go
+holds. The per-package breakdown drives the ordering below.
 
 ---
 
 ## Versioning discipline
 
-The library carries one version; the Rust crates move in lockstep
-(cargo-release `shared-version`). Each published language package carries its own
-registry-appropriate version, mapped to the library version in a table
-(NET-ADR-004).
+Six axes, recorded in
+[NET-ADR-009](adr/NET-ADR-009-versioning-and-binding-sequence.md). The short form:
 
-SemVer is measured against the observable API and the wire behavior. A wire or
-proof-verification change is breaking; an internal refactor is not. The library
-stays `0.x` until the API and the proof, sync, and TVM guarantees are stable
-enough to promise. **v1.0.0 is that deliberate line**, not a marketing number.
-libsignal, a comparable wire library, is still `0.x` after years; ton-net reaches
-`1.0` only when completeness and stability are both real.
+- **Library version.** One SemVer number everywhere, mapped per registry. Breaking
+  means an API break, a behavioural break (something that verified now fails, or
+  something refused now passes), or a wire break. Pre-1.0, `0.MINOR` is breaking in
+  every ecosystem, not only where Cargo enforces it.
+- **Verification epoch.** A monotonic integer, independent of the library version,
+  incremented whenever the proof engine's accept and reject boundary moves.
+- **Support manifest.** The pinned schema revisions, the supported TVM
+  `global_version` range, and the compiled capabilities, queryable at runtime and
+  diffed against upstream in CI.
+- **TVM global-version matrix.** A compatibility table, not a version number.
+- **Registry mapping.** Generated, never hand-edited. PEP 440 and Maven stop being
+  the identity at the first pre-release.
+- **Toolchain floors and feature flags.** A minimum supported Rust version rises on
+  a minor bump. Changing the default feature set is a major one.
 
 ---
 
 ## Release model
 
-A milestone tag and a registry publish are two different acts (NET-ADR-004). Every
-milestone below is recorded as a git tag when its gate passes. Registry publishing
-is gated separately, on the trust boundary:
+A milestone tag and a registry publish are two different acts. Every milestone
+below is an annotated git tag when its gate passes.
 
-| Milestone | git tag | registry (crates.io, npm, ...) |
+| Milestone | git tag | registry |
 |---|---|---|
 | v0.1.0, v0.2.0 | yes | pre-release only (`-alpha`), not for production |
-| v0.3.0 through v0.9.0 | yes | ordinary release |
+| v0.3.0 onward | yes | ordinary release |
 | v1.0.0 | yes | ordinary release, API frozen |
 
-The reason is honesty at the version-string level. A read is trust-minimized end
-to end only once block sync anchors it at v0.3.0. Before that, a read is the
-server's unproven word: the API marks it with a `ServerReported` type so it cannot
-be mistaken for verified state in code, and the registry channel is the matching
-signal at the version level. v0.3.0 is therefore the first ordinary registry
-release; v0.1.0 and v0.2.0 reach a registry, if at all, only as marked
-pre-releases.
+v0.3.0 is the first ordinary release because a read is trust-minimized end to end
+from there: the anchor comes from the config's pinned key block rather than from
+anything a server offers.
 
 ---
 
-## The path
+## Binding sequence
 
-Each milestone lists what ships, which layer it exercises, and its exit gate.
+The Rust core reaches parity carrying **only the Node binding**. v1.0.0 is the core
+plus Node. Browser, Python, Swift and Kotlin ship afterwards.
 
-### v0.1.0: TL codec + ADNL-TCP + liteserver reads (unverified) + Node
-
-The foundation and the first useful slice. TL codec over `tl-proto` with the
-official schemas; the ADNL-over-TCP handshake and stream framing; the liteserver
-query layer for reads; the config loader; the napi-rs Node binding.
-
-Reads are **not proof-verified yet** and are marked so in the API with a
-`ServerReported` type. This already does something no TypeScript library does
-today: talk to a liteserver directly from Node over ADNL, no HTTP indexer.
-Published, if at all, only as a pre-release (`-alpha`), not for production,
-because a read here is still the server's unproven word.
-
-*Gate:* from Node, connect to a mainnet liteserver, call `getMasterchainInfo` and
-`getAccountState`, and get well-formed decoded results. The async-across-FFI
-design is proven on the easiest binding. Full plan:
-[docs/plan/v0.1.0.md](plan/v0.1.0.md).
-
-### v0.2.0: Cell/BoC engine + proof engine
-
-The trust-minimization core. The cell model with exotic cells and level-mask
-representation hashing; BoC parse and serialize; the TL-B for the block
-structures; the five `check_*_proof` routines.
-
-*Gate:* an account read is verified against a **caller-supplied trusted block
-hash** (sync comes next); a tampered proof is rejected; results match the
-reference node for a corpus of real accounts. Still a pre-release (`-alpha`):
-verification here needs a caller-supplied hash, so a read is not yet
-trust-minimized end to end.
-
-### v0.3.0: Block-sync engine
-
-The trust anchor. The init key-block the network config pins, `getBlockProof`
-link-walking, validator-set derivation from config 34, and the two-thirds Ed25519
-signature check in both of the forms mainnet uses. After this, `getAccount` is
-trust-minimized end to end with no caller-supplied hash.
-
-Decisions in [NET-ADR-006](adr/NET-ADR-006-trust-anchor.md) and
-[NET-ADR-007](adr/NET-ADR-007-signature-verification.md); plan in
-[docs/plan/v0.3.0.md](plan/v0.3.0.md).
-
-*Gate:* sync from the pinned init key-block to the current masterchain head across
-at least one validator-set rotation, matched against the reference node's proof
-for the same range. A full proven read needs nothing trusted but the anchor. This
-is the **first ordinary registry release** (NET-ADR-004): a read is now
-trust-minimized with only the pinned anchor.
-
-### v0.4.0: Browser (wasm) binding
-
-wasm-bindgen plus the `WsTransport`, honest about its limits: liteserver-only,
-through a WebSocket-to-liteserver proxy, no DHT, no UDP. Done here, second among
-bindings, so the browser's no-threads and no-socket constraints harden the
-sans-I/O core before the mobile bindings lock the API.
-
-*Gate:* a web page opens a liteserver channel through a proxy, reads and
-proof-verifies an account. The transport seam holds under browser constraints.
-
-### v0.5.0: ADNL-UDP + DHT (read and write)
-
-The peer-to-peer branch. ADNL-over-UDP with channels; the Kademlia DHT with
-`findValue`, `findNode`, `getSignedAddressList` and `store`; signature
-verification on DHT records. This unblocks address resolution, TON DNS groundwork,
-and peer discovery, and it is what a validator-geography or explorer tool needs.
-
-*Gate:* resolve a known validator's ADNL address to a reachable IP through the
-DHT, signature-verified, matched against a known-good client.
-
-### v0.6.0: Python binding
-
-pyo3 plus maturin; wheels per platform. Server, CLI, and test surface, and a
-second independent binding that exercises the API shape beyond Node and wasm.
-
-*Gate:* the Python package resolves an address and proof-verifies an account,
-published as a wheel.
-
-### v0.7.0: TVM (local get-method execution)
-
-The last trust hole (NET-ADR-005). Adapt a validated Rust TVM if one passes the
-conformance gate; otherwise begin the C++-semantics port. Get-methods run locally
-over proven code, data and config, returned as a trust-minimized result distinct
-from a raw server response.
-
-This is the **highest-uncertainty milestone**: if no existing Rust TVM reproduces
-mainnet semantics exactly, the fallback port is a major effort and this milestone
-(and v1.0.0) moves out accordingly. It is sequenced late so everything else ships
-without waiting on it.
-
-*Gate:* get-methods for a corpus of real accounts (wallet `seqno`,
-`get_public_key`; jetton `get_wallet_data`; DNS resolution; common contracts)
-reproduce reference-node results exactly, over proven inputs.
-
-### v0.8.0: Swift + Kotlin (UniFFI)
-
-One crate, both mobile bindings: XCFramework via Swift Package Manager, AAR via
-Maven. Done after the API has stabilized through five prior bindings, because the
-mobile artifact matrix is the heaviest CI loop. This is the reach that makes
-ton-net the first native TON client on iOS and Android without an HTTP indexer or
-C++ FFI.
-
-*Gate:* a Swift test and a Kotlin build proof-verify an account on-device (or
-simulator/emulator in CI).
-
-### v0.9.0: Hardening, conformance, docs
-
-The whole conformance vector set wired into every binding's CI; the TL fuzz target
-and an adversarial-peer harness; the block-sync and proof paths under negative
-tests; complete API docs and examples per language. No new protocol surface, only
-the evidence that what exists is correct.
-
-*Gate:* every binding reproduces the conformance vectors in CI; the fuzz target
-runs clean; the negative-test suite (tampered proofs, forged records, hostile
-packets) passes.
-
-### v1.0.0: The complete client, API frozen
-
-Everything above, stable: TL, ADNL TCP and UDP, DHT read and write, liteserver,
-proof verification, block sync, and the TVM, across the Rust core plus Node,
-browser, Python, Swift and Kotlin. The API and the proof, sync and TVM guarantees
-are promised stable under SemVer.
-
-*Gate:* the completeness bar of NET-ADR-002 is met and verified; the API is frozen;
-the conformance suite is green across all shipped bindings.
-
-### Dart (flutter_rust_bridge): optional, alongside or after 1.0
-
-Built only if Flutter is a real target (NET-ADR-004). Capable but on a beta
-channel, and every consuming app compiles the Rust, so it is not gated into 1.0.
-
-### Post-1.0: the node line (v2 candidate)
-
-RLDP, overlays, and full-node block exchange, behind a clear capability boundary,
-if real demand appears (NET-ADR-002). The transport and TL layers already serve
-them; this is additive, not a rework.
+Node earns its place: building it has already exposed two API holes the core's own
+tests did not, an unconstructible `BlockIdExt` and a missing `verify_account` on
+the facade. One consumer of the API is the cheapest design review available. Five
+of them, before the API settles, multiply every core addition by five, and the
+reference implementation reached 110,109 lines carrying none at all.
 
 ---
 
-## Binding order, in one place
+## Shipped
 
-Node → browser → Python → Swift+Kotlin → (Dart optional). Node first for the best
-async story and cheapest iteration; browser second so its hard constraints shape
-the core early; mobile after the API stabilizes because its CI is heaviest.
-Rationale in [NET-ADR-004](adr/NET-ADR-004-bindings-and-versioning.md).
+### v0.1.0: TL codec, ADNL over TCP, unverified liteserver reads, Node
+
+The foundation. TL codec over `tl-proto` with the official schemas, the ADNL
+handshake and stream framing, the liteserver query layer for reads, the config
+loader, the napi-rs Node binding. Reads carry a `ServerReported` type because they
+are not yet proof-verified.
+
+### v0.2.0: Cell and BoC engine, proof engine
+
+The cell model with exotic cells and level-mask representation hashing, BoC parse
+and serialize, the TL-B for the block structures a proof walk needs, and the proof
+routines. An account read verifies against a caller-supplied trusted block hash,
+and a tampered proof is refused.
+
+### v0.3.0: Block sync
+
+The trust anchor. The init key block the config pins, `getBlockProof` link
+walking, validator-set derivation from configuration parameters 28 and 34, and the
+two-thirds signature check in both forms mainnet uses. A read is trust-minimized
+end to end with only the pinned anchor taken on faith, and a proven head older than
+the configured bound is refused rather than reported.
+
+---
+
+## The path to parity
+
+Ordered by dependency first and value second. Line figures are the tonutils-go
+surface each milestone closes.
+
+### v0.4.0: Cell engine to full capability
+
+~18,000 lines. The critical path, and nothing else can start ahead of it. Builders
+and slices, the five dictionary variants, augmented dictionaries, prefix
+dictionaries, usage trees, virtualization, lazy and large BoC handling, and Merkle
+proof **creation** rather than verification alone.
+
+At 2,138 lines against 20,392 this is the smallest fraction of the target, and the
+wallet, the full TL-B set and the TVM each depend on it.
+
+*Gate:* a Merkle proof built by this crate verifies in the existing proof engine;
+every dictionary variant round-trips against captured mainnet fixtures.
+
+### v0.5.0: The write path
+
+~4,500 lines, and the first milestone a wallet can use. External message
+construction, `sendMessage` with confirmation waiting, transaction subscription,
+and wallets v1 through v5R1, highload v2 and v3, lockup, seed phrases,
+hierarchical derivation, and TON Connect proof verification.
+
+The signer seam is the primary construction: a caller supplies a callback and the
+library never sees key material. Whether any part of this creates custody is
+settled before the code is written, and the seed and derivation support is the
+part that has to be examined.
+
+*Gate:* a transfer built, signed through the seam, sent to mainnet and observed in
+a proven account read.
+
+### v0.6.0: TL-B type set to parity
+
+~8,800 lines. Every block, transaction, message, shard and configuration type, not
+the subset a proof walk needs. The loader and serializer machinery, stack
+serialization, augmented dictionary loaders.
+
+*Gate:* a mainnet block decodes field for field against the reference node.
+
+### v0.7.0: Liteserver API to parity, and a connection pool
+
+~4,000 lines. The full method set, transaction proofs, out-message queue and
+dispatch queue proofs, non-final block queries. The pool brings multiple
+liteservers, sticky contexts, balancing, node exclusion, liveness pings and
+failover, which is the operational gap a single connection leaves open.
+
+*Gate:* every liteserver method answers against mainnet; the pool survives a
+server dropping mid-query.
+
+### v0.8.0: ADNL over UDP, and the DHT
+
+~7,000 lines. Channel establishment over UDP, Kademlia with `findValue`,
+`findNode`, `getSignedAddressList` and `store`, and signature verification on DHT
+records.
+
+*Gate:* a known validator's ADNL address resolves to a reachable endpoint through
+the DHT, signature-verified.
+
+### v0.9.0: RLDP, overlays, QUIC
+
+~10,000 lines. The RaptorQ transfer layer, overlay membership and broadcast, and
+the QUIC transport. Previously deferred past v1.0.0 and brought in by
+[NET-ADR-008](adr/NET-ADR-008-parity-scope.md).
+
+*Gate:* an RLDP transfer completes against a real peer; an overlay is joined and a
+broadcast received.
+
+### v0.10.0: The TVM
+
+~37,000 lines and the largest milestone by a wide margin. Decided in
+[NET-ADR-010](adr/NET-ADR-010-tvm-differential.md).
+
+The harness comes before the first opcode: CI builds a pinned C++ emulator, feeds
+it a case, and compares. Opcodes land with their differential cases, never ahead of
+them. tonutils-go's captured corpora are imported under MIT with attribution, as
+input rather than as oracle. BLS12-381 and secp256k1 come from `blst` and the
+libsecp256k1 bindings rather than being vendored. Each opcode declares its minimum
+`global_version` and an inventory test asserts the table is complete.
+
+Expect no user-visible progress until the harness runs. That is the correct shape
+of this milestone.
+
+*Gate:* the imported replay corpus reproduces against the C++ emulator;
+get-methods for a corpus of real accounts match the reference node exactly, over
+proven inputs.
+
+### v0.11.0: Contract helpers and the HTTP fallback
+
+~2,500 lines. NFT, jetton and TON DNS over the TVM, and a toncenter client for a
+consumer that cannot reach a liteserver.
+
+*Gate:* a jetton balance, an NFT's data and a DNS resolution all computed locally
+over proven state.
+
+### v1.0.0: Parity, API frozen
+
+The parity matrix regenerated against `749603a` and closed. The API and the proof,
+sync and TVM guarantees promised stable under SemVer. `VERIFY_EPOCH` and the
+support manifest published as part of the frozen surface.
+
+*Gate:* coverage against the pin reaches every in-scope package; the conformance
+suite is green; the Node binding exercises every capability.
+
+---
+
+## After v1.0.0
+
+- **The remaining bindings.** Browser (wasm-bindgen), Python (pyo3 and maturin),
+  Swift and Kotlin (UniFFI). Additive, and they do not change the core.
+- **Parity against a later pin.** v1.0.0 closes against `749603a`. Moving the pin
+  forward is a separate decision with its own measurement.
+- **Dart**, if Flutter becomes a real target.
 
 ---
 
 ## What could move v1.0.0
 
-Stated honestly:
+Stated honestly.
 
-- **The TVM (v0.7.0).** If no existing Rust TVM passes the conformance gate, the
-  fallback port is the largest single effort in the project. This is the main
-  schedule risk, sequenced late for exactly that reason.
-- **Proof-engine level-mask and validator-set correctness.** The pytoniq reference
-  has documented gaps here; getting them exactly right (not copied) is subtle work
-  on the critical trust path. Level-mask hashing was settled in v0.2.0 against a
-  mainnet root match, and the validator-set derivation in v0.3.0 against 107475 real
-  signatures, so this risk is now largely spent.
-- **Mobile CI.** The XCFramework and AAR multi-architecture build is the heaviest
-  pipeline and the most likely to consume time in v0.8.0.
+- **The TVM (v0.10.0).** Sixteen months of work in the reference implementation,
+  still taking fixes, with an opcode test corpus twice the size of the opcode
+  source. It is the largest single item and the most likely to consume the
+  schedule, which is why it is sequenced late and why the harness comes first.
+- **The cell engine (v0.4.0).** Everything depends on it, so an underestimate here
+  moves every milestone after it.
+- **Key handling on wallets (v0.5.0).** Seed and derivation support touches key
+  material for the first time. A review outcome that constrains the design would
+  reshape the release.
+- **Scale.** Roughly 300,000 lines of source and tests, against 13,335 built to
+  v0.3.0. The reference implementation took four years and three months and 1,107
+  commits, and carried no bindings while doing it.

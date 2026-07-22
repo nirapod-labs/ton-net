@@ -6,7 +6,7 @@ SPDX-FileCopyrightText: 2026 Nirapod Labs
 # Versions
 
 Which number a given artifact carries, and what it is derived from.
-[NET-ADR-004](adr/NET-ADR-004-bindings-and-versioning.md) requires this mapping to
+[NET-ADR-009](adr/NET-ADR-009-versioning-and-binding-sequence.md) requires this mapping to
 be recorded rather than inferred; this is it. The mechanics of a release are in
 [release-process.md](release-process.md).
 
@@ -28,7 +28,7 @@ npm side and neither reads the other.
 
 Six crates and eight npm packages, all carrying one number.
 
-NET-ADR-004 allows each ecosystem its own scheme, on the grounds that ecosystems
+NET-ADR-009 allows each ecosystem its own scheme, on the grounds that ecosystems
 have their own conventions. Nothing here has asked for one yet, and a mapping that
 is a lookup table rather than a function has a cost the table itself hides: it
 turns "which ton-net am I running" from a question with one answer into a
@@ -36,7 +36,7 @@ question that needs this file open. So the rule is **identity until an ecosystem
 forces otherwise**, and if one ever does, the exception gets a row here and a line
 saying which convention demanded it.
 
-This satisfies the record NET-ADR-004 asks for. That the record is currently
+This satisfies the record NET-ADR-009 asks for. That the record is currently
 trivial is the point, not an omission.
 
 ## What differs anyway: the channel, not the number

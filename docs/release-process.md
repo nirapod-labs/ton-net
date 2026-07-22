@@ -1,7 +1,7 @@
 # Release process
 
 How a version of ton-net reaches crates.io and npm. The decisions behind it are in
-[NET-ADR-004](adr/NET-ADR-004-bindings-and-versioning.md); this is the sequence.
+[NET-ADR-009](adr/NET-ADR-009-versioning-and-binding-sequence.md); this is the sequence.
 
 A milestone tag and a registry publish are separate acts. Every milestone is
 tagged; a registry release is gated on the trust boundary, which v0.3.0 is the
