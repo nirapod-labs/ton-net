@@ -78,7 +78,12 @@ impl CellType {
 
 /// The highest level a mask marks, or zero for an empty mask.
 fn level_of(mask: u8) -> u8 {
-    (u8::BITS - mask.leading_zeros()) as u8
+    #[allow(
+        clippy::cast_possible_truncation,
+        reason = "mask is a u8, so leading_zeros is at most 8, and u8::BITS - leading_zeros is at most 8, which fits u8"
+    )]
+    let level = (u8::BITS - mask.leading_zeros()) as u8;
+    level
 }
 
 /// The mask as it applies at `level`: only the levels below it remain.
@@ -97,12 +102,22 @@ fn hash_index(mask: u8, level: u8) -> usize {
 
 /// The bit descriptor for a bit count: `floor(b/8) + ceil(b/8)`.
 fn bits_descriptor(bits: u16) -> u8 {
-    ((bits / 8) + bits.div_ceil(8)) as u8
+    #[allow(
+        clippy::cast_possible_truncation,
+        reason = "bits is at most MAX_BITS (1023), so floor(bits/8) + ceil(bits/8) is at most 127 + 128 = 255, which fits u8"
+    )]
+    let descriptor = ((bits / 8) + bits.div_ceil(8)) as u8;
+    descriptor
 }
 
 /// The refs-and-type descriptor at a level: `r + 8s + 32l`.
 fn refs_descriptor(refs: usize, exotic: bool, mask: u8, level: u8) -> u8 {
-    refs as u8 + if exotic { 8 } else { 0 } + 32 * applied_mask(mask, level)
+    #[allow(
+        clippy::cast_possible_truncation,
+        reason = "refs is a cell's reference count, bounded to at most MAX_REFS (4) by every constructor, so this fits u8"
+    )]
+    let refs = refs as u8;
+    refs + if exotic { 8 } else { 0 } + 32 * applied_mask(mask, level)
 }
 
 /// A TON cell: up to 1023 bits of data and up to four references.
@@ -486,7 +501,11 @@ impl fmt::Debug for Cell {
 
 /// Renders bytes as lowercase hex, for `Debug`.
 fn hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|b| format!("{b:02x}")).collect()
+    use std::fmt::Write as _;
+    bytes.iter().fold(String::new(), |mut out, b| {
+        let _ = write!(out, "{b:02x}");
+        out
+    })
 }
 
 #[cfg(test)]

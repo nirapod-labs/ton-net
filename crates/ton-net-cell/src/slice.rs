@@ -243,6 +243,10 @@ impl<'a> Slice<'a> {
             ));
         }
         let len_bits = u32::BITS - (max - 1).leading_zeros();
+        #[allow(
+            clippy::cast_possible_truncation,
+            reason = "max >= 2 is checked above, so len_bits = 32 - leading_zeros(max - 1) is at most 32, and load_uint returns a value under 2^32, which fits u32"
+        )]
         let len = self.load_uint(len_bits)? as u32;
         self.load_uint128(len * 8)
     }

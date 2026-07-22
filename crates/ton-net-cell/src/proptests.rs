@@ -67,6 +67,10 @@ fn data_and_bits() -> impl Strategy<Value = (Vec<u8>, u16)> {
             // so a round-trip compares like with like.
             if bits % 8 != 0 {
                 if let Some(last) = bytes.last_mut() {
+                    #[allow(
+                        clippy::cast_possible_truncation,
+                        reason = "bits % 8 is at most 7, which fits u32 trivially"
+                    )]
                     let used = (bits % 8) as u32;
                     let keep = 0xffu8 << (8 - used);
                     *last &= keep;
@@ -283,6 +287,10 @@ proptest! {
 fn keys() -> impl Strategy<Value = (u16, Vec<Vec<u8>>)> {
     (1u16..=64).prop_flat_map(|key_bits| {
         let bytes = usize::from(key_bits).div_ceil(8);
+        #[allow(
+            clippy::cast_possible_truncation,
+            reason = "key_bits is generated over 1..=64, so bytes = ceil(key_bits/8) is at most 8, which fits u16"
+        )]
         let spare = u32::from(bytes as u16 * 8 - key_bits);
         let key = proptest::collection::vec(any::<u8>(), bytes).prop_map(move |mut key| {
             // The bits past the key width are not part of the key, so leaving them set

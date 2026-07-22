@@ -35,7 +35,12 @@ impl Rng {
         if bound == 0 {
             0
         } else {
-            (self.next() % bound as u64) as usize
+            #[allow(
+                clippy::cast_possible_truncation,
+                reason = "the result is < bound as u64, and bound: usize was widened losslessly into that u64, so it always fits back into usize"
+            )]
+            let result = (self.next() % bound as u64) as usize;
+            result
         }
     }
 }

@@ -149,6 +149,10 @@ fn read_label(slice: &mut Slice<'_>, max: u16) -> Result<Vec<bool>, CellError> {
 
     if !slice.load_bit()? {
         // hml_long: an explicit length, then that many bits.
+        #[allow(
+            clippy::cast_possible_truncation,
+            reason = "bounded_width(max) is at most 16 because max is itself a u16, so this reads at most 16 bits and the result always fits u16"
+        )]
         let len = slice.load_uint(bounded_width(max))? as u16;
         if len > max {
             return Err(CellError::LabelTooLong);
@@ -162,6 +166,10 @@ fn read_label(slice: &mut Slice<'_>, max: u16) -> Result<Vec<bool>, CellError> {
 
     // hml_same: one bit repeated a given number of times.
     let value = slice.load_bit()?;
+    #[allow(
+        clippy::cast_possible_truncation,
+        reason = "bounded_width(max) is at most 16 because max is itself a u16, so this reads at most 16 bits and the result always fits u16"
+    )]
     let len = slice.load_uint(bounded_width(max))? as u16;
     if len > max {
         return Err(CellError::LabelTooLong);
@@ -224,7 +232,7 @@ struct Step {
 
 impl Step {
     /// Rebuilds this fork with `child` in place of the branch the walk took.
-    fn rebuild(&self, child: Cell) -> Result<Cell, CellError> {
+    fn rebuild(&self, child: &Cell) -> Result<Cell, CellError> {
         let mut fork = Builder::new();
         store_label(&mut fork, &self.label, self.remaining)?;
         for branch in 0..2 {
@@ -359,7 +367,12 @@ impl Dict {
                 return Ok(Lookup::Absent);
             }
             consumed += label.len();
-            remaining -= label.len() as u16;
+            #[allow(
+                clippy::cast_possible_truncation,
+                reason = "read_label bounds label.len() to at most its `max` argument (here `remaining`), and remaining is a u16, so this fits"
+            )]
+            let spent = label.len() as u16;
+            remaining -= spent;
 
             if remaining == 0 {
                 let bit_offset = usize::from(node.bit_len()) - slice.remaining_bits();
@@ -459,6 +472,16 @@ impl Dict {
     }
 }
 
+impl IntoIterator for &Dict {
+    type Item = Result<(Vec<u8>, DictEntry), CellError>;
+    type IntoIter = DictIter;
+
+    /// Delegates to [`Dict::iter`].
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
+    }
+}
+
 /// Where a key parts from the tree, and the forks passed on the way.
 struct Walk {
     path: Vec<Step>,
@@ -522,7 +545,12 @@ fn descend(root: Cell, key_bits: u16, bits: &[bool]) -> Result<Walk, CellError> 
         });
         node = child;
         consumed += len + 1;
-        remaining -= len as u16 + 1;
+        #[allow(
+            clippy::cast_possible_truncation,
+            reason = "read_label bounds len to at most remaining, and the check above returned unless len < remaining, so this fits a u16"
+        )]
+        let spent = len as u16;
+        remaining -= spent + 1;
     }
 }
 
@@ -561,6 +589,10 @@ fn split(
     key: &[bool],
     value: &Builder,
 ) -> Result<Cell, CellError> {
+    #[allow(
+        clippy::cast_possible_truncation,
+        reason = "at is where diverges() found label and key part company, so at < label.len(), and read_label bounds label.len() to at most remaining; remaining is a u16, so this fits"
+    )]
     let below = remaining - at as u16 - 1;
 
     let mut kept = Builder::new();
@@ -593,6 +625,10 @@ fn collapse(parent: &Step) -> Result<Cell, CellError> {
 
     let mut label = parent.label.clone();
     label.push(parent.branch == 0);
+    #[allow(
+        clippy::cast_possible_truncation,
+        reason = "parent.label was read by read_label under parent.remaining as its max, so parent.label.len() <= parent.remaining, which is a u16, so this fits"
+    )]
     let below = parent.remaining - parent.label.len() as u16 - 1;
     let mut slice = sibling.parse();
     label.extend_from_slice(&read_label(&mut slice, below)?);
@@ -606,7 +642,7 @@ fn collapse(parent: &Step) -> Result<Cell, CellError> {
 /// Rebuilds every fork on the path, from the deepest up to the root.
 fn rebuild(mut path: Vec<Step>, mut child: Cell) -> Result<Cell, CellError> {
     while let Some(step) = path.pop() {
-        child = step.rebuild(child)?;
+        child = step.rebuild(&child)?;
     }
     Ok(child)
 }
@@ -647,6 +683,10 @@ impl DictIter {
 
             // The right branch goes on first so the left one comes off first, which is
             // what puts the keys in ascending order.
+            #[allow(
+                clippy::cast_possible_truncation,
+                reason = "read_label bounds len to at most remaining, and the check above returned unless len < remaining, so this fits a u16"
+            )]
             let below = remaining - len as u16 - 1;
             for branch in [1usize, 0usize] {
                 let child = node.reference(branch).ok_or(NO_BRANCH)?.clone();
@@ -865,7 +905,7 @@ mod tests {
                 // The value each key was stored under is the key itself, so a walk that
                 // paired a key with the wrong leaf would show up here.
                 assert_eq!(
-                    found.slice().unwrap().load_uint(32).unwrap() as u32,
+                    found.slice().unwrap().load_u32().unwrap(),
                     u32::from_be_bytes(key.clone().try_into().unwrap())
                 );
                 u32::from_be_bytes(key.try_into().unwrap())
