@@ -125,10 +125,15 @@ pub fn bit_len(d2: u8, data: &[u8]) -> Result<u16, CellError> {
     // byte-aligned cell the long way round, and accepting it would leave a byte of pure
     // padding inside `data` for the hash to cover, so this crate and TON would disagree
     // about the identity of a cell they both accepted.
-    if last & 0x7f == 0 {
+    if last.trailing_zeros() >= 7 {
         return Err(CellError::Malformed("partial byte has no completion bit"));
     }
-    Ok(full * 8 + (7 - last.trailing_zeros() as u16))
+    #[allow(
+        clippy::cast_possible_truncation,
+        reason = "last is a u8, so trailing_zeros is at most 8, which fits u16"
+    )]
+    let low_zeros = last.trailing_zeros() as u16;
+    Ok(full * 8 + (7 - low_zeros))
 }
 
 /// Determines a cell's kind, and holds an exotic cell to the shape that kind must have.
@@ -255,10 +260,31 @@ pub fn parse_boc(bytes: &[u8]) -> Result<Vec<Cell>, CellError> {
         }
     }
 
+    // ref_size is validated above to be at most 4, so each of these reads at most four
+    // bytes and the result is under 2^32, which fits usize on every target this crate
+    // supports.
+    #[allow(
+        clippy::cast_possible_truncation,
+        reason = "ref_size is at most 4, so this is under 2^32"
+    )]
     let count = reader.uint(ref_size)? as usize;
+    #[allow(
+        clippy::cast_possible_truncation,
+        reason = "ref_size is at most 4, so this is under 2^32"
+    )]
     let roots = reader.uint(ref_size)? as usize;
+    #[allow(
+        clippy::cast_possible_truncation,
+        reason = "ref_size is at most 4, so this is under 2^32"
+    )]
     let absent = reader.uint(ref_size)? as usize;
-    let total_size = reader.uint(offset_size)? as usize;
+    // Unlike the reads above, this one is as wide as offset_size allows, which is eight
+    // bytes, so it can name a bag larger than a 32-bit target can address. Refusing is
+    // what keeps the check below meaningful: a size narrowed to fit would let a bag claim
+    // one length, carry another, and still pass.
+    let Ok(total_size) = usize::try_from(reader.uint(offset_size)?) else {
+        return Err(CellError::Header("cell area size"));
+    };
 
     // An absent cell is a reference to a cell the bag does not carry, which only the
     // format's incremental-update use has. A bag holding one cannot be read whole.
@@ -279,6 +305,10 @@ pub fn parse_boc(bytes: &[u8]) -> Result<Vec<Cell>, CellError> {
 
     let mut root_list = Vec::with_capacity(roots);
     for _ in 0..roots {
+        #[allow(
+            clippy::cast_possible_truncation,
+            reason = "ref_size is at most 4, so this is under 2^32"
+        )]
         let index = reader.uint(ref_size)? as usize;
         if index >= count {
             return Err(CellError::BadReference);
@@ -340,6 +370,10 @@ pub fn parse_boc(bytes: &[u8]) -> Result<Vec<Cell>, CellError> {
 
         let mut refs = Vec::with_capacity(ref_count);
         for _ in 0..ref_count {
+            #[allow(
+                clippy::cast_possible_truncation,
+                reason = "ref_size is at most 4, so this is under 2^32"
+            )]
             let target = reader.uint(ref_size)? as usize;
             // References point strictly forward, which is what keeps the graph acyclic.
             if target >= count || target <= index {
@@ -548,8 +582,17 @@ pub fn serialize_boc(roots: &[Cell]) -> Result<Vec<u8>, CellError> {
 
     let mut out = Vec::with_capacity(body.len() + 32);
     out.extend_from_slice(&MAGIC);
-    // No index, a checksum, and the reference size in the low three bits.
+    // No index, a checksum, and the reference size in the low three bits. byte_width
+    // always returns a byte count from 1 to 8, which fits u8 in both pushes below.
+    #[allow(
+        clippy::cast_possible_truncation,
+        reason = "byte_width returns 1 to 8, which fits u8"
+    )]
     out.push(0x40 | ref_size as u8);
+    #[allow(
+        clippy::cast_possible_truncation,
+        reason = "byte_width returns 1 to 8, which fits u8"
+    )]
     out.push(offset_size as u8);
     push_be(&mut out, count as u64, ref_size);
     push_be(&mut out, roots.len() as u64, ref_size);
@@ -714,9 +757,17 @@ mod tests {
         body.extend_from_slice(&[0x00, 0x01]);
         body.push(0xde);
         let mut bag = vec![0xb5, 0xee, 0x9c, 0x72, 0x01, 0x01, 0x01, 0x01, 0x00];
+        #[allow(
+            clippy::cast_possible_truncation,
+            reason = "body is 37 bytes here, so 2 + body.len() is far under u8::MAX"
+        )]
         bag.push((2 + body.len()) as u8);
         bag.push(0x00);
         bag.push(0x28);
+        #[allow(
+            clippy::cast_possible_truncation,
+            reason = "body is 37 bytes here, so body.len() * 2 is far under u8::MAX"
+        )]
         bag.push((body.len() * 2) as u8);
         bag.extend_from_slice(&body);
         assert_eq!(
