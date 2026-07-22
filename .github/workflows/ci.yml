@@ -41,11 +41,21 @@ concurrency:
 # cannot see.
 jobs:
   conventions:
-    name: license headers and workflow pins
+    name: license headers, workflow pins, justfile
     if: github.event_name != 'schedule' || github.repository == 'nirapod-labs/ton-net'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: taiki-e/install-action@a6b2e2dcd845ddd7f509ce4f3ed3d922b80cc5d9 # v2.84.0
+        with:
+          tool: just@1.57.0
+      # Until this step the justfile was the one build input no build read. Every job
+      # here invokes the underlying commands directly, so a justfile that does not
+      # parse leaves CI green while every command a contributor is told to run fails,
+      # and a duplicate recipe name reached main that way. A recipe name is not checked
+      # against anything else; parsing is the whole of what can be checked cheaply.
+      - name: justfile parses
+        run: just --list > /dev/null
       # Every file carries a copyright holder and a license identifier, in its own
       # header where the format allows a comment and in REUSE.toml where it does not.
       # A convention this wide decays without a check, so this one fails the build.
