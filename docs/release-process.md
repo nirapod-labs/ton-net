@@ -9,7 +9,7 @@ first version to cross.
 
 ## What holds the version together
 
-The library ships as six crates on crates.io and nine packages on npm, built from
+The library ships as six crates on crates.io and eight packages on npm, built from
 one commit through two toolchains that do not read each other. release-plz moves
 the Cargo side, napi moves the npm side.
 
@@ -87,7 +87,7 @@ secret exists to leak. Use it.
 
 It does not cover the first release. A trusted publisher is configured on a crate
 or a package that already exists, and crates.io has no equivalent of PyPI's pending
-publisher, so the first version of each of the six crates and each of the nine npm
+publisher, so the first version of each of the six crates and each of the eight npm
 packages is published by hand with a token. Only then can the registry side be
 configured. That makes the first release a different act from every one after it:
 
