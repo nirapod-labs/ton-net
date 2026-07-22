@@ -65,8 +65,9 @@ each registry even when the number is the same, is in [versions.md](versions.md)
 
 ## Cutting it
 
-release-plz opens a release pull request carrying the version bump. On that
-branch:
+release-plz opens a release pull request carrying the version bump, once it can
+run at all (see below). Until then the same bump is made by hand on a branch. On
+that branch:
 
 1. Rename `## [Unreleased]` to the version and date, and open a fresh empty
    `[Unreleased]`. Update the comparison links at the bottom.
@@ -91,9 +92,12 @@ Two workflows, split so that deciding to release and releasing are separate acts
 and a merge authorizes a publish rather than being one.
 
 - **`.github/workflows/release-plz.yml`** opens and updates the release pull
-  request on every push to `main`. It reaches no registry, holds no credential, and
-  does not tag. `git_release_enable` in `release-plz.toml` therefore governs a
-  subcommand nothing runs.
+  request. It reaches no registry, holds no credential, and does not tag.
+  `git_release_enable` in `release-plz.toml` therefore governs a subcommand
+  nothing runs. It is `workflow_dispatch` only until the first hand-publish:
+  release-plz works out the next version by diffing the published crate against
+  the tree, so with a tag and nothing on the registry it fails outright. The
+  `push` trigger goes back once the crates exist.
 - **`.github/workflows/release.yml`** wakes on the tag. It reruns the whole gate,
   because a tag is not evidence that the commit under it ever had a full run and
   crates.io yanks but never deletes. Then it publishes the six crates bottom up,

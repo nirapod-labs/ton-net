@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: 2026 Nirapod Labs
 
-# Opens the pull request that becomes a release, and tags the commit when it merges.
+# Opens the pull request that becomes a release. It does not tag; see the last step.
 #
 # This does not publish. Publishing is `release.yml`, on the tag this produces, and
 # the split is deliberate: the decision to release and the act of releasing are
@@ -16,11 +16,11 @@
 # whether they were exposed to anything.
 name: release-plz
 
+# Manual until the crates exist on the registry. release-plz works out the next version
+# by diffing the published crate against the tree, so with a v0.3.0 tag and nothing
+# published it fails on every push: "not found in the registry, but the git tag exists".
+# The `push` trigger goes back once the first hand-publish has happened.
 on:
-  push:
-    branches: [main]
-  # A release is a decision, and sometimes the decision is made without a commit to
-  # hang it on.
   workflow_dispatch:
 
 env:
