@@ -185,8 +185,7 @@ impl SignatureSet {
     #[must_use]
     pub fn signatures(&self) -> &[Signature] {
         match self {
-            Self::Ordinary { signatures, .. }
-            | Self::Simplex { signatures, .. } => signatures,
+            Self::Ordinary { signatures, .. } | Self::Simplex { signatures, .. } => signatures,
         }
     }
 }
