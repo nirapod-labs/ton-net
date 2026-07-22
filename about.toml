@@ -10,26 +10,26 @@
 # being shipped without its notice or a notice is being written for something
 # that is not allowed in.
 accepted = [
-    "Apache-2.0",
-    "Apache-2.0 WITH LLVM-exception",
-    "BSD-3-Clause",
-    "ISC",
-    "MIT",
-    "Unicode-3.0",
-    "Unlicense",
+  "Apache-2.0",
+  "Apache-2.0 WITH LLVM-exception",
+  "BSD-3-Clause",
+  "ISC",
+  "MIT",
+  "Unicode-3.0",
+  "Unlicense",
 ]
 
 # The binding links its dependencies into one shared object per platform, and
 # these are the platforms it is built for. Something reached only on a target
 # that is never shipped does not belong in the notice file.
 targets = [
-    "aarch64-apple-darwin",
-    "x86_64-apple-darwin",
-    "x86_64-unknown-linux-gnu",
-    "x86_64-unknown-linux-musl",
-    "aarch64-unknown-linux-gnu",
-    "aarch64-unknown-linux-musl",
-    "x86_64-pc-windows-msvc",
+  "aarch64-apple-darwin",
+  "x86_64-apple-darwin",
+  "x86_64-unknown-linux-gnu",
+  "x86_64-unknown-linux-musl",
+  "aarch64-unknown-linux-gnu",
+  "aarch64-unknown-linux-musl",
+  "x86_64-pc-windows-msvc",
 ]
 
 # A development dependency is not linked into the shipped binary, so attributing

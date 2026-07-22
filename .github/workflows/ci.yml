@@ -41,14 +41,14 @@ concurrency:
 # cannot see.
 jobs:
   conventions:
-    name: license headers, workflow pins, justfile
+    name: headers, pins, justfile, toml, spelling
     if: github.event_name != 'schedule' || github.repository == 'nirapod-labs/ton-net'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: taiki-e/install-action@a6b2e2dcd845ddd7f509ce4f3ed3d922b80cc5d9 # v2.84.0
         with:
-          tool: just@1.57.0
+          tool: just@1.57.0,taplo@0.10.0,typos@1.48.0
       # Until this step the justfile was the one build input no build read. Every job
       # here invokes the underlying commands directly, so a justfile that does not
       # parse leaves CI green while every command a contributor is told to run fails,
@@ -56,6 +56,18 @@ jobs:
       # against anything else; parsing is the whole of what can be checked cheaply.
       - name: justfile parses
         run: just --list > /dev/null
+      # Nineteen TOML files carry the workspace, the lint policy, the license policy
+      # and the release configuration, and each was formatted by whoever touched it
+      # last. `.editorconfig` had declared two-space indentation for them the whole
+      # time while every file used four, so this is what makes that declaration true.
+      - name: toml formatted
+        run: RUST_LOG=warn taplo fmt --check
+      # The argument for why a check exists is written next to the check here, so the
+      # comments and the documentation are a larger surface than the code, and they are
+      # the part no compiler and no linter reads. Fixtures are excluded in _typos.toml:
+      # a captured mainnet address is an arbitrary string and will spell near-misses.
+      - name: spelling
+        run: typos
       # Every file carries a copyright holder and a license identifier, in its own
       # header where the format allows a comment and in REUSE.toml where it does not.
       # A convention this wide decays without a check, so this one fails the build.

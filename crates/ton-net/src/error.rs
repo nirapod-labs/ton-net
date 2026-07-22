@@ -119,7 +119,7 @@ impl From<ton_net_block::BlockError> for Error {
     /// Every way the proof engine fails is a proof failure, bytes that are not cells
     /// included.
     ///
-    /// The tempting split is to call unparseable bytes a decode failure, on the reasoning
+    /// The tempting split is to call unparsable bytes a decode failure, on the reasoning
     /// that they failed before any proof was in question. They did not: the bytes are the
     /// server's proof, and the engine parses them with no precondition, so four bytes of
     /// junk in a shard proof is a server failing to prove its answer in the cheapest way

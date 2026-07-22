@@ -104,5 +104,5 @@ for (const target of targets) {
 
 // Progress goes to stderr. npm runs this from `prepack`, so anything written to
 // stdout lands in front of the JSON that `npm pack --json` is expected to emit and
-// makes it unparseable for whatever reads it.
+// makes it unparsable for whatever reads it.
 console.error(`prepared ${targets.length} package(s)`);

@@ -1,0 +1,24 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: 2026 Nirapod Labs
+
+# Spell checking over the whole tree. This repository is unusually prose-heavy for a
+# protocol library: the argument for why a check exists is written next to the check,
+# so the comments and the documentation are a larger surface than the code and they
+# are where a typo survives longest. Nothing in a compiler or a linter reads them.
+
+[files]
+# Three kinds of file are not prose and would only produce noise.
+#
+# The fixtures are blocks, proofs and addresses captured from mainnet and compared
+# byte for byte. A base64 address is an arbitrary string, so any three letters in one
+# can spell a near-miss of an English word: `EQCxE6mUtQJKFnGfaROTKOt1...` reads as a
+# misspelled `To` at `Ot`. Correcting one would break the test it belongs to.
+#
+# The notices are generated, and they are eighty-odd other projects' license texts.
+# A typo in one is theirs, and this file is not the place to fix it.
+extend-exclude = [
+  "crates/*/tests/fixtures/**",
+  "*.hex",
+  "THIRD-PARTY-LICENSES.md",
+  "spikes/**",
+]
