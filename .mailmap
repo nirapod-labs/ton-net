@@ -6,6 +6,14 @@
 #
 # Every mapping here stays within one identity. Mapping one identity onto another
 # would misstate who wrote the code, so it is never done.
+#
+# The canonical address is on the organization domain. The commit identity moved
+# there under ORG-ADR-004, and the move is forward-only: a published commit is
+# never rewritten, so the earlier address stays in history and is collapsed here
+# instead. Both domains therefore appear below, and both carry the profile
+# spelling a squash merge stamps.
 
-athexweb3 <athexweb3@gmail.com> Athex Web3 <athexweb3@gmail.com>
-athexweb3 <athexweb3@gmail.com> <athexweb3@users.noreply.github.com>
+athexweb3 <athexweb3@nirapod.org> Athex Web3 <athexweb3@nirapod.org>
+athexweb3 <athexweb3@nirapod.org> <athexweb3@gmail.com>
+athexweb3 <athexweb3@nirapod.org> Athex Web3 <athexweb3@gmail.com>
+athexweb3 <athexweb3@nirapod.org> <athexweb3@users.noreply.github.com>
