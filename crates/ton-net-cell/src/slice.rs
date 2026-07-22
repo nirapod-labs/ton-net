@@ -136,6 +136,60 @@ impl<'a> Slice<'a> {
         Ok(value)
     }
 
+    // The four readers below narrow through the big-endian bytes rather than a cast.
+    // `load_uint(n)` cannot return more than `n` bits, so the high bytes are always zero
+    // and the conversion is total. Writing it this way says so, and leaves no cast for a
+    // later reader to have to prove safe.
+
+    /// Reads eight bits as a `u8`.
+    ///
+    /// The width is in the name rather than in an argument, so a fixed-width TL-B field
+    /// arrives as the type it actually has and no caller narrows a `u64` back down.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CellError::NotEnoughBits`] if the slice has fewer than eight bits left.
+    pub fn load_u8(&mut self) -> Result<u8, CellError> {
+        let [.., byte] = self.load_uint(8)?.to_be_bytes();
+        Ok(byte)
+    }
+
+    /// Reads sixteen bits as a `u16`, most significant bit first.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CellError::NotEnoughBits`] if the slice has fewer than sixteen bits
+    /// left.
+    pub fn load_u16(&mut self) -> Result<u16, CellError> {
+        let [.., a, b] = self.load_uint(16)?.to_be_bytes();
+        Ok(u16::from_be_bytes([a, b]))
+    }
+
+    /// Reads thirty-two bits as a `u32`, most significant bit first.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CellError::NotEnoughBits`] if the slice has fewer than thirty-two bits
+    /// left.
+    pub fn load_u32(&mut self) -> Result<u32, CellError> {
+        let [.., a, b, c, d] = self.load_uint(32)?.to_be_bytes();
+        Ok(u32::from_be_bytes([a, b, c, d]))
+    }
+
+    /// Reads thirty-two bits as a two's complement `i32`, most significant bit first.
+    ///
+    /// This is TL-B's `int32`, which a workchain id uses. The bits are the ones
+    /// [`load_u32`](Self::load_u32) reads; only the meaning of the top one differs.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CellError::NotEnoughBits`] if the slice has fewer than thirty-two bits
+    /// left.
+    pub fn load_i32(&mut self) -> Result<i32, CellError> {
+        let [.., a, b, c, d] = self.load_uint(32)?.to_be_bytes();
+        Ok(i32::from_be_bytes([a, b, c, d]))
+    }
+
     /// Reads `n` bits as a wide unsigned integer, most significant bit first.
     ///
     /// # Errors
@@ -361,6 +415,13 @@ mod tests {
         0xb5, 0xee, 0x9c, 0x72, 0x01, 0x01, 0x01, 0x01, 0x00, 0x03, 0x00, 0x00, 0x02, 0xab,
     ];
 
+    // One cell of thirty-two bits holding 0x89abcdef. The top bit is set, so the signed
+    // reading of those bits differs from the unsigned one.
+    const FOUR_BYTES: [u8; 17] = [
+        0xb5, 0xee, 0x9c, 0x72, 0x01, 0x01, 0x01, 0x01, 0x00, 0x06, 0x00, 0x00, 0x08, 0x89, 0xab,
+        0xcd, 0xef,
+    ];
+
     // A root with one reference; the referenced cell holds the byte 0xcd.
     const TWO_CELLS: [u8; 17] = [
         0xb5, 0xee, 0x9c, 0x72, 0x01, 0x01, 0x02, 0x01, 0x00, 0x06, 0x00, 0x01, 0x00, 0x01, 0x00,
@@ -392,6 +453,23 @@ mod tests {
         let roots = parse_boc(&ONE_CELL).unwrap();
         assert!(roots[0].parse().load_uint(65).is_err());
         assert!(roots[0].parse().load_uint128(129).is_err());
+    }
+
+    #[test]
+    fn a_fixed_width_read_lands_in_its_own_type() {
+        let roots = parse_boc(&FOUR_BYTES).unwrap();
+        assert_eq!(roots[0].parse().load_u8().unwrap(), 0x89);
+        assert_eq!(roots[0].parse().load_u16().unwrap(), 0x89ab);
+        assert_eq!(roots[0].parse().load_u32().unwrap(), 0x89ab_cdef);
+        // The same thirty-two bits, read as int32.
+        assert_eq!(roots[0].parse().load_i32().unwrap(), -1_985_229_329);
+
+        // Each advances by its own width, and the last one runs out rather than wrapping.
+        let mut slice = roots[0].parse();
+        assert_eq!(slice.load_u16().unwrap(), 0x89ab);
+        assert_eq!(slice.load_u16().unwrap(), 0xcdef);
+        assert!(slice.is_empty());
+        assert!(slice.load_u8().is_err());
     }
 
     #[test]
