@@ -68,6 +68,26 @@ napi = { version = "3", default-features = false }
 napi-derive = "3"
 napi-build = "2"
 
+# Clippy's default groups catch a wrong program. Pedantic catches where this one is
+# loose about what it is doing, which on a decoder reading bytes from a peer it does not
+# trust is most of what is worth catching.
+[workspace.lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+
+# Nursery lints are named one at a time rather than taken as a group. The group is
+# clippy's staging area, the toolchain tracks stable, and lint runs with -D warnings, so
+# taking the group would let a Rust release turn the build red on a change that touched
+# nothing. missing_const_for_fn is deliberately absent: it asks for const on 41 public
+# functions, and const on a published function is a promise that only breaks in one
+# direction, which is the wrong trade while the cell engine is still being written.
+use_self = "warn"
+redundant_pub_crate = "warn"
+redundant_clone = "warn"
+significant_drop_tightening = "warn"
+
+# Length here follows the size of the format being decoded, not complexity.
+too_many_lines = "allow"
+
 # Verifying a proof chain is signature-bound: a cold sync checks over a hundred thousand
 # ed25519 signatures, and the curve and digest crates are roughly two orders of magnitude
 # slower without optimization. Leaving them unoptimized in a debug build turns a two

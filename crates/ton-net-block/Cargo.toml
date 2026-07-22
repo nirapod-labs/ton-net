@@ -41,3 +41,6 @@ ed25519-dalek = "3"
 [[bench]]
 name = "verify"
 harness = false
+
+[lints]
+workspace = true

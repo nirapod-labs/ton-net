@@ -20,12 +20,12 @@
 /// addresses as strings can be walked past it. The three things that would break it are
 /// a length that is not a whole number of quanta, padding in the middle, and a final
 /// character with bits set that no output byte carries.
-pub(crate) fn base64_decode(input: &str) -> Option<Vec<u8>> {
+pub fn base64_decode(input: &str) -> Option<Vec<u8>> {
     fn sextet(c: u8) -> Option<u32> {
         Some(match c {
-            b'A'..=b'Z' => (c - b'A') as u32,
-            b'a'..=b'z' => (c - b'a' + 26) as u32,
-            b'0'..=b'9' => (c - b'0' + 52) as u32,
+            b'A'..=b'Z' => u32::from(c - b'A'),
+            b'a'..=b'z' => u32::from(c - b'a' + 26),
+            b'0'..=b'9' => u32::from(c - b'0' + 52),
             b'+' | b'-' => 62,
             b'/' | b'_' => 63,
             _ => return None,
@@ -51,6 +51,10 @@ pub(crate) fn base64_decode(input: &str) -> Option<Vec<u8>> {
         bits += 6;
         if bits >= 8 {
             bits -= 8;
+            #[allow(
+                clippy::cast_possible_truncation,
+                reason = "bits was just reduced below 8, so acc >> bits carries exactly the newly completed byte in its low 8 bits; anything the cast drops above that is a sextet already pushed in an earlier iteration"
+            )]
             out.push((acc >> bits) as u8);
         }
     }
@@ -67,10 +71,10 @@ pub(crate) fn base64_decode(input: &str) -> Option<Vec<u8>> {
 ///
 /// Verified against addresses packed by the reference implementation, in both
 /// workchains and both bounceable forms.
-pub(crate) fn crc16(data: &[u8]) -> u16 {
+pub fn crc16(data: &[u8]) -> u16 {
     let mut crc: u16 = 0;
     for &byte in data {
-        crc ^= (byte as u16) << 8;
+        crc ^= u16::from(byte) << 8;
         for _ in 0..8 {
             crc = if crc & 0x8000 != 0 {
                 (crc << 1) ^ 0x1021
@@ -84,7 +88,7 @@ pub(crate) fn crc16(data: &[u8]) -> u16 {
 
 /// Decodes a hex string to bytes, or `None` if the length is odd or a character is not a
 /// hex digit.
-pub(crate) fn decode_hex(input: &str) -> Option<Vec<u8>> {
+pub fn decode_hex(input: &str) -> Option<Vec<u8>> {
     fn nibble(c: u8) -> Option<u8> {
         match c {
             b'0'..=b'9' => Some(c - b'0'),
@@ -111,7 +115,12 @@ mod tests {
     use super::*;
 
     fn hex(bytes: &[u8]) -> String {
-        bytes.iter().map(|b| format!("{b:02x}")).collect()
+        use std::fmt::Write as _;
+
+        bytes.iter().fold(String::new(), |mut hex, b| {
+            let _ = write!(hex, "{b:02x}");
+            hex
+        })
     }
 
     #[test]

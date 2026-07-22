@@ -91,10 +91,14 @@ pub struct BlockIdExt {
 
 impl From<ton_net_tl::lite::BlockIdExt> for BlockIdExt {
     /// The sequence number is a height, so it becomes unsigned crossing into the domain.
-    fn from(wire: ton_net_tl::lite::BlockIdExt) -> BlockIdExt {
-        BlockIdExt {
+    fn from(wire: ton_net_tl::lite::BlockIdExt) -> Self {
+        Self {
             workchain: wire.workchain,
             shard: wire.shard,
+            #[allow(
+                clippy::cast_sign_loss,
+                reason = "the liteserver wire carries seqno as TL's i32; this reinterprets those bits as the domain's u32, with no range check performed here"
+            )]
             seqno: wire.seqno as u32,
             root_hash: wire.root_hash,
             file_hash: wire.file_hash,
@@ -103,10 +107,14 @@ impl From<ton_net_tl::lite::BlockIdExt> for BlockIdExt {
 }
 
 impl From<&BlockIdExt> for ton_net_tl::lite::BlockIdExt {
-    fn from(block: &BlockIdExt) -> ton_net_tl::lite::BlockIdExt {
-        ton_net_tl::lite::BlockIdExt {
+    fn from(block: &BlockIdExt) -> Self {
+        Self {
             workchain: block.workchain,
             shard: block.shard,
+            #[allow(
+                clippy::cast_possible_wrap,
+                reason = "reinterprets the domain's u32 seqno back into the wire's i32 field for the TL encoding, with no range check performed here"
+            )]
             seqno: block.seqno as i32,
             root_hash: block.root_hash,
             file_hash: block.file_hash,
@@ -131,8 +139,8 @@ impl BlockIdExt {
         seqno: u32,
         root_hash: [u8; 32],
         file_hash: [u8; 32],
-    ) -> BlockIdExt {
-        BlockIdExt {
+    ) -> Self {
+        Self {
             workchain,
             shard,
             seqno,

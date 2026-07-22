@@ -20,7 +20,7 @@ use ton_net_tl::{adnl, deserialize, lite, serialize, signed, TlError};
 fn crc32(s: &str) -> u32 {
     let mut crc: u32 = 0xFFFF_FFFF;
     for &b in s.as_bytes() {
-        crc ^= b as u32;
+        crc ^= u32::from(b);
         for _ in 0..8 {
             let m = (crc & 1).wrapping_neg();
             crc = (crc >> 1) ^ (0xEDB8_8320 & m);
@@ -252,23 +252,26 @@ fn constructor_ids_match_scheme() {
 
 #[test]
 fn types_round_trip() {
-    let m = masterchain_info();
+    let info = masterchain_info();
     assert_eq!(
-        deserialize::<lite::MasterchainInfo>(&serialize(&m)).unwrap(),
-        m
+        deserialize::<lite::MasterchainInfo>(&serialize(&info)).unwrap(),
+        info
     );
 
-    let a = account_state();
+    let account = account_state();
     assert_eq!(
-        deserialize::<lite::AccountState>(&serialize(&a)).unwrap(),
-        a
+        deserialize::<lite::AccountState>(&serialize(&account)).unwrap(),
+        account
     );
 
-    let q = adnl::Message::Query {
+    let query = adnl::Message::Query {
         query_id: [7; 32],
         query: vec![1, 2, 3, 4, 5],
     };
-    assert_eq!(deserialize::<adnl::Message>(&serialize(&q)).unwrap(), q);
+    assert_eq!(
+        deserialize::<adnl::Message>(&serialize(&query)).unwrap(),
+        query
+    );
 
     let ans = adnl::Message::Answer {
         query_id: [9; 32],
@@ -276,27 +279,33 @@ fn types_round_trip() {
     };
     assert_eq!(deserialize::<adnl::Message>(&serialize(&ans)).unwrap(), ans);
 
-    let e = lite::Error {
+    let err = lite::Error {
         code: -400,
         message: b"bad request".to_vec(),
     };
-    assert_eq!(deserialize::<lite::Error>(&serialize(&e)).unwrap(), e);
+    assert_eq!(deserialize::<lite::Error>(&serialize(&err)).unwrap(), err);
 
-    let v = lite::Version {
+    let version = lite::Version {
         mode: 0,
         version: 1,
         capabilities: 7,
         now: 1_700_000_000,
     };
-    assert_eq!(deserialize::<lite::Version>(&serialize(&v)).unwrap(), v);
-
-    let t = lite::CurrentTime { now: 1_700_000_000 };
-    assert_eq!(deserialize::<lite::CurrentTime>(&serialize(&t)).unwrap(), t);
-
-    let p = partial_block_proof();
     assert_eq!(
-        deserialize::<lite::PartialBlockProof>(&serialize(&p)).unwrap(),
-        p
+        deserialize::<lite::Version>(&serialize(&version)).unwrap(),
+        version
+    );
+
+    let time = lite::CurrentTime { now: 1_700_000_000 };
+    assert_eq!(
+        deserialize::<lite::CurrentTime>(&serialize(&time)).unwrap(),
+        time
+    );
+
+    let proof = partial_block_proof();
+    assert_eq!(
+        deserialize::<lite::PartialBlockProof>(&serialize(&proof)).unwrap(),
+        proof
     );
 
     for set in [ordinary_set(), simplex_set()] {
@@ -306,16 +315,16 @@ fn types_round_trip() {
         );
     }
 
-    let d = signed::DataToSign {
+    let data_to_sign = signed::DataToSign {
         session_id: [0xab; 32],
         data: serialize(signed::Vote::Finalize { id: candidate_id() }),
     };
     assert_eq!(
-        deserialize::<signed::DataToSign>(&serialize(&d)).unwrap(),
-        d
+        deserialize::<signed::DataToSign>(&serialize(&data_to_sign)).unwrap(),
+        data_to_sign
     );
     assert_eq!(
-        deserialize::<signed::Vote>(&d.data).unwrap(),
+        deserialize::<signed::Vote>(&data_to_sign.data).unwrap(),
         signed::Vote::Finalize { id: candidate_id() }
     );
 }

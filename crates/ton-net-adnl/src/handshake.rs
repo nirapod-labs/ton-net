@@ -170,7 +170,13 @@ mod tests {
     fn secrets() -> HandshakeSecrets {
         let mut params = [0u8; 160];
         for (i, byte) in params.iter_mut().enumerate() {
-            *byte = (i as u8).wrapping_mul(3).wrapping_add(5);
+            #[allow(
+                clippy::cast_possible_truncation,
+                reason = "params is a fixed [u8; 160], so enumerate() bounds i to 0..160, well within u8::MAX"
+            )]
+            {
+                *byte = (i as u8).wrapping_mul(3).wrapping_add(5);
+            }
         }
         HandshakeSecrets {
             key_seed: [0x11; 32],
@@ -274,8 +280,7 @@ mod tests {
             assert!(
                 matches!(
                     client_handshake(&key, &secrets()),
-                    Err(HandshakeError::DegenerateSharedSecret)
-                        | Err(HandshakeError::InvalidServerKey)
+                    Err(HandshakeError::DegenerateSharedSecret | HandshakeError::InvalidServerKey)
                 ),
                 "a key of small order was accepted: {key:02x?}"
             );

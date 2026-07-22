@@ -143,7 +143,7 @@ impl CandidateBlock {
     #[must_use]
     pub fn block(&self) -> &crate::lite::BlockIdExt {
         match self {
-            CandidateBlock::Ordinary { block } | CandidateBlock::Empty { block } => block,
+            Self::Ordinary { block } | Self::Empty { block } => block,
         }
     }
 
@@ -158,8 +158,8 @@ impl CandidateBlock {
     /// Returns [`crate::TlError::UnknownConstructor`] if the bytes are some other
     /// candidate form, or [`crate::TlError::UnexpectedEof`] if they end before the
     /// identity does.
-    pub fn read_prefix(bytes: &[u8]) -> crate::TlResult<CandidateBlock> {
-        <CandidateBlock as TlRead>::read_from(&mut &bytes[..])
+    pub fn read_prefix(bytes: &[u8]) -> crate::TlResult<Self> {
+        <Self as TlRead>::read_from(&mut &bytes[..])
     }
 }
 

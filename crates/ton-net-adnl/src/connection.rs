@@ -58,7 +58,8 @@ pub enum AdnlError {
     #[error(transparent)]
     Handshake(#[from] HandshakeError),
 
-    /// A received frame did not decrypt or check out.
+    /// A received frame did not decrypt or check out, or a query was larger than one
+    /// frame carries.
     #[error(transparent)]
     Frame(#[from] FrameError),
 
@@ -157,7 +158,7 @@ impl<T: Transport> AdnlConnection<T> {
                     query_id: answered,
                     answer,
                 }) if answered == query_id => return Ok(answer),
-                Ok(_) => continue, // some other message; keep waiting for this answer
+                Ok(_) => {} // some other message; keep waiting for this answer
                 // A frame that decrypted and passed its checksum but names a message this
                 // crate does not model. ADNL has more message kinds than the two read
                 // here, so this is a gap in what is decoded rather than a broken stream,
@@ -175,7 +176,7 @@ impl<T: Transport> AdnlConnection<T> {
     /// Seals one frame and puts it on the wire.
     async fn send(&mut self, nonce: &[u8; 32], message: &[u8]) -> Result<(), AdnlError> {
         self.check()?;
-        let frame = self.ciphers.seal(nonce, message);
+        let frame = self.ciphers.seal(nonce, message)?;
         // Sealing has already advanced the send keystream over the whole frame, so a
         // write that stops partway leaves the server reading the rest of one frame out of
         // the front of the next.

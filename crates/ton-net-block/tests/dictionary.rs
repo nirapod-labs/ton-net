@@ -117,7 +117,7 @@ fn validator_list(config: &Cell) -> Cell {
 
 /// The masterchain's shard hashes, out of the proof that binds a basechain read.
 fn shard_hashes(read: &Read) -> Cell {
-    let state = read.state_of(&read.shard_proof, &read.block_root_hash);
+    let state = Read::state_of(&read.shard_proof, &read.block_root_hash);
     // The masterchain extra: a tag, then the shard hashes.
     let extra = state
         .cell()
@@ -134,7 +134,7 @@ fn shard_hashes(read: &Read) -> Cell {
 
 /// The shard's accounts dictionary, out of the account proof.
 fn shard_accounts(read: &Read) -> Cell {
-    let state = read.state_of(&read.proof, &read.shard_block_root_hash);
+    let state = Read::state_of(&read.proof, &read.shard_block_root_hash);
     let accounts = state.accounts().expect("a state carries its accounts");
     accounts
         .parse()
@@ -177,11 +177,19 @@ fn read_label(slice: &mut Slice<'_>, max: u16) -> (Vec<bool>, usize, &'static st
         return (bits, 2 + 2 * len, "short");
     }
     if !slice.load_bit().unwrap() {
+        #[allow(
+            clippy::cast_possible_truncation,
+            reason = "width is u16::BITS - max.leading_zeros() <= 16, so load_uint(width) is under 2^16 and fits any usize"
+        )]
         let len = slice.load_uint(width).unwrap() as usize;
         let bits = (0..len).map(|_| slice.load_bit().unwrap()).collect();
         return (bits, 2 + width as usize + len, "long");
     }
     let value = slice.load_bit().unwrap();
+    #[allow(
+        clippy::cast_possible_truncation,
+        reason = "width is u16::BITS - max.leading_zeros() <= 16, so load_uint(width) is under 2^16 and fits any usize"
+    )]
     let len = slice.load_uint(width).unwrap() as usize;
     (vec![value; len], 3 + width as usize, "same")
 }
@@ -205,6 +213,10 @@ fn walk(node: &Cell, max: u16, out: &mut Vec<Node>) {
     if len == usize::from(max) {
         return;
     }
+    #[allow(
+        clippy::cast_possible_truncation,
+        reason = "the len == max case already returned above, so here len < max <= 65535, fits u16"
+    )]
     let below = max - len as u16 - 1;
     for branch in 0..2 {
         walk(
@@ -451,13 +463,13 @@ struct Link {
 }
 
 impl Link {
-    fn parse(text: &str) -> Link {
+    fn parse(text: &str) -> Self {
         let proof: ton_net_tl::lite::PartialBlockProof =
             ton_net_tl::deserialize(&unhex(text)).expect("the fixture decodes");
         match proof.steps.into_iter().next().expect("one step") {
             ton_net_tl::lite::BlockLink::Forward {
                 from, config_proof, ..
-            } => Link {
+            } => Self {
                 from_root_hash: from.root_hash,
                 config_proof,
             },
@@ -476,14 +488,14 @@ struct Read {
 }
 
 impl Read {
-    fn parse(text: &str) -> Read {
+    fn parse(text: &str) -> Self {
         let field = |name: &str| -> &str {
             text.lines()
                 .find_map(|line| line.strip_prefix(name)?.strip_prefix('='))
                 .unwrap_or_else(|| panic!("fixture has no {name}"))
                 .trim()
         };
-        Read {
+        Self {
             account_id: hash32(field("account_id")),
             block_root_hash: hash32(field("block_root_hash")),
             shard_block_root_hash: hash32(field("shard_block_root_hash")),
@@ -493,7 +505,7 @@ impl Read {
     }
 
     /// The shard state a proof carries, checked against the block it claims to be of.
-    fn state_of(&self, bytes: &[u8], block_root_hash: &[u8; 32]) -> ShardState {
+    fn state_of(bytes: &[u8], block_root_hash: &[u8; 32]) -> ShardState {
         let roots = ton_net_cell::parse_boc(bytes).expect("the proof parses");
         let state_hash =
             proof::verify_block_state(&roots, block_root_hash).expect("the proof roots");

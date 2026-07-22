@@ -24,15 +24,12 @@ fn main() -> Result<(), Error> {
     let body = async {
         let config = Config::mainnet();
 
-        let mut client = match load(Path::new(SAVED)) {
-            Some(anchor) => {
-                println!("resuming from block {}", anchor.seqno);
-                Client::connect_from(&config, &anchor).await?
-            }
-            None => {
-                println!("no saved anchor, walking from the block the config pins");
-                Client::connect(&config).await?
-            }
+        let mut client = if let Some(anchor) = load(Path::new(SAVED)) {
+            println!("resuming from block {}", anchor.seqno);
+            Client::connect_from(&config, &anchor).await?
+        } else {
+            println!("no saved anchor, walking from the block the config pins");
+            Client::connect(&config).await?
         };
 
         let report = client.sync().await?;
@@ -92,7 +89,12 @@ fn load(path: &Path) -> Option<BlockIdExt> {
 }
 
 fn hex(bytes: &[u8; 32]) -> String {
-    bytes.iter().map(|b| format!("{b:02x}")).collect()
+    use std::fmt::Write as _;
+
+    bytes.iter().fold(String::new(), |mut hex, b| {
+        let _ = write!(hex, "{b:02x}");
+        hex
+    })
 }
 
 fn unhex(text: &str) -> Option<[u8; 32]> {

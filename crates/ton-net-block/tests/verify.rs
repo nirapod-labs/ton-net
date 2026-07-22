@@ -58,14 +58,14 @@ struct Read {
 }
 
 impl Read {
-    fn parse(text: &str) -> Read {
+    fn parse(text: &str) -> Self {
         let field = |name: &str| -> &str {
             text.lines()
                 .find_map(|line| line.strip_prefix(name)?.strip_prefix('='))
                 .unwrap_or_else(|| panic!("fixture has no {name}"))
                 .trim()
         };
-        Read {
+        Self {
             workchain: field("workchain").parse().expect("workchain"),
             account_id: hash(field("account_id")),
             block_root_hash: hash(field("block_root_hash")),
@@ -134,10 +134,15 @@ fn prune_at(roots: &[Cell], prune: &dyn Fn(&Cell) -> bool) -> Vec<u8> {
             let mut data = vec![0x01, 0x01];
             data.extend_from_slice(cell.hash());
             data.extend_from_slice(&cell.depth().to_be_bytes());
+            #[allow(
+                clippy::cast_possible_truncation,
+                reason = "data is a fixed 36 bytes here (2-byte prefix, 32-byte hash, 2-byte depth), so *8 = 288 fits u16"
+            )]
+            let bits = (data.len() * 8) as u16;
             Raw {
                 level_mask: 1,
                 exotic: true,
-                bits: (data.len() * 8) as u16,
+                bits,
                 data,
                 refs: Vec::new(),
             }
@@ -175,13 +180,30 @@ fn prune_at(roots: &[Cell], prune: &dyn Fn(&Cell) -> bool) -> Vec<u8> {
         .map(|root| walk(root, prune, &mut out, &mut seen))
         .collect();
     let last = out.len() - 1;
+    #[allow(
+        clippy::cast_possible_truncation,
+        reason = "cell counts in a captured single-account proof are in the hundreds at most, far under 2^16"
+    )]
     let index = |at: usize| (last - at) as u16;
 
     let mut body = Vec::new();
     for cell in out.iter().rev() {
         let partial = u8::from(cell.bits % 8 != 0);
-        body.push(cell.refs.len() as u8 + 8 * u8::from(cell.exotic) + 32 * cell.level_mask);
-        body.push((cell.data.len() as u8) * 2 - partial);
+        // Every Raw here comes either from the fixed-size placeholder above or from a real
+        // Cell's own refs()/data(), which parse_boc and Builder both cap at MAX_REFS = 4
+        // references and MAX_BITS = 1023 bits (128 bytes), so both casts below fit u8.
+        #[allow(
+            clippy::cast_possible_truncation,
+            reason = "a Cell holds at most MAX_REFS = 4 references, enforced when it is parsed or built"
+        )]
+        let ref_count = cell.refs.len() as u8;
+        #[allow(
+            clippy::cast_possible_truncation,
+            reason = "a Cell holds at most MAX_BITS = 1023 bits, so data.len() <= 128 fits u8"
+        )]
+        let data_len = cell.data.len() as u8;
+        body.push(ref_count + 8 * u8::from(cell.exotic) + 32 * cell.level_mask);
+        body.push(data_len * 2 - partial);
         body.extend_from_slice(&cell.data);
         for &child in &cell.refs {
             body.extend_from_slice(&index(child).to_be_bytes());
@@ -191,10 +213,25 @@ fn prune_at(roots: &[Cell], prune: &dyn Fn(&Cell) -> bool) -> Vec<u8> {
     // Two-byte references and a four-byte cell area, wide enough for any proof here, and
     // no index or checksum since neither is required to read a bag back.
     let mut bag = vec![0xb5, 0xee, 0x9c, 0x72, 0x02, 0x04];
-    bag.extend_from_slice(&(out.len() as u16).to_be_bytes());
-    bag.extend_from_slice(&(at.len() as u16).to_be_bytes());
+    #[allow(
+        clippy::cast_possible_truncation,
+        reason = "out.len() is a captured proof's cell count, far under 2^16, same bound as the index closure above"
+    )]
+    let cell_count = out.len() as u16;
+    #[allow(
+        clippy::cast_possible_truncation,
+        reason = "at.len() is a captured proof's root count, always a small handful, far under 2^16"
+    )]
+    let root_count = at.len() as u16;
+    bag.extend_from_slice(&cell_count.to_be_bytes());
+    bag.extend_from_slice(&root_count.to_be_bytes());
     bag.extend_from_slice(&0u16.to_be_bytes());
-    bag.extend_from_slice(&(body.len() as u32).to_be_bytes());
+    #[allow(
+        clippy::cast_possible_truncation,
+        reason = "body.len() is a captured single-account proof's serialized size, at most a few hundred KB, far under u32::MAX"
+    )]
+    let body_len = body.len() as u32;
+    bag.extend_from_slice(&body_len.to_be_bytes());
     for &root in &at {
         bag.extend_from_slice(&index(root).to_be_bytes());
     }
@@ -430,7 +467,7 @@ fn an_account_whose_contents_were_pruned_away_is_refused() {
         root.hash(),
         "the edit has to be invisible to the hash, or it proves nothing"
     );
-    assert!(rebuilt[0].refs().iter().all(|c| c.is_exotic()));
+    assert!(rebuilt[0].refs().iter().all(ton_net_cell::Cell::is_exotic));
 
     assert_eq!(
         verify_account(&read.with_state(&forged)),
@@ -571,10 +608,10 @@ impl Edits {
         read: &Read,
         field: impl Fn(&Read) -> &Vec<u8>,
         rebuild: impl for<'a> Fn(&'a Read, &'a [u8]) -> AccountRead<'a>,
-    ) -> Edits {
+    ) -> Self {
         let expected = verify_account(&read.as_read()).expect("the untampered read verifies");
         let original = field(read).clone();
-        let mut edits = Edits {
+        let mut edits = Self {
             tried: 0,
             refused: 0,
         };
@@ -643,7 +680,7 @@ fn no_edit_to_a_proof_changes_the_answer() {
 #[test]
 fn no_edit_to_the_account_state_changes_the_answer() {
     let read = Read::parse(BASECHAIN);
-    let edits = Edits::sweep(&read, |r| &r.state, |r, bytes| r.with_state(bytes));
+    let edits = Edits::sweep(&read, |r| &r.state, Read::with_state);
     assert!(edits.tried > 3000, "only {} edits were tried", edits.tried);
     // Every byte of an account state is hashed into the hash the proof binds, so unlike a
     // proof there is nothing here that does not matter.

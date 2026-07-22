@@ -31,7 +31,7 @@ pub struct Config {
 
 /// One liteserver: an address ready to dial and its public key.
 #[derive(Debug, Clone)]
-pub(crate) struct LiteServer {
+pub struct LiteServer {
     pub(crate) addr: String,
     pub(crate) key: [u8; 32],
 }
@@ -58,13 +58,20 @@ impl Config {
     /// publishes rather than one this library chose, and the further it recedes the
     /// longer a first sync takes, so refreshing this snapshot belongs to cutting a
     /// release rather than to housekeeping.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the bundled snapshot fails to parse. It cannot in a released build: a
+    /// test in this module parses this exact checked-in file, so a failure here would mean
+    /// the snapshot and the test that guards it have already gone out of sync before this
+    /// ever ran.
     #[must_use]
     // Whether the checked-in snapshot parses is settled before a caller ever runs, and a
     // test in this module holds it there. Returning a Result would put a failure no
     // caller can cause, and none can act on, into the first call most programs make.
     #[expect(clippy::expect_used, reason = "a checked-in file, held by a test")]
-    pub fn mainnet() -> Config {
-        Config::from_json(include_str!("mainnet.config.json"))
+    pub fn mainnet() -> Self {
+        Self::from_json(include_str!("mainnet.config.json"))
             .expect("the bundled mainnet config parses")
     }
 
@@ -84,7 +91,7 @@ impl Config {
     /// Returns [`Error::Config`] if the JSON is malformed, has no liteserver list, a
     /// liteserver has an unsupported key type or a key that is not 32 bytes, or the init
     /// block's hashes are not 32 base64 bytes.
-    pub fn from_json(json: &str) -> Result<Config, Error> {
+    pub fn from_json(json: &str) -> Result<Self, Error> {
         let raw: RawConfig =
             serde_json::from_str(json).map_err(|e| Error::Config(e.to_string()))?;
         if raw.liteservers.is_empty() {
@@ -105,6 +112,11 @@ impl Config {
                     Error::Config("liteserver key is not 32 base64 bytes".to_string())
                 })?;
 
+            #[allow(
+                clippy::cast_possible_truncation,
+                clippy::cast_sign_loss,
+                reason = "ip is a signed 32-bit integer that serde_json widens to i64; casting back to u32 takes its low 32 bits as the address octets, which is the intended bit-for-bit reinterpretation"
+            )]
             let octets = (server.ip as u32).to_be_bytes();
             let addr = format!(
                 "{}.{}.{}.{}:{}",
@@ -114,17 +126,24 @@ impl Config {
         }
 
         let init_block = match raw.validator.and_then(|validator| validator.init_block) {
-            Some(block) => Some(BlockIdExt::new(
-                block.workchain,
-                block.shard as u64,
-                block.seqno,
-                hash(&block.root_hash, "init block root hash")?,
-                hash(&block.file_hash, "init block file hash")?,
-            )),
+            Some(block) => {
+                #[allow(
+                    clippy::cast_sign_loss,
+                    reason = "shard is TON's signed 64-bit prefix mask; BlockIdExt stores its bit pattern as u64, so the masterchain's top bit becomes 0x8000_0000_0000_0000 rather than a negative number"
+                )]
+                let shard = block.shard as u64;
+                Some(BlockIdExt::new(
+                    block.workchain,
+                    shard,
+                    block.seqno,
+                    hash(&block.root_hash, "init block root hash")?,
+                    hash(&block.file_hash, "init block file hash")?,
+                ))
+            }
             None => None,
         };
 
-        Ok(Config {
+        Ok(Self {
             liteservers,
             init_block,
             max_head_age: DEFAULT_MAX_HEAD_AGE,
@@ -153,7 +172,7 @@ impl Config {
     /// only freshness signal there is. Setting this to zero refuses every head, which is
     /// a way to say the check is not wanted only if the caller means it.
     #[must_use]
-    pub fn with_max_head_age(mut self, seconds: u32) -> Config {
+    pub fn with_max_head_age(mut self, seconds: u32) -> Self {
         self.max_head_age = seconds;
         self
     }
@@ -217,7 +236,12 @@ mod tests {
     use super::*;
 
     fn hex(bytes: &[u8]) -> String {
-        bytes.iter().map(|b| format!("{b:02x}")).collect()
+        use std::fmt::Write as _;
+
+        bytes.iter().fold(String::new(), |mut hex, b| {
+            let _ = write!(hex, "{b:02x}");
+            hex
+        })
     }
 
     const KEY: &str = "n4VDnSCUuSpjnCyUk9e3QOOd6o0ItSWYbTnW3Wnn8wk=";

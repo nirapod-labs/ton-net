@@ -32,12 +32,12 @@ pub struct Coins(u128);
 
 impl Coins {
     /// No TON at all.
-    pub const ZERO: Coins = Coins(0);
+    pub const ZERO: Self = Self(0);
 
     /// Builds an amount from a count of nanotons.
     #[must_use]
-    pub const fn from_nanotons(nanotons: u128) -> Coins {
-        Coins(nanotons)
+    pub const fn from_nanotons(nanotons: u128) -> Self {
+        Self(nanotons)
     }
 
     /// The amount in nanotons.
@@ -60,8 +60,8 @@ impl Coins {
     /// # Errors
     ///
     /// Returns [`BlockError::Cell`] if the slice runs out before the amount is complete.
-    pub(crate) fn load(slice: &mut Slice<'_>) -> Result<Coins, BlockError> {
-        Ok(Coins(slice.load_var_uint(16)?))
+    pub(crate) fn load(slice: &mut Slice<'_>) -> Result<Self, BlockError> {
+        Ok(Self(slice.load_var_uint(16)?))
     }
 }
 
@@ -73,8 +73,8 @@ impl fmt::Display for Coins {
 }
 
 impl From<u128> for Coins {
-    fn from(nanotons: u128) -> Coins {
-        Coins(nanotons)
+    fn from(nanotons: u128) -> Self {
+        Self(nanotons)
     }
 }
 

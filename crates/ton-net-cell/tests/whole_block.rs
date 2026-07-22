@@ -36,6 +36,12 @@ const PLAIN: [u8; 14] = [
     0xb5, 0xee, 0x9c, 0x72, 0x01, 0x01, 0x01, 0x01, 0x00, 0x03, 0x00, 0x00, 0x02, 0xab,
 ];
 
+/// Decodes a hex-dump fixture into bytes, skipping `#` comment lines and whitespace.
+///
+/// # Panics
+///
+/// Panics if what is left after filtering is not valid hex, which only a corrupted
+/// fixture would be.
 pub fn unhex(text: &str) -> Vec<u8> {
     let hex: String = text
         .lines()
@@ -49,7 +55,11 @@ pub fn unhex(text: &str) -> Vec<u8> {
 }
 
 fn hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|b| format!("{b:02x}")).collect()
+    use std::fmt::Write as _;
+    bytes.iter().fold(String::new(), |mut out, b| {
+        let _ = write!(out, "{b:02x}");
+        out
+    })
 }
 
 /// Every cell in the tree, each reached once.

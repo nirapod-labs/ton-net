@@ -127,10 +127,12 @@ fn verify_link(link: &BlockLink, from: &BlockIdExt) -> Result<ProvenBlock, Block
         ValidatorSet::from_config(&Block::from_proof(config_proof, &source.root_hash)?.config()?)?;
 
     let header = Block::from_proof(dest_proof, &to.root_hash)?.header()?;
-    if header.seqno != to.seqno as u32
-        || header.workchain != to.workchain
-        || header.shard != to.shard
-    {
+    #[allow(
+        clippy::cast_sign_loss,
+        reason = "the wire carries this as int32; the domain counts it unsigned"
+    )]
+    let to_seqno = to.seqno as u32;
+    if header.seqno != to_seqno || header.workchain != to.workchain || header.shard != to.shard {
         return Err(BlockError::ChainBroken(
             "has a destination header for a different block",
         ));

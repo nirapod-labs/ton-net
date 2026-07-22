@@ -4,7 +4,13 @@
 export declare class Config {
   /** Returns a config for TON mainnet from a bundled snapshot. */
   static mainnet(): Config
-  /** Parses a config from the TON `global.config.json` format. */
+  /**
+   * Parses a config from the TON `global.config.json` format.
+   *
+   * Throws `CONFIG: ` if `json` is malformed, has no liteserver list, a liteserver
+   * names an unsupported key type or a key that is not 32 bytes, or a block hash in
+   * the init block is not 32 base64 bytes.
+   */
   static fromJson(json: string): Config
   /**
    * Returns the same config with a different bound on how old a proven head may be.
@@ -30,7 +36,12 @@ export declare class Config {
  * mutex, so overlapping calls from JavaScript serialize rather than corrupt the stream.
  */
 export declare class TonClient {
-  /** Connects to a liteserver from the config and completes the ADNL handshake. */
+  /**
+   * Connects to a liteserver from the config and completes the ADNL handshake.
+   *
+   * Throws `TRANSPORT: ` if no liteserver in `config` is reachable, or `HANDSHAKE: `
+   * if the last one reached rejects the handshake.
+   */
   static connect(config: Config): Promise<TonClient>
   /**
    * Connects and starts the walk from a key block proven on an earlier run.
@@ -40,6 +51,12 @@ export declare class TonClient {
    * worth. Anything that can write to where a caller keeps one can choose what this
    * client believes. The binding stores nothing and picks no location; a `BlockId` is
    * an object with two buffers, and where it lives is the caller's decision.
+   *
+   * Throws `INVALID_ARGUMENT: ` if `anchor`'s shard is not 16 hex digits or either of
+   * its hashes is not 32 bytes; `TRANSPORT: ` if no liteserver is reachable;
+   * `HANDSHAKE: ` if the handshake fails; `SYNC: ` if the server cannot prove a chain
+   * from `anchor`; or `STALE: ` if the block that chain leads to is older than the
+   * config's freshness bound.
    */
   static connectFrom(config: Config, anchor: BlockId): Promise<TonClient>
   /**
@@ -54,9 +71,21 @@ export declare class TonClient {
    * Without an anchor the walk starts at the config's init block, which is a first
    * sync and runs over every key block published since: minutes and tens of megabytes
    * against mainnet. With one it is a link or two.
+   *
+   * Throws `CONFIG: ` if there is neither a stored anchor nor an init block, `SYNC: `
+   * if the proof chain does not check out or the server will not finish it, `STALE: `
+   * if the head it leads to is older than the config's freshness bound, or a transport
+   * code (`TRANSPORT: `, `TIMEOUT: `, `DECODE: `, `LITESERVER: `, or
+   * `CONNECTION_LOST: `) if a read along the way fails.
    */
   sync(): Promise<SyncReport>
-  /** Reads the liteserver's current masterchain head. */
+  /**
+   * Reads the liteserver's current masterchain head.
+   *
+   * Throws `TIMEOUT: ` if the query does not complete in time, `LITESERVER: ` if the
+   * server returns an error of its own, `DECODE: ` if the response does not decode, or
+   * `TRANSPORT: ` on a socket failure.
+   */
   masterchainInfo(): Promise<ReportedMasterchainInfo>
   /**
    * Reads an account and proves it against a block this client established itself.
@@ -68,6 +97,12 @@ export declare class TonClient {
    *
    * Every call walks. A caller reading several accounts should `sync()` once and pass
    * that head to `accountAt` rather than pay for a walk per account.
+   *
+   * Throws `ADDRESS: ` if `address` does not parse; `CONFIG: ` if there is nothing to
+   * start a walk from; `SYNC: ` if the proof chain does not check out; `STALE: ` if
+   * the head it reaches is older than the config's freshness bound; `PROOF: ` if the
+   * account does not bind to that head; or a transport code if a read along the way
+   * fails.
    */
   account(address: string): Promise<VerifiedAccount>
   /**
@@ -76,6 +111,12 @@ export declare class TonClient {
    * The result is the server's word: the proof it sent comes back alongside,
    * unchecked. It is named for what it is, because the proven read is the one a caller
    * lands on without choosing and this is the exception.
+   *
+   * Throws `ADDRESS: ` if `address` does not parse; `TIMEOUT: ` if a query does not
+   * complete in time; `LITESERVER: ` if the server returns an error; `DECODE: ` if a
+   * response does not decode; `CELL: ` if the account state does not read as an
+   * account; or `TRANSPORT: ` on a socket failure. Never `PROOF: `, since this call
+   * checks no proof.
    */
   accountReported(address: string): Promise<ReportedAccount>
   /**
@@ -92,6 +133,12 @@ export declare class TonClient {
    * server agrees with itself. The two sources that mean something are a block this
    * client proved, from `sync()` or `anchor()`, and a block the caller trusts
    * independently.
+   *
+   * Throws `INVALID_ARGUMENT: ` if `trusted`'s shard is not 16 hex digits or either
+   * hash is not 32 bytes; `ADDRESS: ` if `address` does not parse; `PROOF: ` if
+   * `trusted` is not a masterchain block, a proof does not check out, or the account
+   * does not bind to `trusted`; or `TIMEOUT: `, `LITESERVER: `, `DECODE: `, or
+   * `TRANSPORT: ` as the read fails.
    */
   accountAt(address: string, trusted: BlockId): Promise<VerifiedAccount>
   /**
@@ -100,6 +147,11 @@ export declare class TonClient {
    * The bytes come back as the server sent them, unchecked and undecoded. This is the
    * way out for a caller who wants to keep the proofs, check them elsewhere, or check
    * them against an anchor obtained later, with `verifyAccount`.
+   *
+   * Throws `INVALID_ARGUMENT: ` if `block`'s shard is not 16 hex digits or either hash
+   * is not 32 bytes; `ADDRESS: ` if `address` does not parse; `TIMEOUT: ` if the query
+   * does not complete in time; `LITESERVER: ` if the server returns an error;
+   * `DECODE: ` if the response does not decode; or `TRANSPORT: ` on a socket failure.
    */
   accountState(address: string, block: BlockId): Promise<ReportedAccountState>
 }
@@ -255,6 +307,11 @@ export interface VerifiedAccount {
  * The check reaches no network and depends on nothing but its argument, so the same
  * bytes always give the same answer. It throws if the proof does not root at the trusted
  * hash, or if the account does not bind to it.
+ *
+ * Throws `ADDRESS: ` if `read.address` does not parse; `INVALID_ARGUMENT: ` if
+ * `trustedRootHash` is not 32 bytes, or if `shardProof` is missing for an address
+ * outside the masterchain; `PROOF: ` if the proof does not root at the trusted hash or
+ * the account does not bind to it; or `CELL: ` if the bytes are not cells at all.
  */
 export declare function verifyAccount(read: AccountRead): Account
 

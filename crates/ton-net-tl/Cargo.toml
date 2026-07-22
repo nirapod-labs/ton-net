@@ -17,3 +17,6 @@ rust-version.workspace = true
 
 [dependencies]
 tl-proto.workspace = true
+
+[lints]
+workspace = true

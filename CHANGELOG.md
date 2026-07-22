@@ -13,6 +13,26 @@ never published.
 
 ## [Unreleased]
 
+### Added
+
+- `Slice::load_u8`, `load_u16`, `load_u32` and `load_i32` read a fixed-width
+  field into the type that field has, instead of returning a `u64` for the
+  caller to narrow.
+- `&Dict` implements `IntoIterator`.
+
+### Changed
+
+- `SessionCiphers::seal` returns `Result<Vec<u8>, FrameError>` and refuses a
+  payload larger than one frame carries. The read side already refused a body
+  outside that range, so the two ends now hold to the same ceiling. Nothing is
+  sealed on a refusal and the send keystream does not move.
+
+### Fixed
+
+- `parse_boc` no longer narrows the stated cell area size before the check that
+  holds a bag to it. Where `usize` is 32 bits, which is every wasm target, a bag
+  could state one length, carry another, and pass that check.
+
 ## [0.3.0] - 2026-07-22
 
 ### Added

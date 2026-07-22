@@ -185,8 +185,7 @@ impl SignatureSet {
     #[must_use]
     pub fn signatures(&self) -> &[Signature] {
         match self {
-            SignatureSet::Ordinary { signatures, .. }
-            | SignatureSet::Simplex { signatures, .. } => signatures,
+            Self::Ordinary { signatures, .. } | Self::Simplex { signatures, .. } => signatures,
         }
     }
 }
@@ -303,11 +302,11 @@ pub struct AccountState {
     pub id: BlockIdExt,
     /// The shard block that holds the account.
     pub shardblk: BlockIdExt,
-    /// The proof linking the masterchain block to the shard block, as raw BoC bytes.
+    /// The proof linking the masterchain block to the shard block, as raw `BoC` bytes.
     pub shard_proof: Vec<u8>,
-    /// The proof of the account state within the shard block, as raw BoC bytes.
+    /// The proof of the account state within the shard block, as raw `BoC` bytes.
     pub proof: Vec<u8>,
-    /// The account state, as raw BoC bytes.
+    /// The account state, as raw `BoC` bytes.
     pub state: Vec<u8>,
 }
 

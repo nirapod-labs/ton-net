@@ -98,8 +98,8 @@ fn hash(s: &str) -> [u8; 32] {
 }
 
 impl Read {
-    fn parse() -> Read {
-        Read {
+    fn parse() -> Self {
+        Self {
             account_id: hash(field(READ, "account_id")),
             block_root_hash: hash(field(READ, "block_root_hash")),
             proof: unhex(field(READ, "proof")),

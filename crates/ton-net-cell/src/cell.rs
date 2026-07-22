@@ -50,35 +50,40 @@ impl CellType {
     #[must_use]
     pub fn tag(self) -> Option<u8> {
         match self {
-            CellType::Ordinary => None,
-            CellType::PrunedBranch => Some(0x01),
-            CellType::LibraryReference => Some(0x02),
-            CellType::MerkleProof => Some(0x03),
-            CellType::MerkleUpdate => Some(0x04),
+            Self::Ordinary => None,
+            Self::PrunedBranch => Some(0x01),
+            Self::LibraryReference => Some(0x02),
+            Self::MerkleProof => Some(0x03),
+            Self::MerkleUpdate => Some(0x04),
         }
     }
 
     /// The kind an exotic cell's leading data byte names, or `None` if it names none.
     #[must_use]
-    pub fn from_tag(tag: u8) -> Option<CellType> {
+    pub fn from_tag(tag: u8) -> Option<Self> {
         match tag {
-            0x01 => Some(CellType::PrunedBranch),
-            0x02 => Some(CellType::LibraryReference),
-            0x03 => Some(CellType::MerkleProof),
-            0x04 => Some(CellType::MerkleUpdate),
+            0x01 => Some(Self::PrunedBranch),
+            0x02 => Some(Self::LibraryReference),
+            0x03 => Some(Self::MerkleProof),
+            0x04 => Some(Self::MerkleUpdate),
             _ => None,
         }
     }
 
     /// Whether this kind covers another tree, so its content sits one level down.
     fn is_merkle(self) -> bool {
-        matches!(self, CellType::MerkleProof | CellType::MerkleUpdate)
+        matches!(self, Self::MerkleProof | Self::MerkleUpdate)
     }
 }
 
 /// The highest level a mask marks, or zero for an empty mask.
 fn level_of(mask: u8) -> u8 {
-    (u8::BITS - mask.leading_zeros()) as u8
+    #[allow(
+        clippy::cast_possible_truncation,
+        reason = "mask is a u8, so leading_zeros is at most 8, and u8::BITS - leading_zeros is at most 8, which fits u8"
+    )]
+    let level = (u8::BITS - mask.leading_zeros()) as u8;
+    level
 }
 
 /// The mask as it applies at `level`: only the levels below it remain.
@@ -97,12 +102,22 @@ fn hash_index(mask: u8, level: u8) -> usize {
 
 /// The bit descriptor for a bit count: `floor(b/8) + ceil(b/8)`.
 fn bits_descriptor(bits: u16) -> u8 {
-    ((bits / 8) + bits.div_ceil(8)) as u8
+    #[allow(
+        clippy::cast_possible_truncation,
+        reason = "bits is at most MAX_BITS (1023), so floor(bits/8) + ceil(bits/8) is at most 127 + 128 = 255, which fits u8"
+    )]
+    let descriptor = ((bits / 8) + bits.div_ceil(8)) as u8;
+    descriptor
 }
 
 /// The refs-and-type descriptor at a level: `r + 8s + 32l`.
 fn refs_descriptor(refs: usize, exotic: bool, mask: u8, level: u8) -> u8 {
-    refs as u8 + if exotic { 8 } else { 0 } + 32 * applied_mask(mask, level)
+    #[allow(
+        clippy::cast_possible_truncation,
+        reason = "refs is a cell's reference count, bounded to at most MAX_REFS (4) by every constructor, so this fits u8"
+    )]
+    let refs = refs as u8;
+    refs + if exotic { 8 } else { 0 } + 32 * applied_mask(mask, level)
 }
 
 /// A TON cell: up to 1023 bits of data and up to four references.
@@ -178,17 +193,17 @@ impl Cell {
     pub(crate) fn from_parts(
         data: Vec<u8>,
         bits: u16,
-        refs: Vec<Cell>,
+        refs: Vec<Self>,
         cell_type: CellType,
         level_mask: u8,
-    ) -> Result<Cell, CellError> {
+    ) -> Result<Self, CellError> {
         if level_mask != implied_mask(cell_type, &refs, level_mask) {
             return Err(CellError::Malformed(
                 "cell level mask is not the one its children imply",
             ));
         }
         let (hashes, depths) = compute(&data, bits, &refs, cell_type, level_mask)?;
-        Ok(Cell {
+        Ok(Self {
             inner: Arc::new(Inner {
                 data,
                 bits,
@@ -219,13 +234,13 @@ impl Cell {
 
     /// The cell's references, at most four.
     #[must_use]
-    pub fn refs(&self) -> &[Cell] {
+    pub fn refs(&self) -> &[Self] {
         &self.inner.refs
     }
 
     /// The reference at `index`, or `None` if the cell has no such reference.
     #[must_use]
-    pub fn reference(&self, index: usize) -> Option<&Cell> {
+    pub fn reference(&self, index: usize) -> Option<&Self> {
         self.inner.refs.get(index)
     }
 
@@ -465,7 +480,7 @@ impl PartialEq for Cell {
     ///
     /// A pruned branch is deliberately not equal to the subtree it replaced, even though
     /// they share a level-zero hash.
-    fn eq(&self, other: &Cell) -> bool {
+    fn eq(&self, other: &Self) -> bool {
         self.repr_hash() == other.repr_hash()
     }
 }
@@ -486,7 +501,11 @@ impl fmt::Debug for Cell {
 
 /// Renders bytes as lowercase hex, for `Debug`.
 fn hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|b| format!("{b:02x}")).collect()
+    use std::fmt::Write as _;
+    bytes.iter().fold(String::new(), |mut out, b| {
+        let _ = write!(out, "{b:02x}");
+        out
+    })
 }
 
 #[cfg(test)]

@@ -25,3 +25,6 @@ thiserror.workspace = true
 # current-thread runtime.
 ton-net-adnl.workspace = true
 tokio = { workspace = true, features = ["rt", "macros", "time"] }
+
+[lints]
+workspace = true

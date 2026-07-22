@@ -1,10 +1,10 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: 2026 Nirapod Labs
 
-# The panic lints in the workspace manifest exist because a decoder must not unwind on
-# hostile bytes. A test is the opposite case: it is asserting, the input is its own, and
-# an unwrap there is the assertion. Denying it would push every test through a match that
-# says nothing.
+# The panic lints each crate denies at the top of its lib.rs exist because a decoder must
+# not unwind on hostile bytes. A test is the opposite case: it is asserting, the input is
+# its own, and an unwrap there is the assertion. Denying it would push every test through
+# a match that says nothing.
 allow-unwrap-in-tests = true
 allow-expect-in-tests = true
 allow-panic-in-tests = true

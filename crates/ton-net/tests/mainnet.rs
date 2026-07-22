@@ -383,7 +383,14 @@ async fn a_cold_sync_then_proves_an_account_against_a_block_it_derived() {
     assert!(account.anchor().seqno > init.seqno);
     assert_eq!(account.anchor().workchain, -1);
     assert!(account.value().balance.nanotons() > 0);
-    let hex = |bytes: &[u8]| -> String { bytes.iter().map(|b| format!("{b:02x}")).collect() };
+    let hex = |bytes: &[u8]| -> String {
+        use std::fmt::Write as _;
+
+        bytes.iter().fold(String::new(), |mut hex, b| {
+            let _ = write!(hex, "{b:02x}");
+            hex
+        })
+    };
     eprintln!(
         "proved the elector at {} in {:.1?}: balance {}",
         account.anchor().seqno,
@@ -406,8 +413,8 @@ async fn a_cold_sync_then_proves_an_account_against_a_block_it_derived() {
     // The code cell, not the whole state: the elector's data moves between two reads
     // seconds apart, and a test that compares it is asserting the chain stood still.
     assert_eq!(
-        reported.value().code().map(|code| code.hash()),
-        account.value().code().map(|code| code.hash()),
+        reported.value().code().map(ton_net::Cell::hash),
+        account.value().code().map(ton_net::Cell::hash),
         "the proved and unchecked reads decoded different contract code"
     );
 

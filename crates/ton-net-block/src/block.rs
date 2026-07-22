@@ -76,12 +76,12 @@ impl Block {
     ///
     /// Returns [`BlockError::WrongConstructor`] if the cell is not a block, or
     /// [`BlockError::Cell`] if it ends early.
-    pub fn from_cell(cell: &Cell) -> Result<Block, BlockError> {
-        let tag = cell.parse().load_uint(32)? as u32;
+    pub fn from_cell(cell: &Cell) -> Result<Self, BlockError> {
+        let tag = cell.parse().load_u32()?;
         if tag != BLOCK_TAG {
             return Err(BlockError::WrongConstructor { expected: "block" });
         }
-        Ok(Block { cell: cell.clone() })
+        Ok(Self { cell: cell.clone() })
     }
 
     /// Reads the block a Merkle proof covers, requiring the proof to root at `root_hash`.
@@ -97,12 +97,12 @@ impl Block {
     /// [`BlockError::ProofNotAnchored`] or [`BlockError::ProofInconsistent`] if the
     /// proof does not check out against `root_hash`, and
     /// [`BlockError::WrongConstructor`] if what it covers is not a block.
-    pub fn from_proof(proof: &[u8], root_hash: &[u8; 32]) -> Result<Block, BlockError> {
+    pub fn from_proof(proof: &[u8], root_hash: &[u8; 32]) -> Result<Self, BlockError> {
         let roots = ton_net_cell::parse_boc(proof)?;
         let root = roots
             .first()
             .ok_or(BlockError::Malformed("a proof with no root cell"))?;
-        Block::from_cell(verify_merkle_proof(root, root_hash)?)
+        Self::from_cell(verify_merkle_proof(root, root_hash)?)
     }
 
     /// Reads the block's header.
@@ -123,7 +123,7 @@ impl Block {
         }
 
         let mut s = info.parse();
-        if s.load_uint(32)? as u32 != BLOCK_INFO_TAG {
+        if s.load_u32()? != BLOCK_INFO_TAG {
             return Err(BlockError::WrongConstructor {
                 expected: "a block header",
             });
@@ -134,15 +134,15 @@ impl Block {
         let key_block = s.load_bit()?;
         s.skip_bits(1)?; // vert_seqno_incr
         s.skip_bits(8)?; // flags
-        let seqno = s.load_uint(32)? as u32;
+        let seqno = s.load_u32()?;
         s.skip_bits(32)?; // vert_seq_no
         let (workchain, shard) = read_shard_ident(&mut s)?;
-        let gen_utime = s.load_uint(32)? as u32;
+        let gen_utime = s.load_u32()?;
         s.skip_bits(64 + 64)?; // start_lt, end_lt
-        let gen_validator_list_hash_short = s.load_uint(32)? as u32;
-        let gen_catchain_seqno = s.load_uint(32)? as u32;
+        let gen_validator_list_hash_short = s.load_u32()?;
+        let gen_catchain_seqno = s.load_u32()?;
         s.skip_bits(32)?; // min_ref_mc_seqno
-        let prev_key_block_seqno = s.load_uint(32)? as u32;
+        let prev_key_block_seqno = s.load_u32()?;
 
         Ok(BlockHeader {
             workchain,
@@ -178,7 +178,7 @@ impl Block {
         }
 
         let mut s = extra.parse();
-        if s.load_uint(32)? as u32 != BLOCK_EXTRA_TAG {
+        if s.load_u32()? != BLOCK_EXTRA_TAG {
             return Err(BlockError::WrongConstructor {
                 expected: "a block extra",
             });
@@ -267,7 +267,7 @@ fn read_shard_ident(s: &mut Slice<'_>) -> Result<(i32, u64), BlockError> {
     if prefix_bits > MAX_SHARD_PREFIX_BITS {
         return Err(BlockError::Malformed("a shard prefix longer than 60 bits"));
     }
-    let workchain = s.load_uint(32)? as u32 as i32;
+    let workchain = s.load_i32()?;
     let prefix = s.load_uint(64)?;
     // Only the declared bits are the prefix; the rest of the word is cleared before the
     // terminator goes in. Every real header carries them clear already, so this changes

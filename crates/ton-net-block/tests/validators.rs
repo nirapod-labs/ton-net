@@ -196,7 +196,12 @@ fn a_link_header_says_what_the_link_claims() {
         (SIMPLEX, round_b::KEY_BLOCK),
     ] {
         let link = link(text);
-        assert_eq!(link.from.seqno as u32, key_block);
+        #[allow(
+            clippy::cast_sign_loss,
+            reason = "the wire carries this as int32; the domain counts it unsigned"
+        )]
+        let from_seqno = link.from.seqno as u32;
+        assert_eq!(from_seqno, key_block);
 
         let header = Block::from_proof(&link.dest_proof, &link.to.root_hash)
             .expect("the destination proof roots at the destination")
@@ -205,7 +210,12 @@ fn a_link_header_says_what_the_link_claims() {
 
         // The header is proof-backed and the link's own fields are not, so these are
         // the checks that make a link's claims worth anything.
-        assert_eq!(header.seqno, link.to.seqno as u32);
+        #[allow(
+            clippy::cast_sign_loss,
+            reason = "the wire carries this as int32; the domain counts it unsigned"
+        )]
+        let to_seqno = link.to.seqno as u32;
+        assert_eq!(header.seqno, to_seqno);
         assert_eq!(header.workchain, link.to.workchain);
         assert_eq!(header.shard, link.to.shard);
         assert_eq!(header.key_block, link.to_key_block);
@@ -276,7 +286,7 @@ fn a_config_proof_covers_only_the_parameter_it_answers_for() {
     let block = Block::from_proof(&link.config_proof, &link.from.root_hash).expect("it roots");
     let config = block.config().expect("a key block carries a configuration");
 
-    let params = Dict::from_root(Some(config.clone()), 32).expect("a 32-bit dictionary");
+    let params = Dict::from_root(Some(config), 32).expect("a 32-bit dictionary");
     assert!(matches!(
         params
             .get(&PREVIOUS_VALIDATORS.to_be_bytes())
