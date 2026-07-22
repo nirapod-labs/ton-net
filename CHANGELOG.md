@@ -7,9 +7,9 @@ one library version, and SemVer is measured against the observable API and the
 wire behavior, so a proof-verification change is breaking and an internal refactor
 is not.
 
-Nothing has been published to a registry yet. Every version below is a git tag.
-The first ordinary registry release is 0.3.0, the point at which a read no longer
-depends on a block hash the caller has to supply.
+0.3.0 is the first registry release, the point at which a read no longer depends
+on a block hash the caller has to supply. 0.1.0 and 0.2.0 are git tags and were
+never published.
 
 ## [Unreleased]
 
@@ -26,12 +26,14 @@ depends on a block hash the caller has to supply.
 - `Client::connect_from` resumes from a key block proven on an earlier run, which
   turns a first walk of over a thousand links into a single one. `Client::anchor`
   returns the block to save.
-- `Client::account_verified` returns `Verified<Account>`, a type that cannot be
-  constructed outside the crate without a proof having checked out.
+- `Client::account` returns `Verified<Account>`, a type that cannot be
+  constructed outside the crate without a proof having checked out. The proved
+  read is the one a caller lands on without choosing; `Client::account_reported`
+  is the unchecked exception, and it returns a different type.
 - `ton_net::verify_account` and `BlockIdExt::new`, so a caller can verify a read
   and name an out-of-band anchor without going through the facade.
-- The Node binding carries an anchor in both directions and exposes
-  `accountVerified`, `accountState` and `verifyAccount`.
+- The Node binding carries an anchor in both directions and exposes `account`,
+  `accountAt`, `accountReported`, `accountState` and `verifyAccount`.
 - Validator signature checking in both of the forms mainnet uses, including the
   Simplex vote, whose candidate hash is now bound to the block a link claims.
 - `AdnlError::NoRandomness`. An operating system that will not supply randomness
