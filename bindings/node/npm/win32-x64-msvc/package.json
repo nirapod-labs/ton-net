@@ -7,7 +7,8 @@
   "main": "ton-net.win32-x64-msvc.node",
   "files": [
     "ton-net.win32-x64-msvc.node",
-    "NOTICE"
+    "NOTICE",
+    "THIRD-PARTY-LICENSES.md"
   ],
   "description": "A direct TON network client: ADNL over TCP, liteserver reads, and Merkle-proof verification, with no HTTP indexer in the path.",
   "keywords": [

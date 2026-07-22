@@ -35,7 +35,8 @@
     "index.d.ts",
     "README.md",
     "LICENSE",
-    "NOTICE"
+    "NOTICE",
+    "THIRD-PARTY-LICENSES.md"
   ],
   "engines": {
     "node": ">= 18.17.0"

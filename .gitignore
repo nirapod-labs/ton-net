@@ -17,11 +17,14 @@ mutants.out.old/
 # comments a caller reads in an editor, so leaving them untracked would put the
 # whole JavaScript surface outside review. CI regenerates and fails on a diff.
 
-# The license and the notice are copied into every publishable package before the
-# tarball is built, because Apache-2.0 requires a redistribution to carry them and
-# an npm consumer never sees the repository root. The originals live there; these
-# are copies.
+# The license, the notice and the third-party notices are copied into every
+# publishable package before the tarball is built, because Apache-2.0 requires a
+# redistribution to carry them and an npm consumer never sees the repository root.
+# The originals live there; these are copies, and the third one is 145 kB, so
+# tracking eight of it would put a megabyte of duplication in every clone.
 bindings/node/LICENSE
 bindings/node/NOTICE
+bindings/node/THIRD-PARTY-LICENSES.md
 bindings/node/npm/*/LICENSE
 bindings/node/npm/*/NOTICE
+bindings/node/npm/*/THIRD-PARTY-LICENSES.md

@@ -30,6 +30,13 @@ deny:
 versions:
     node scripts/check-versions.mjs
 
+# Regenerates the notices the npm tarballs carry. The `.node` links its whole
+# dependency tree in, so publishing it redistributes eighty-odd other projects and
+# an npm consumer has no Cargo.toml to find their licenses in. Run it when the
+# dependency graph moves; the accepted set mirrors deny.toml.
+licenses:
+    cargo about generate --manifest-path bindings/node/Cargo.toml about.hbs -o THIRD-PARTY-LICENSES.md
+
 # The sans-I/O core, on a target with no threads, no sockets and no clock. The
 # transport crates are expected to fail this until the browser transport lands.
 wasm:
