@@ -70,7 +70,12 @@ fn agreed(public_key: &[u8; 32], message: &[u8], signature: &[u8]) -> bool {
 }
 
 fn hex(b: &[u8]) -> String {
-    b.iter().map(|x| format!("{x:02x}")).collect()
+    use std::fmt::Write as _;
+    b.iter()
+        .fold(String::with_capacity(b.len() * 2), |mut out, x| {
+            let _ = write!(out, "{x:02x}");
+            out
+        })
 }
 
 #[test]
@@ -106,6 +111,10 @@ fn the_two_implementations_agree_over_random_corruptions() {
             0 => signature[(xorshift(&mut state) % 64) as usize] ^= 1 << (xorshift(&mut state) % 8),
             1 => public[(xorshift(&mut state) % 32) as usize] ^= 1 << (xorshift(&mut state) % 8),
             _ => {
+                #[allow(
+                    clippy::cast_possible_truncation,
+                    reason = "this feeds % message.len() right after, so any truncation still yields a valid index"
+                )]
                 let at = (xorshift(&mut state) as usize) % message.len();
                 message[at] ^= 1;
             }

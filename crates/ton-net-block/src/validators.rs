@@ -134,10 +134,10 @@ impl ValidatorSet {
                 })
             }
         };
-        let utime_since = s.load_uint(32)? as u32;
-        let utime_until = s.load_uint(32)? as u32;
-        let total = s.load_uint(16)? as u16;
-        let main = s.load_uint(16)? as u16;
+        let utime_since = s.load_u32()?;
+        let utime_until = s.load_u32()?;
+        let total = s.load_u16()?;
+        let main = s.load_u16()?;
         if main == 0 || main > total {
             return Err(BlockError::Malformed(
                 "a validator set with no main validators, or more main than total",
@@ -340,6 +340,11 @@ mod tests {
         assert!(!set.carries(0));
 
         // Two thirds of the largest weight there is, exactly at the boundary.
+        #[allow(
+            clippy::cast_possible_truncation,
+            reason = "dividing 2 * u128::from(u64::MAX) by 3 yields at most 2/3 of u64::MAX, \
+                      which is under u64::MAX, so the truncation to u64 cannot lose any bits"
+        )]
         let boundary = ((2 * u128::from(u64::MAX)) / 3) as u64;
         assert!(!set.carries(boundary));
         assert!(set.carries(boundary + 1));

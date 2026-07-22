@@ -165,6 +165,10 @@ fn skip_address(slice: &mut Slice<'_>) -> Result<(), BlockError> {
         // addr_var: a wider workchain and an account id of a stated length.
         0b11 => {
             skip_anycast(slice)?;
+            #[allow(
+                clippy::cast_possible_truncation,
+                reason = "load_uint(9) returns a value below 2^9 = 512, which fits in any usize"
+            )]
             let len = slice.load_uint(9)? as usize;
             slice.skip_bits(32 + len)?;
         }
@@ -176,6 +180,10 @@ fn skip_address(slice: &mut Slice<'_>) -> Result<(), BlockError> {
 /// Steps over an address's anycast prefix, which almost no address carries.
 fn skip_anycast(slice: &mut Slice<'_>) -> Result<(), BlockError> {
     if slice.load_bit()? {
+        #[allow(
+            clippy::cast_possible_truncation,
+            reason = "load_uint(5) returns a value below 2^5 = 32, which fits in any usize"
+        )]
         let depth = slice.load_uint(5)? as usize;
         slice.skip_bits(depth)?;
     }

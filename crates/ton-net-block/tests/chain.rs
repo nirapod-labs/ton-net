@@ -304,7 +304,12 @@ fn a_set_signed_by_nobody_in_it_is_refused() {
     let error = tampered(|proof| {
         let (.., signatures) = forward!(&mut proof.steps[0]);
         for (index, entry) in signatures_mut(signatures).iter_mut().enumerate() {
-            entry.node_id_short = [index as u8; 32];
+            #[allow(
+                clippy::cast_possible_truncation,
+                reason = "this fixture's signature list has a fixed 85 entries (fixtures/chain.hex), far under 256, so index fits u8"
+            )]
+            let fake_id = index as u8;
+            entry.node_id_short = [fake_id; 32];
         }
     });
     assert!(

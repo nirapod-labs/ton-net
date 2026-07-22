@@ -92,7 +92,7 @@ impl ShardState {
     /// Returns [`BlockError::WrongConstructor`] if the cell is not a shard state, or
     /// [`BlockError::Cell`] if it ends early.
     pub fn from_cell(cell: &Cell) -> Result<Self, BlockError> {
-        let tag = cell.parse().load_uint(32)? as u32;
+        let tag = cell.parse().load_u32()?;
         if tag != SHARD_STATE_TAG {
             return Err(BlockError::WrongConstructor {
                 expected: "shard_state",
@@ -241,7 +241,7 @@ impl ShardDescr {
                 expected: "shard_descr",
             });
         }
-        let seq_no = slice.load_uint(32)? as u32;
+        let seq_no = slice.load_u32()?;
         slice.skip_bits(32 + 64 + 64)?; // reg_mc_seqno, start_lt, end_lt
         let bytes = slice.load_bytes(32)?;
         let mut root_hash = [0u8; 32];
