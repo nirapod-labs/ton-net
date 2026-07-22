@@ -34,7 +34,11 @@ each registry even when the number is the same, is in [versions.md](versions.md)
    have done, whether any published version carried it, and what now refuses it.
 4. The measured numbers in the README still match. A sync benchmark that has
    drifted is a claim that has gone stale.
-5. `just check-config` passes, and `just test-snapshot` passes with its output read
+5. `just notices-check` passes. The notices are generated from the dependency
+   graph and staged into all eight npm tarballs, and an npm version can be
+   deprecated but never replaced, so this is the last moment a wrong one can be
+   corrected. CI runs the same check on every push and daily.
+6. `just check-config` passes, and `just test-snapshot` passes with its output read
    rather than only its exit code.
 
    These answer different questions, and the difference decides whether there is
@@ -50,7 +54,7 @@ each registry even when the number is the same, is in [versions.md](versions.md)
    published configuration into `crates/ton-net/src/mainnet.config.json`. If the
    init block moved, that moves the default trust anchor, so the walk from the new
    pinned block has to be run before the release, not after: `just test-sync`.
-6. The binding matrix is green on a dispatch from `main`, including both jobs that
+7. The binding matrix is green on a dispatch from `main`, including both jobs that
    load a musl binary on musl. That workflow runs on a tag, a schedule and a
    dispatch, so no ordinary commit exercises it, and the first time it ran it
    failed on three of seven targets.

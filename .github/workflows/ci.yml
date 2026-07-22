@@ -120,7 +120,7 @@ jobs:
           retention-days: 14
 
   deny:
-    name: advisories, licenses, duplicates, sources
+    name: advisories, licenses, duplicates, sources, notices
     if: github.event_name != 'schedule' || github.repository == 'nirapod-labs/ton-net'
     runs-on: ubuntu-latest
     steps:
@@ -130,13 +130,31 @@ jobs:
           toolchain: stable
       - uses: taiki-e/install-action@a6b2e2dcd845ddd7f509ce4f3ed3d922b80cc5d9 # v2.84.0
         with:
-          tool: cargo-deny
+          tool: cargo-deny,cargo-about@0.9.1
       # Also on the daily schedule, and that is the half most projects leave out: an
       # advisory is published against a version that merged weeks ago, so a check that
       # only runs on a diff never sees it. Every rule and its exceptions are in
       # deny.toml, including why the crypto stack sits at two generations.
       - name: dependency tree
         run: cargo deny check
+      # The other end of the same policy, which is why it shares this job and its
+      # schedule: deny.toml gates what enters the tree, about.toml gates what gets
+      # attributed on the way out, and about.toml holds the argument for why the two
+      # allow lists mirror each other. A dependency bump breaks both at once.
+      #
+      # The generator is pinned because this step compares its output against a
+      # committed file. An unpinned one that changes its rendering produces the same
+      # diff as a moved dependency, and the message below would then send a reader
+      # looking for a bump that never happened.
+      #
+      # The comparison runs through git rather than diff on purpose. The generator
+      # emits CRLF where an upstream license text carries it and the committed blob is
+      # LF, so only .gitattributes normalizing both sides makes the two comparable.
+      - name: notices match the dependency tree
+        run: |
+          cargo about generate --manifest-path bindings/node/Cargo.toml about.hbs -o THIRD-PARTY-LICENSES.md
+          git diff --stat --exit-code THIRD-PARTY-LICENSES.md \
+            || { echo "::error::THIRD-PARTY-LICENSES.md no longer describes what the npm tarballs ship; run \`just notices\` and commit the result"; exit 1; }
 
   wasm:
     name: the core still builds for the browser

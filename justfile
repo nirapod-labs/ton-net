@@ -37,6 +37,14 @@ versions:
 notices:
     cargo about generate --manifest-path bindings/node/Cargo.toml about.hbs -o THIRD-PARTY-LICENSES.md
 
+# Whether the committed notices still describe the tree they claim to. Regenerating is
+# deterministic for a fixed cargo-about, so a diff means the tree moved under the file,
+# or the generator did; CI pins the generator to tell the two apart. Like `deny`, this
+# reaches the network. Run it before a release: the notices ship inside eight npm
+# tarballs and cannot be corrected after one, which release-process.md covers.
+notices-check: notices
+    git diff --stat --exit-code THIRD-PARTY-LICENSES.md
+
 # The sans-I/O core, on a target with no threads, no sockets and no clock. The
 # transport crates are expected to fail this until the browser transport lands.
 wasm:
