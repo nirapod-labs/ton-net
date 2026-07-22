@@ -36,6 +36,12 @@ Everything for 0.3.0. The heading moves when the release is cut.
   Simplex vote, whose candidate hash is now bound to the block a link claims.
 - `AdnlError::NoRandomness`. An operating system that will not supply randomness
   used to end the calling process; it now fails the call that needed it.
+- Property tests over the cell codec: the bag-of-cells round trip preserves a
+  cell's representation hash and its bytes, a parsed cell hashes to what its
+  own parts imply, arbitrary and truncated input is refused rather than fatal,
+  and a cell has exactly one accepted encoding.
+- `docs/security/threat-model.md`, which works out what an attacker controls at
+  each of the four boundaries, which check refuses it, and what is left trusted.
 
 ### Fixed
 
@@ -87,6 +93,9 @@ them.
   different. `taplo` decides now, and CI checks.
 - Two spellings of `unparsable`, found by adding a spell check rather than by
   reading.
+- The readme's sync measurement. It carried a download size no test measures
+  and a link count from the walk before last. The binding readme had already
+  been corrected and this one had not, so the two disagreed.
 - The Node binding's two musl binaries are built on musl. Both had been built on
   the glibc runner: the x64 one linked against glibc and needed
   `ld-linux-x86-64.so.2`, which no musl system carries, and the arm64 one did not

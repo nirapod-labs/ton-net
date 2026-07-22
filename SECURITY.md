@@ -24,7 +24,9 @@ supported version.
 
 ## What is in scope
 
-The high-severity classes, in the order they matter here:
+The high-severity classes, in the order they matter here. Each is a boundary in
+[the threat model](docs/security/threat-model.md), which sets out what an
+attacker controls there and which check refuses it.
 
 - **Proof verification bypass.** Anything that makes the library accept an account,
   a block, a balance or a state that the validators did not sign. Forged proof of

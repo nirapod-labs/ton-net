@@ -113,7 +113,11 @@ impl<'a> Reader<'a> {
 ///
 /// An odd descriptor means the final byte is partial: it carries the data bits, then a
 /// set bit, then zeros.
-fn bit_len(d2: u8, data: &[u8]) -> Result<u16, CellError> {
+///
+/// Visible to the crate so the encoding-uniqueness property can reach it. A cell's
+/// second encoding exists only at this level: the serializer never writes one, so a
+/// property that goes out through [`serialize_boc`] cannot construct the case at all.
+pub(crate) fn bit_len(d2: u8, data: &[u8]) -> Result<u16, CellError> {
     let full = u16::from(d2 >> 1);
     if d2 & 1 == 0 {
         return Ok(full * 8);

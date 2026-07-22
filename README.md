@@ -3,9 +3,6 @@
 The complete TON network client, written once in Rust and available in every
 language.
 
-> Working name. The launch name is an open decision (see
-> [docs/roadmap.md](docs/roadmap.md)).
-
 ton-net speaks TON's own protocols directly, with no HTTP indexer in the path.
 Today that is TL, ADNL over TCP, the liteserver query layer, Merkle-proof
 verification, and key-block sync: enough to read an account and prove it against
@@ -110,9 +107,11 @@ ADNL, walks from the key block its config pins to the network's current head
 checking a validator signature set at every link, and reads an account proved
 against the block it arrived at. `v0.1.0` and `v0.2.0` are tagged.
 
-What a first walk costs, measured against mainnet in July 2026: 1244 links over
-78 replies, about 52 MB and a minute and a half. A client that saves the block
-it ended on and hands it back next time pays one link instead.
+What a first walk costs, measured against mainnet on 2026-07-22: 1246 links over
+78 replies and a little over two minutes. Read it as a scale rather than a
+constant, since the link count climbs with the chain. A client that saves the
+block it ended on and hands it back next time pays one link instead, in about a
+second.
 
 Every wire fact is drawn from primary sources: the `ton_api.tl` and
 `lite_api.tl` schemas, the C++ reference in `ton-blockchain/ton`, and the
@@ -122,7 +121,9 @@ against the reference, not inferred.
 
 ### What is still taken on trust
 
-Two things, and they are the whole list:
+Two things, and they are the whole list. What an attacker controls at each
+boundary the library crosses, and which check refuses it, is worked out in
+[the threat model](docs/security/threat-model.md).
 
 - **The block the config pins.** A walk has to start somewhere. It comes from
   the same file that decides which network the client is on, it is one visible
