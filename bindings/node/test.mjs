@@ -158,14 +158,28 @@ async function main() {
     }
   }
 
-  // The elector's balance runs past 2^53, so a JS number would round it and say nothing
-  // about having done so. Asserting the rounding is real keeps the decimal string from
-  // resting on a case that no longer occurs.
-  const big = proved.value.balance;
+  // A balance past 2^53 is why these cross as decimal strings: a JS number would round it
+  // and say nothing about having done so.
+  //
+  // The rounding is proved on a pinned value rather than on the live balance. Whether one
+  // particular number survives `Number()` is a property of that number and not of this
+  // library: JavaScript prints the shortest decimal that parses back to the same double,
+  // doubles are spaced 256 apart up here, so roughly one balance in 256 is already its own
+  // shortest form and returns intact. Asserting otherwise on a live balance fails at
+  // random, and did, on 1273626113126627300.
+  const ROUNDS = "1243292186243323275";
   assert.notEqual(
-    Number(big).toString(),
-    big,
-    `the elector balance ${big} now fits a JS number exactly`,
+    Number(ROUNDS).toString(),
+    ROUNDS,
+    "a JS number should not carry this value intact",
+  );
+
+  // That the string keeps every digit is already asserted by assertDecimal above. What is
+  // left to establish is that this balance is in the range where it matters at all.
+  const big = proved.value.balance;
+  assert.ok(
+    BigInt(big) > BigInt(Number.MAX_SAFE_INTEGER),
+    `the elector balance ${big} no longer exceeds 2^53`,
   );
 
   // The two paths read the same block, so they have to agree to the nanoton. A proved
