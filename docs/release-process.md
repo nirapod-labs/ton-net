@@ -18,6 +18,9 @@ stamps it outward with `--fix` and checks it in CI without. Nothing else keeps t
 two registries agreeing, so a release that skips it publishes two artifacts
 claiming to be the same library at different numbers.
 
+Which number each artifact carries, and how a prerelease is spelled differently by
+each registry even when the number is the same, is in [versions.md](versions.md).
+
 ## Before the release
 
 1. `just gate` passes, and so does the live suite: `just test-live`, plus
