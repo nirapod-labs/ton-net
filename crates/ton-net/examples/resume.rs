@@ -89,7 +89,12 @@ fn load(path: &Path) -> Option<BlockIdExt> {
 }
 
 fn hex(bytes: &[u8; 32]) -> String {
-    bytes.iter().map(|b| format!("{b:02x}")).collect()
+    use std::fmt::Write as _;
+
+    bytes.iter().fold(String::new(), |mut hex, b| {
+        let _ = write!(hex, "{b:02x}");
+        hex
+    })
 }
 
 fn unhex(text: &str) -> Option<[u8; 32]> {

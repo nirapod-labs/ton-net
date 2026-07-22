@@ -65,10 +65,20 @@ fn base64(text: &[u8]) -> Result<[u8; 32], Error> {
             .iter()
             .position(|c| *c == byte)
             .ok_or_else(|| Error::Config(format!("not base64: {byte}")))?;
-        acc = (acc << 6) | value as u32;
+        #[allow(
+            clippy::cast_possible_truncation,
+            reason = "value is a position in the 64-byte ALPHABET, so it is under 64 and fits in u32 regardless of platform pointer width"
+        )]
+        {
+            acc = (acc << 6) | value as u32;
+        }
         bits += 6;
         if bits >= 8 {
             bits -= 8;
+            #[allow(
+                clippy::cast_possible_truncation,
+                reason = "bits was just reduced below 8, so acc >> bits carries exactly the newly completed byte in its low 8 bits; anything the cast drops above that is a sextet already pushed in an earlier iteration"
+            )]
             out.push((acc >> bits) as u8);
         }
     }

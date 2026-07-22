@@ -58,6 +58,13 @@ impl Config {
     /// publishes rather than one this library chose, and the further it recedes the
     /// longer a first sync takes, so refreshing this snapshot belongs to cutting a
     /// release rather than to housekeeping.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the bundled snapshot fails to parse. It cannot in a released build: a
+    /// test in this module parses this exact checked-in file, so a failure here would mean
+    /// the snapshot and the test that guards it have already gone out of sync before this
+    /// ever ran.
     #[must_use]
     // Whether the checked-in snapshot parses is settled before a caller ever runs, and a
     // test in this module holds it there. Returning a Result would put a failure no
@@ -105,6 +112,11 @@ impl Config {
                     Error::Config("liteserver key is not 32 base64 bytes".to_string())
                 })?;
 
+            #[allow(
+                clippy::cast_possible_truncation,
+                clippy::cast_sign_loss,
+                reason = "ip is a signed 32-bit integer that serde_json widens to i64; casting back to u32 takes its low 32 bits as the address octets, which is the intended bit-for-bit reinterpretation"
+            )]
             let octets = (server.ip as u32).to_be_bytes();
             let addr = format!(
                 "{}.{}.{}.{}:{}",
@@ -114,13 +126,20 @@ impl Config {
         }
 
         let init_block = match raw.validator.and_then(|validator| validator.init_block) {
-            Some(block) => Some(BlockIdExt::new(
-                block.workchain,
-                block.shard as u64,
-                block.seqno,
-                hash(&block.root_hash, "init block root hash")?,
-                hash(&block.file_hash, "init block file hash")?,
-            )),
+            Some(block) => {
+                #[allow(
+                    clippy::cast_sign_loss,
+                    reason = "shard is TON's signed 64-bit prefix mask; BlockIdExt stores its bit pattern as u64, so the masterchain's top bit becomes 0x8000_0000_0000_0000 rather than a negative number"
+                )]
+                let shard = block.shard as u64;
+                Some(BlockIdExt::new(
+                    block.workchain,
+                    shard,
+                    block.seqno,
+                    hash(&block.root_hash, "init block root hash")?,
+                    hash(&block.file_hash, "init block file hash")?,
+                ))
+            }
             None => None,
         };
 
@@ -217,7 +236,12 @@ mod tests {
     use super::*;
 
     fn hex(bytes: &[u8]) -> String {
-        bytes.iter().map(|b| format!("{b:02x}")).collect()
+        use std::fmt::Write as _;
+
+        bytes.iter().fold(String::new(), |mut hex, b| {
+            let _ = write!(hex, "{b:02x}");
+            hex
+        })
     }
 
     const KEY: &str = "n4VDnSCUuSpjnCyUk9e3QOOd6o0ItSWYbTnW3Wnn8wk=";

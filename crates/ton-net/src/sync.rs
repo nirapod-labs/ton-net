@@ -231,10 +231,7 @@ pub fn fresh_enough(gen_utime: u32, limit_seconds: u32) -> Result<(), Error> {
 ///
 /// A zero bound refuses every head by design, so a walk under one is allowed its first
 /// reply and fails as stale, which is the failure the caller asked for.
-pub fn worth_continuing(
-    elapsed: std::time::Duration,
-    limit_seconds: u32,
-) -> Result<(), Error> {
+pub fn worth_continuing(elapsed: std::time::Duration, limit_seconds: u32) -> Result<(), Error> {
     if limit_seconds == 0 {
         return Ok(());
     }
@@ -280,6 +277,10 @@ mod tests {
 
     #[test]
     fn a_head_older_than_the_bound_is_stale() {
+        #[allow(
+            clippy::cast_possible_truncation,
+            reason = "unix seconds fit in u32 until year 2106; fresh_enough takes gen_utime as u32, matching the width TON's utime field actually has on the wire"
+        )]
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .expect("a clock after 1970")
@@ -303,6 +304,10 @@ mod tests {
 
     #[test]
     fn a_clock_behind_the_chain_is_reported_rather_than_obeyed() {
+        #[allow(
+            clippy::cast_possible_truncation,
+            reason = "unix seconds fit in u32 until year 2106; fresh_enough takes gen_utime as u32, matching the width TON's utime field actually has on the wire"
+        )]
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .expect("a clock after 1970")
@@ -359,6 +364,10 @@ mod tests {
     fn a_zero_bound_refuses_every_head() {
         // Documented behaviour rather than an accident: a caller who says no staleness at
         // all gets what they asked for, including on a block a second old.
+        #[allow(
+            clippy::cast_possible_truncation,
+            reason = "unix seconds fit in u32 until year 2106; fresh_enough takes gen_utime as u32, matching the width TON's utime field actually has on the wire"
+        )]
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .expect("a clock after 1970")

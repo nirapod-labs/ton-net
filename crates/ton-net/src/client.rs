@@ -288,7 +288,7 @@ impl Client {
         // reads a block-structure failure as a proof failure and there is no proof here.
         reported
             .try_map(|state| Account::decode(&state.state))
-            .map_err(Error::decoding)
+            .map_err(|error| Error::decoding(&error))
     }
 
     /// Reads an account's raw state and proofs at a given block.

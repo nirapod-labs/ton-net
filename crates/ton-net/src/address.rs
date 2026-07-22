@@ -106,6 +106,10 @@ impl Address {
         }
 
         // The workchain byte is a signed 8-bit value: 0x00 is workchain 0, 0xff is -1.
+        #[allow(
+            clippy::cast_possible_wrap,
+            reason = "the workchain byte is meant as signed: 0x00 is 0 and 0xff is -1, so reinterpreting its bit pattern as i8 is the intended decode, not an accident"
+        )]
         let workchain = i32::from(raw[1] as i8);
         let mut account_id = [0u8; 32];
         account_id.copy_from_slice(&raw[2..34]);
@@ -171,7 +175,12 @@ mod tests {
     use super::*;
 
     fn hex(bytes: &[u8]) -> String {
-        bytes.iter().map(|b| format!("{b:02x}")).collect()
+        use std::fmt::Write as _;
+
+        bytes.iter().fold(String::new(), |mut hex, b| {
+            let _ = write!(hex, "{b:02x}");
+            hex
+        })
     }
 
     #[test]

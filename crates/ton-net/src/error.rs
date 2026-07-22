@@ -228,7 +228,7 @@ impl Error {
     /// conversion below says so. Out of `Client::account_reported` there was no proof to
     /// fail, so the same failure is only bytes that did not read, and calling it a proof
     /// failure would report a check that never ran.
-    pub(crate) fn decoding(error: ton_net_block::BlockError) -> Self {
+    pub(crate) fn decoding(error: &ton_net_block::BlockError) -> Self {
         Self::Cell(error.to_string())
     }
 }
@@ -332,7 +332,7 @@ mod tests {
             BlockError::Malformed("account address"),
             BlockError::Cell(ton_net_cell::CellError::NotABagOfCells),
         ] {
-            let mapped = Error::decoding(failure.clone());
+            let mapped = Error::decoding(&failure);
             assert!(
                 matches!(mapped, Error::Cell(_)),
                 "{failure:?} became {mapped:?}"
