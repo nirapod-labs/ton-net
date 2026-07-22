@@ -70,26 +70,12 @@ type Result<T> = napi::Result<T>;
 /// enum, and every call here is async. When that changes, the code moves to `error.code`
 /// and this prefix stays where it is.
 fn to_js(error: ton_net::Error) -> napi::Error {
-    use ton_net::Error;
-    // Named one by one up to the catch-all, which is here because the facade's error type
-    // may grow. A new variant reaching JavaScript as UNKNOWN is worse than one reaching it
-    // under its own name, so this list is worth extending when that happens.
-    let code = match &error {
-        Error::Transport(_) => "TRANSPORT",
-        Error::Handshake => "HANDSHAKE",
-        Error::Timeout => "TIMEOUT",
-        Error::ConnectionLost => "CONNECTION_LOST",
-        Error::LiteServer { .. } => "LITESERVER",
-        Error::Decode(_) => "DECODE",
-        Error::Address(_) => "ADDRESS",
-        Error::Config(_) => "CONFIG",
-        Error::Cell(_) => "CELL",
-        Error::Proof(_) => "PROOF",
-        Error::Sync(_) => "SYNC",
-        Error::Stale { .. } => "STALE",
-        Error::ClockBehind { .. } => "CLOCK_BEHIND",
-        _ => "UNKNOWN",
-    };
+    // The names come from the core rather than from a table kept here. This was a match
+    // per variant ending in a wildcard, and the wildcard was the defect: a variant added
+    // to the facade would have gone on compiling and arrived in JavaScript as UNKNOWN.
+    // The core's own match has no wildcard, so that case is a build failure there now,
+    // and every later binding reads the same list instead of writing its own.
+    let code = error.code().as_str();
     // Several of the facade's messages already open with a lowercase kind, which the code
     // now says better. Printing both would stutter: "PROOF: proof: no merkle proof".
     let text = error.to_string();
@@ -104,10 +90,10 @@ fn to_js(error: ton_net::Error) -> napi::Error {
 /// Carries napi's own `InvalidArg` status as well as the message prefix, since this one
 /// failure is the caller's rather than the network's and `error.code` can say so.
 fn invalid(reason: String) -> napi::Error {
-    napi::Error::new(
-        napi::Status::InvalidArg,
-        format!("INVALID_ARGUMENT: {reason}"),
-    )
+    // Spelled by the core even though no core error carries it, so that this binding and
+    // the ones after it name the caller's own mistake the same way.
+    let code = ton_net::ErrorCode::InvalidArgument.as_str();
+    napi::Error::new(napi::Status::InvalidArg, format!("{code}: {reason}"))
 }
 
 /// The public network parameters a client needs to reach TON.

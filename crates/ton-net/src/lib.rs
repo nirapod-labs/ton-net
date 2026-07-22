@@ -90,7 +90,7 @@ mod verified;
 pub use address::Address;
 pub use client::Client;
 pub use config::Config;
-pub use error::Error;
+pub use error::{Error, ErrorCode};
 pub use proof::verify_account;
 pub use sync::SyncReport;
 pub use verified::Verified;

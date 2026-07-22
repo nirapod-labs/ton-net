@@ -36,6 +36,13 @@ Everything for 0.3.0. The heading moves when the release is cut.
   Simplex vote, whose candidate hash is now bound to the block a link claims.
 - `AdnlError::NoRandomness`. An operating system that will not supply randomness
   used to end the calling process; it now fails the call that needed it.
+- `ErrorCode` and `Error::code`, the stable name for a kind of failure. Which
+  failure occurred decides what a caller does next, and two of the answers are
+  opposites: a transport failure means the socket dropped and the server may be
+  fine, a proof failure means the server did not prove its answer and asking it
+  again is the reverse of what this library is for. The names were already a
+  documented contract in the Node binding's message prefix and are unchanged;
+  they now come from the core, so a binding maps rather than invents.
 - Property tests over the cell codec: the bag-of-cells round trip preserves a
   cell's representation hash and its bytes, a parsed cell hashes to what its
   own parts imply, arbitrary and truncated input is refused rather than fatal,

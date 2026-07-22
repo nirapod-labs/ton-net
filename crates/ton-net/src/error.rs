@@ -101,7 +101,125 @@ pub enum Error {
     ConnectionLost,
 }
 
+/// The stable name for a kind of failure, for a caller that has to branch on one.
+///
+/// [`Error`] is `#[non_exhaustive]`, so outside this crate it cannot be matched to the
+/// end, and a caller who tried would be writing a wildcard arm that silently swallows
+/// whatever is added next. This is the type to match on instead: the variant set is what
+/// callers are promised, and [`as_str`](ErrorCode::as_str) is the same name spelled for a
+/// language that has no enums.
+///
+/// # Why it lives here and not in each binding
+///
+/// Which failure occurred decides what a caller does next, and two of the answers are
+/// opposites. A transport failure means the socket dropped and the server may be fine, so
+/// trying again is right. A proof failure means the server did not prove its answer, so
+/// asking it again is the reverse of what this library is for.
+///
+/// That distinction has to reach every language this library is bound into, spelled the
+/// same way. Held in a binding it is one `match` per binding, drifting as each is
+/// written, and a caller who learns `PROOF` in JavaScript meets something else in Swift.
+/// Held here, a binding maps rather than invents.
+///
+/// The strings are a compatibility surface: they are what a caller compares against, so
+/// they are fixed once published, and renaming one breaks a caller no compiler warns.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum ErrorCode {
+    /// A socket could not connect, read, or write. The server may be fine.
+    Transport,
+    /// The ADNL handshake failed: the configured key is not the key that answered.
+    Handshake,
+    /// A call passed its deadline.
+    Timeout,
+    /// The connection lost its place in the cipher stream and cannot be reused.
+    ConnectionLost,
+    /// The liteserver answered with an error of its own.
+    LiteServer,
+    /// Bytes that did not read, from a call that verified nothing.
+    Decode,
+    /// An address that is not one.
+    Address,
+    /// A network configuration that could not be used.
+    Config,
+    /// A cell or bag of cells that is not well formed.
+    Cell,
+    /// A server did not prove its answer. Asking it again is not the repair.
+    Proof,
+    /// A walk toward the head could not be completed or checked.
+    Sync,
+    /// The proven head is older than the caller allowed.
+    Stale,
+    /// The local clock is far enough behind the chain that freshness cannot be judged.
+    ClockBehind,
+    /// An argument refused before any call was made.
+    ///
+    /// No [`Error`] carries this: the failure is the caller's rather than the network's,
+    /// and it happens above this crate. It is named here anyway, because a binding that
+    /// validates its own arguments needs a spelling for it, and the point of this type is
+    /// that the spelling is not invented once per language.
+    InvalidArgument,
+}
+
+impl ErrorCode {
+    /// The stable name, for a binding whose language has no enums.
+    ///
+    /// Upper case with underscores, the form the Node binding already publishes in its
+    /// message prefix.
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ErrorCode::Transport => "TRANSPORT",
+            ErrorCode::Handshake => "HANDSHAKE",
+            ErrorCode::Timeout => "TIMEOUT",
+            ErrorCode::ConnectionLost => "CONNECTION_LOST",
+            ErrorCode::LiteServer => "LITESERVER",
+            ErrorCode::Decode => "DECODE",
+            ErrorCode::Address => "ADDRESS",
+            ErrorCode::Config => "CONFIG",
+            ErrorCode::Cell => "CELL",
+            ErrorCode::Proof => "PROOF",
+            ErrorCode::Sync => "SYNC",
+            ErrorCode::Stale => "STALE",
+            ErrorCode::ClockBehind => "CLOCK_BEHIND",
+            ErrorCode::InvalidArgument => "INVALID_ARGUMENT",
+        }
+    }
+}
+
+impl std::fmt::Display for ErrorCode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
 impl Error {
+    /// Which kind of failure this is, as a name a caller can branch on.
+    ///
+    /// The match below is exhaustive on purpose. `#[non_exhaustive]` binds callers
+    /// outside this crate and not this file, so a variant added without a code here fails
+    /// to compile rather than reaching a caller unnamed. That is the whole mechanism:
+    /// before this existed the mapping was a wildcard inside the Node binding, and a new
+    /// variant would have arrived in JavaScript as `UNKNOWN`.
+    #[must_use]
+    pub fn code(&self) -> ErrorCode {
+        match self {
+            Error::Transport(_) => ErrorCode::Transport,
+            Error::Handshake => ErrorCode::Handshake,
+            Error::Timeout => ErrorCode::Timeout,
+            Error::ConnectionLost => ErrorCode::ConnectionLost,
+            Error::LiteServer { .. } => ErrorCode::LiteServer,
+            Error::Decode(_) => ErrorCode::Decode,
+            Error::Address(_) => ErrorCode::Address,
+            Error::Config(_) => ErrorCode::Config,
+            Error::Cell(_) => ErrorCode::Cell,
+            Error::Proof(_) => ErrorCode::Proof,
+            Error::Sync(_) => ErrorCode::Sync,
+            Error::Stale { .. } => ErrorCode::Stale,
+            Error::ClockBehind { .. } => ErrorCode::ClockBehind,
+        }
+    }
+
     /// Classifies a block-structure failure from a read that checked nothing.
     ///
     /// The same [`BlockError`](ton_net_block::BlockError) means two different things
