@@ -16,11 +16,11 @@
 # whether they were exposed to anything.
 name: release-plz
 
-# Manual until the crates exist on the registry. release-plz works out the next version
-# by diffing the published crate against the tree, so with a v0.3.0 tag and nothing
-# published it fails on every push: "not found in the registry, but the git tag exists".
-# The `push` trigger goes back once the first hand-publish has happened.
 on:
+  push:
+    branches: [main]
+  # A release is a decision, and sometimes the decision is made without a commit to
+  # hang it on.
   workflow_dispatch:
 
 env:
