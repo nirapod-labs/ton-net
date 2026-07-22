@@ -13,7 +13,7 @@ depends on a block hash the caller has to supply.
 
 ## [Unreleased]
 
-Everything for 0.3.0. The heading moves when the release is cut.
+## [0.3.0] - 2026-07-22
 
 ### Added
 
@@ -167,6 +167,7 @@ The foundation: a liteserver read over TON's own protocols, from Node.
 Reads at this version are the server's unproven word, and are marked in the API
 with a `ServerReported` type.
 
-[Unreleased]: https://github.com/nirapod-labs/ton-net/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/nirapod-labs/ton-net/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/nirapod-labs/ton-net/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/nirapod-labs/ton-net/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/nirapod-labs/ton-net/releases/tag/v0.1.0
