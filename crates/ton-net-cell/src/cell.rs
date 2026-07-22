@@ -251,6 +251,11 @@ impl Cell {
         self.inner.level_mask
     }
 
+    /// The hashes and depths this cell computed, in the order a bag of cells stores them.
+    pub(crate) fn stored(&self) -> (&[[u8; 32]], &[u16]) {
+        (&self.inner.hashes, &self.inner.depths)
+    }
+
     /// The cell's level: the highest level its mask marks, or zero for an empty mask.
     #[must_use]
     pub fn level(&self) -> u8 {

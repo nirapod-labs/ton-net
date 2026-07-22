@@ -36,6 +36,8 @@ struct RawCell {
     refs: Vec<usize>,
     cell_type: CellType,
     level_mask: u8,
+    /// The hashes and depths the cell carried ahead of its data, when it carried them.
+    stored: Option<Vec<u8>>,
 }
 
 /// The CRC-32C (Castagnoli) checksum a bag of cells may carry, reflected form.
@@ -308,9 +310,6 @@ pub fn parse_boc(bytes: &[u8]) -> Result<Vec<Cell>, CellError> {
     for index in 0..count {
         let d1 = reader.byte()?;
         let d2 = reader.byte()?;
-        if d1 & 16 != 0 {
-            return Err(CellError::Malformed("cell stores its hashes inline"));
-        }
         // The field is three bits wide and the cell model allows four references, so the
         // top three values describe a cell no TON implementation will build.
         let ref_count = usize::from(d1 & 7);
@@ -319,6 +318,18 @@ pub fn parse_boc(bytes: &[u8]) -> Result<Vec<Cell>, CellError> {
         }
         let exotic = d1 & 8 != 0;
         let level_mask = d1 >> 5;
+
+        // A cell may carry its own hashes and depths ahead of its data, one of each per
+        // level its mask marks and one more besides. A whole block arrives this way; a
+        // Merkle proof does not, which is why the read path never met it. None of it is
+        // taken on trust: it is checked below against what the cell's own contents give,
+        // so a bag that describes itself wrongly is refused rather than believed.
+        let stored = if d1 & 16 != 0 {
+            let per_level = level_mask.count_ones() as usize + 1;
+            Some(reader.take(per_level * (32 + 2))?.to_vec())
+        } else {
+            None
+        };
 
         let data = reader.take(usize::from((d2 >> 1) + (d2 & 1)))?.to_vec();
         let bits = bit_len(d2, &data)?;
@@ -343,6 +354,7 @@ pub fn parse_boc(bytes: &[u8]) -> Result<Vec<Cell>, CellError> {
             refs,
             cell_type,
             level_mask,
+            stored,
         });
     }
 
@@ -371,13 +383,17 @@ pub fn parse_boc(bytes: &[u8]) -> Result<Vec<Cell>, CellError> {
                 .ok_or(CellError::BadReference)?;
             refs.push(child.clone());
         }
-        built.push(Cell::from_parts(
+        let cell = Cell::from_parts(
             raw_cell.data.clone(),
             raw_cell.bits,
             refs,
             raw_cell.cell_type,
             raw_cell.level_mask,
-        )?);
+        )?;
+        if let Some(stored) = &raw_cell.stored {
+            check_stored(&cell, stored)?;
+        }
+        built.push(cell);
     }
 
     root_list
@@ -389,6 +405,37 @@ pub fn parse_boc(bytes: &[u8]) -> Result<Vec<Cell>, CellError> {
                 .ok_or(CellError::BadReference)
         })
         .collect()
+}
+
+/// Holds a cell to the hashes and depths it carried.
+///
+/// The stored copies are never used: the cell's identity comes from its own contents
+/// either way. What they are good for is disagreement, which means the sender computed
+/// something this crate did not, and there is no reading of that worth continuing from.
+fn check_stored(cell: &Cell, stored: &[u8]) -> Result<(), CellError> {
+    let (hashes, depths) = cell.stored();
+    if stored.len() != hashes.len() * 32 + depths.len() * 2 {
+        return Err(CellError::Malformed(
+            "cell stores a different number of hashes than its level mask allows",
+        ));
+    }
+    for (index, hash) in hashes.iter().enumerate() {
+        if stored.get(index * 32..index * 32 + 32) != Some(&hash[..]) {
+            return Err(CellError::Malformed(
+                "cell stores a hash its contents do not give",
+            ));
+        }
+    }
+    let base = hashes.len() * 32;
+    for (index, depth) in depths.iter().enumerate() {
+        let at = base + index * 2;
+        if stored.get(at..at + 2) != Some(&depth.to_be_bytes()[..]) {
+            return Err(CellError::Malformed(
+                "cell stores a depth its contents do not give",
+            ));
+        }
+    }
+    Ok(())
 }
 
 /// Orders every cell reachable from `roots` so each comes before the cells it
