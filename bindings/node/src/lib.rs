@@ -133,6 +133,10 @@ pub struct Config {
 // lints on the core crates make a panic unlikely rather than impossible, and by their own
 // terms they do not reach arithmetic or a dependency's unwrap.
 #[napi]
+#[allow(
+    clippy::missing_errors_doc,
+    reason = "the errors section would ship into the TypeScript declarations"
+)]
 impl Config {
     /// Returns a config for TON mainnet from a bundled snapshot.
     #[napi(factory, catch_unwind)]
@@ -144,8 +148,6 @@ impl Config {
     }
 
     /// Parses a config from the TON `global.config.json` format.
-    ///
-    /// # Errors
     ///
     /// Throws `CONFIG: ` if `json` is malformed, has no liteserver list, a liteserver
     /// names an unsupported key type or a key that is not 32 bytes, or a block hash in
@@ -331,10 +333,15 @@ pub struct TonClient {
 }
 
 #[napi]
+// Every doc comment here is copied verbatim into the published index.d.ts, where a Rust
+// section heading renders as a heading in an editor's hover. What each call throws is in
+// the prose instead, which reads in both languages.
+#[allow(
+    clippy::missing_errors_doc,
+    reason = "the errors section would ship into the TypeScript declarations"
+)]
 impl TonClient {
     /// Connects to a liteserver from the config and completes the ADNL handshake.
-    ///
-    /// # Errors
     ///
     /// Throws `TRANSPORT: ` if no liteserver in `config` is reachable, or `HANDSHAKE: `
     /// if the last one reached rejects the handshake.
@@ -356,8 +363,6 @@ impl TonClient {
     /// worth. Anything that can write to where a caller keeps one can choose what this
     /// client believes. The binding stores nothing and picks no location; a `BlockId` is
     /// an object with two buffers, and where it lives is the caller's decision.
-    ///
-    /// # Errors
     ///
     /// Throws `INVALID_ARGUMENT: ` if `anchor`'s shard is not 16 hex digits or either of
     /// its hashes is not 32 bytes; `TRANSPORT: ` if no liteserver is reachable;
@@ -391,8 +396,6 @@ impl TonClient {
     /// sync and runs over every key block published since: minutes and tens of megabytes
     /// against mainnet. With one it is a link or two.
     ///
-    /// # Errors
-    ///
     /// Throws `CONFIG: ` if there is neither a stored anchor nor an init block, `SYNC: `
     /// if the proof chain does not check out or the server will not finish it, `STALE: `
     /// if the head it leads to is older than the config's freshness bound, or a transport
@@ -417,8 +420,6 @@ impl TonClient {
     }
 
     /// Reads the liteserver's current masterchain head.
-    ///
-    /// # Errors
     ///
     /// Throws `TIMEOUT: ` if the query does not complete in time, `LITESERVER: ` if the
     /// server returns an error of its own, `DECODE: ` if the response does not decode, or
@@ -446,8 +447,6 @@ impl TonClient {
     /// Every call walks. A caller reading several accounts should `sync()` once and pass
     /// that head to `accountAt` rather than pay for a walk per account.
     ///
-    /// # Errors
-    ///
     /// Throws `ADDRESS: ` if `address` does not parse; `CONFIG: ` if there is nothing to
     /// start a walk from; `SYNC: ` if the proof chain does not check out; `STALE: ` if
     /// the head it reaches is older than the config's freshness bound; `PROOF: ` if the
@@ -471,8 +470,6 @@ impl TonClient {
     /// The result is the server's word: the proof it sent comes back alongside,
     /// unchecked. It is named for what it is, because the proven read is the one a caller
     /// lands on without choosing and this is the exception.
-    ///
-    /// # Errors
     ///
     /// Throws `ADDRESS: ` if `address` does not parse; `TIMEOUT: ` if a query does not
     /// complete in time; `LITESERVER: ` if the server returns an error; `DECODE: ` if a
@@ -510,8 +507,6 @@ impl TonClient {
     /// client proved, from `sync()` or `anchor()`, and a block the caller trusts
     /// independently.
     ///
-    /// # Errors
-    ///
     /// Throws `INVALID_ARGUMENT: ` if `trusted`'s shard is not 16 hex digits or either
     /// hash is not 32 bytes; `ADDRESS: ` if `address` does not parse; `PROOF: ` if
     /// `trusted` is not a masterchain block, a proof does not check out, or the account
@@ -539,8 +534,6 @@ impl TonClient {
     /// The bytes come back as the server sent them, unchecked and undecoded. This is the
     /// way out for a caller who wants to keep the proofs, check them elsewhere, or check
     /// them against an anchor obtained later, with `verifyAccount`.
-    ///
-    /// # Errors
     ///
     /// Throws `INVALID_ARGUMENT: ` if `block`'s shard is not 16 hex digits or either hash
     /// is not 32 bytes; `ADDRESS: ` if `address` does not parse; `TIMEOUT: ` if the query
@@ -586,13 +579,15 @@ impl TonClient {
 /// bytes always give the same answer. It throws if the proof does not root at the trusted
 /// hash, or if the account does not bind to it.
 ///
-/// # Errors
-///
 /// Throws `ADDRESS: ` if `read.address` does not parse; `INVALID_ARGUMENT: ` if
 /// `trustedRootHash` is not 32 bytes, or if `shardProof` is missing for an address
 /// outside the masterchain; `PROOF: ` if the proof does not root at the trusted hash or
 /// the account does not bind to it; or `CELL: ` if the bytes are not cells at all.
 #[napi(catch_unwind)]
+#[allow(
+    clippy::missing_errors_doc,
+    reason = "the errors section would ship into the TypeScript declarations"
+)]
 pub fn verify_account(read: AccountRead) -> Result<Account> {
     let parsed = ton_net::Address::parse(&read.address).map_err(|e| to_js(&e))?;
     let anchor = hash(&read.trusted_root_hash, "trustedRootHash")?;
