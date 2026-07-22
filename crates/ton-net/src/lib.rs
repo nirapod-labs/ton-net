@@ -87,6 +87,35 @@ mod proof;
 mod sync;
 mod verified;
 
+/// Which set of things this build will accept as proven.
+///
+/// A version number answers "is this API compatible". It cannot answer the question a
+/// caller of a verifier actually has, which is whether an upgrade changed what the
+/// library believes. Those are different questions: the accept and reject boundary can
+/// move while every signature stays byte-identical, and it can stay fixed across a
+/// breaking API change.
+///
+/// So this is a separate number. It rises when a new kind of proof is accepted, when an
+/// acceptance condition tightens or loosens, when the rule for validator signature weight
+/// changes, or when a freshness default changes. It does not move for wording, for
+/// performance, or for anything a caller cannot observe in an accept or reject.
+///
+/// A caller that recorded a result can compare the epoch it was verified under against
+/// this one and decide whether to check again. Nothing else in the API answers that.
+///
+/// ```
+/// # let cached_epoch = ton_net::VERIFY_EPOCH;
+/// if cached_epoch < ton_net::VERIFY_EPOCH {
+///     // this build accepts a different set of things; verify again rather than trust
+///     // a result an older set of rules produced
+/// }
+/// ```
+///
+/// The number is meaningless across libraries and is not a version. It only ever
+/// increases, and each increase is recorded in the changelog as the delta in what is
+/// accepted and what is refused.
+pub const VERIFY_EPOCH: u32 = 1;
+
 pub use address::Address;
 pub use client::Client;
 pub use config::Config;

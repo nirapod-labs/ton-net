@@ -257,3 +257,26 @@ export interface VerifiedAccount {
  * hash, or if the account does not bind to it.
  */
 export declare function verifyAccount(read: AccountRead): Account
+
+/**
+ * Which set of things this build will accept as proven.
+ *
+ * The package version says whether the API changed. It cannot say whether an upgrade
+ * changed what the library believes, because the accept and reject boundary moves
+ * independently of any signature. This number is that second answer: it rises when a
+ * new kind of proof is accepted, when an acceptance condition tightens or loosens, when
+ * the validator signature weight rule changes, or when a freshness default changes.
+ *
+ * A caller that stored a verified result alongside the epoch it was verified under can
+ * compare and decide whether to check again:
+ *
+ * ```js
+ * if (cached.epoch < verifyEpoch()) {
+ *   // this build accepts a different set of things; re-verify rather than trust a
+ *   // result that an older set of rules produced
+ * }
+ * ```
+ *
+ * It is meaningless across libraries, it is not a version, and it only ever increases.
+ */
+export declare function verifyEpoch(): number

@@ -16,7 +16,7 @@
 import assert from "node:assert/strict";
 import binding from "./index.js";
 
-const { Config, TonClient, verifyAccount } = binding;
+const { Config, TonClient, verifyAccount, verifyEpoch } = binding;
 
 // The elector is a system contract that is always active on mainnet.
 const ELECTOR =
@@ -479,6 +479,15 @@ async function coldSync(config) {
   console.log(
     `cold sync: ${report.links} links over ${report.rounds} rounds in ${elapsed}s`,
   );
+}
+
+// The epoch a result was verified under. A caller stores it beside a cached read and
+// compares on upgrade, so it has to survive the boundary as a number, not a string.
+{
+  const epoch = verifyEpoch();
+  assert.equal(typeof epoch, "number", "verifyEpoch returns a number");
+  assert.ok(Number.isInteger(epoch) && epoch >= 1, `epoch is a positive integer: ${epoch}`);
+  console.log(`verify epoch: ${epoch}`);
 }
 
 main().catch((error) => {

@@ -36,6 +36,15 @@ Everything for 0.3.0. The heading moves when the release is cut.
   Simplex vote, whose candidate hash is now bound to the block a link claims.
 - `AdnlError::NoRandomness`. An operating system that will not supply randomness
   used to end the calling process; it now fails the call that needed it.
+- `VERIFY_EPOCH`, and `verifyEpoch()` in the Node binding. A version says whether
+  the API changed; it cannot say whether an upgrade changed what the library
+  accepts as proven, because that boundary moves independently of any signature.
+  This number answers the second question and rises only when the boundary does,
+  so a caller who stored the epoch a result was verified under can decide whether
+  to check it again. It starts at 1, and each rise is recorded here as the delta
+  in what is accepted and what is refused. The boundary itself is pinned as a
+  transcript in `crates/ton-net/tests/epoch.rs`, so a change to what verifies
+  fails the build rather than passing unnoticed.
 - `ErrorCode` and `Error::code`, the stable name for a kind of failure. Which
   failure occurred decides what a caller does next, and two of the answers are
   opposites: a transport failure means the socket dropped and the server may be

@@ -590,3 +590,4 @@ module.exports = nativeBinding
 module.exports.Config = nativeBinding.Config
 module.exports.TonClient = nativeBinding.TonClient
 module.exports.verifyAccount = nativeBinding.verifyAccount
+module.exports.verifyEpoch = nativeBinding.verifyEpoch
