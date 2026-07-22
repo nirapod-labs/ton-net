@@ -26,7 +26,14 @@
 //!
 //! [`parse_boc`] reads the serialized form, a bag of cells, into the root cells it
 //! holds, and [`serialize_boc`] writes one back. [`Cell::parse`] opens a [`Slice`], a
-//! cursor that reads typed values out of a cell's bits and references.
+//! cursor that reads typed values out of a cell's bits and references, and [`Builder`]
+//! is the way back: outside this crate a cell comes from parsing or from a builder and
+//! from nowhere else.
+//!
+//! [`Dict`] is TON's dictionary, a radix tree over fixed-width keys that carries almost
+//! everything a block holds. It sits here rather than above the block types because it
+//! belongs to the cell model: the virtual machine has opcodes for it, and a wallet needs
+//! one without needing to know what a block is.
 //!
 //! # Identity and proofs
 //!
@@ -67,6 +74,7 @@
 mod boc;
 mod builder;
 mod cell;
+mod dict;
 mod error;
 mod slice;
 
@@ -79,6 +87,7 @@ mod proptests;
 pub use boc::{parse_boc, serialize_boc, MAX_CELLS, MAX_DEPTH};
 pub use builder::Builder;
 pub use cell::{Cell, CellType, MAX_BITS, MAX_REFS};
+pub use dict::{Dict, DictEntry, DictIter, Lookup};
 pub use error::CellError;
 pub use slice::Slice;
 

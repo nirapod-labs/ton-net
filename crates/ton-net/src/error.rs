@@ -306,7 +306,7 @@ mod tests {
             BlockError::NotBound,
             BlockError::WrongConstructor { expected: "block" },
             BlockError::Malformed("shard state"),
-            BlockError::LabelTooLong,
+            BlockError::Cell(ton_net_cell::CellError::LabelTooLong),
             // Bytes that are not cells belong on this list too. The engine parses the
             // proof with no precondition, so four bytes of junk where a shard proof
             // should be is a server failing to prove its answer in the cheapest way

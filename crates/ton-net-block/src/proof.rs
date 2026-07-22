@@ -41,9 +41,9 @@ use ton_net_cell::{parse_boc, Cell, CellType};
 
 use crate::account::Account;
 use crate::block::Block;
-use crate::dict::Lookup;
 use crate::error::BlockError;
 use crate::shard::ShardState;
+use ton_net_cell::Lookup;
 
 /// The workchain id of the masterchain.
 const MASTERCHAIN: i32 = -1;

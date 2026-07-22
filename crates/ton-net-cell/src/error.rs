@@ -92,4 +92,26 @@ pub enum CellError {
         /// The limit that was reached.
         limit: usize,
     },
+
+    /// A dictionary key was narrower than the dictionary holds.
+    #[error("dictionary key is {given} bits, the dictionary holds {expected}")]
+    KeyLength {
+        /// The width of the key that was given.
+        given: usize,
+        /// The width the dictionary was built over.
+        expected: usize,
+    },
+
+    /// A dictionary edge claimed more key bits than are left to spend.
+    #[error("dictionary label is longer than the key it labels")]
+    LabelTooLong,
+
+    /// A change fell in a branch a Merkle proof has pruned away.
+    ///
+    /// A pruned branch holds a hash rather than a subtree, so a change reaching one would
+    /// have to invent what it replaced. Reading is different: a read reports
+    /// [`Lookup::Pruned`](crate::Lookup::Pruned) and lets the caller decide, because "not
+    /// covered" is an honest answer to a question and no answer at all to a change.
+    #[error("the dictionary prunes the branch this change needs")]
+    Pruned,
 }

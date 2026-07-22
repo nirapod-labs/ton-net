@@ -22,19 +22,6 @@ pub enum BlockError {
     #[error("malformed {0}")]
     Malformed(&'static str),
 
-    /// A dictionary key was longer than the dictionary holds.
-    #[error("dictionary key is {given} bits, the dictionary holds {expected}")]
-    KeyLength {
-        /// The length of the key supplied.
-        given: usize,
-        /// The length the dictionary holds.
-        expected: usize,
-    },
-
-    /// A dictionary label claimed more bits than the remaining key can hold.
-    #[error("dictionary label is longer than the key it labels")]
-    LabelTooLong,
-
     /// A cell that has to be a Merkle proof is some other kind of cell.
     #[error("not a merkle proof")]
     NotAMerkleProof,

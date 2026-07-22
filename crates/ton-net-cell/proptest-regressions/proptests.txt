@@ -8,3 +8,6 @@
 # It is recommended to check this file in to source control so that
 # everyone who runs the test benefits from these saved cases.
 cc 79a48644bf544bfcb07b2c75bc2e3f4ea6463a6e0394c310bc50a6c115558816 # shrinks to value = 2305843009213693952, bits = 62
+cc 78b743eff73b03216fbd85dc1bdbc3acd41429bd8d85b94e7f3cc44d801627e8 # shrinks to (key_bits, keys) = (6, [[4], [104], [152], [56], [164], [168], [0], [36], [80], [252], [212], [76], [200], [40], [228], [248]])
+cc c9eb6a2d4143d26b120da24afc228e4e9c97413684d4a918259fbe05df1a2128 # shrinks to (key_bits, keys) = (4, [[64], [192], [160], [144], [48], [80], [112], [96], [208], [16]])
+cc 428eb2938368fef55865c01d2cb7ab2841a0783809969b5787b06118eed76d15 # shrinks to (key_bits, keys) = (6, [[180], [224], [240], [32], [84], [160], [200], [80], [136]])

@@ -274,3 +274,87 @@ proptest! {
         prop_assert_eq!(copy.repr_hash(), root.repr_hash());
     }
 }
+
+/// A key width and a set of distinct keys of that width.
+///
+/// The width is generated rather than fixed because it decides how wide a label's length
+/// field is, and so which of the three label encodings wins. Mainnet uses four widths;
+/// these reach the ones between them, where a length field changes size.
+fn keys() -> impl Strategy<Value = (u16, Vec<Vec<u8>>)> {
+    (1u16..=64).prop_flat_map(|key_bits| {
+        let bytes = usize::from(key_bits).div_ceil(8);
+        let spare = u32::from(bytes as u16 * 8 - key_bits);
+        let key = proptest::collection::vec(any::<u8>(), bytes).prop_map(move |mut key| {
+            // The bits past the key width are not part of the key, so leaving them set
+            // would make two spellings of one key look like two keys.
+            if let Some(last) = key.last_mut() {
+                *last &= u8::MAX.checked_shl(spare).unwrap_or(0);
+            }
+            key
+        });
+        (
+            Just(key_bits),
+            proptest::collection::hash_set(key, 1..24).prop_map(|set| set.into_iter().collect()),
+        )
+    })
+}
+
+/// The dictionary those keys build, each key stored under its own bytes.
+fn dict_of(key_bits: u16, keys: &[Vec<u8>]) -> crate::Dict {
+    let mut dict = crate::Dict::new(key_bits).unwrap();
+    for key in keys {
+        let mut value = crate::Builder::new();
+        value.store_bytes(key).unwrap();
+        dict.set(key, &value).unwrap();
+    }
+    dict
+}
+
+proptest! {
+    /// A dictionary is the same tree whatever order its keys arrived in.
+    ///
+    /// A radix tree has one shape per key set, so this is the property a wrong split or
+    /// a wrong merge breaks first, and it needs no oracle outside the crate to state.
+    #[test]
+    fn a_dictionary_does_not_depend_on_the_order_its_keys_arrive_in((key_bits, keys) in keys()) {
+        let forwards = dict_of(key_bits, &keys);
+        let backwards = dict_of(key_bits, &keys.iter().rev().cloned().collect::<Vec<_>>());
+        prop_assert_eq!(
+            forwards.root().map(Cell::repr_hash),
+            backwards.root().map(Cell::repr_hash)
+        );
+    }
+
+    /// Every key stored reads back, and the walk yields them in ascending order.
+    #[test]
+    fn every_key_stored_reads_back_in_order((key_bits, keys) in keys()) {
+        let dict = dict_of(key_bits, &keys);
+        let mut sorted = keys.clone();
+        sorted.sort_unstable();
+        let walked: Vec<Vec<u8>> = dict.iter().map(|entry| entry.unwrap().0).collect();
+        prop_assert_eq!(walked, sorted);
+        for key in &keys {
+            let found = dict.get(key).unwrap().found().unwrap();
+            prop_assert_eq!(found.slice().unwrap().load_bytes(key.len()).unwrap(), key.clone());
+        }
+    }
+
+    /// Taking a key out leaves the dictionary the same keys would have built without it.
+    ///
+    /// A removal has to undo the split its insertion made, label and all. Comparing
+    /// against a dictionary built from the remaining keys is what says it did, since a
+    /// tree that merely read back correctly would pass any round trip.
+    #[test]
+    fn removing_a_key_leaves_the_dictionary_that_never_held_it((key_bits, keys) in keys()) {
+        for dropped in &keys {
+            let mut edited = dict_of(key_bits, &keys);
+            prop_assert!(edited.remove(dropped).unwrap());
+            let rest: Vec<Vec<u8>> = keys.iter().filter(|k| *k != dropped).cloned().collect();
+            let never = dict_of(key_bits, &rest);
+            prop_assert_eq!(
+                edited.root().map(Cell::repr_hash),
+                never.root().map(Cell::repr_hash)
+            );
+        }
+    }
+}

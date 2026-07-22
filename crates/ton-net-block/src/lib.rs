@@ -57,7 +57,6 @@ mod account;
 mod block;
 pub mod chain;
 mod coins;
-pub mod dict;
 mod error;
 pub mod proof;
 mod shard;
@@ -68,11 +67,14 @@ pub use account::{Account, AccountStatus};
 pub use block::{Block, BlockHeader};
 pub use chain::{verify_chain, ProvenBlock};
 pub use coins::Coins;
-pub use dict::Lookup;
 pub use error::BlockError;
 pub use proof::{verify_account, AccountRead};
 pub use shard::{McStateExtra, ShardAccountEntry, ShardDescr, ShardState};
 pub use validators::{Validator, ValidatorSet};
+
+/// How a dictionary lookup ended, re-exported from ton-net-cell because this crate's
+/// own reads answer with it.
+pub use ton_net_cell::Lookup;
 
 /// The block identity and proof-chain types [`verify_chain`] reads, re-exported from
 /// ton-net-tl so a caller need not name that crate to check a chain.

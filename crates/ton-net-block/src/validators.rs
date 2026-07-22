@@ -40,8 +40,8 @@
 use sha2::{Digest, Sha256};
 use ton_net_cell::{Cell, Slice};
 
-use crate::dict::{self, Lookup};
 use crate::error::BlockError;
+use ton_net_cell::{Dict, Lookup};
 
 /// The configuration parameter holding the current validator set.
 const CURRENT_VALIDATORS: i32 = 34;
@@ -102,7 +102,9 @@ impl ValidatorSet {
     /// the parameter or any descriptor in the subset, and
     /// [`BlockError::WrongConstructor`] if a tag is not what it should be.
     pub fn from_config(config: &Cell) -> Result<ValidatorSet, BlockError> {
-        let entry = match dict::lookup(config, 32, &CURRENT_VALIDATORS.to_be_bytes())? {
+        let entry = match Dict::from_root(Some(config.clone()), 32)?
+            .get(&CURRENT_VALIDATORS.to_be_bytes())?
+        {
             Lookup::Found(entry) => entry,
             Lookup::Absent => {
                 return Err(BlockError::Malformed(
@@ -153,10 +155,11 @@ impl ValidatorSet {
             s.load_ref()?
         };
 
+        let list_dict = Dict::from_root(Some(list.clone()), 16)?;
         let mut members = Vec::with_capacity(main as usize);
         let mut total_weight = 0u64;
         for index in 0..main {
-            let entry = match dict::lookup(list, 16, &index.to_be_bytes())? {
+            let entry = match list_dict.get(&index.to_be_bytes())? {
                 Lookup::Found(entry) => entry,
                 Lookup::Absent => {
                     return Err(BlockError::Malformed(

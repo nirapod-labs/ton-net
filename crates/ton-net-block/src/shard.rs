@@ -3,10 +3,9 @@
 
 //! The shard state, walked as far as one account or one shard binding.
 
-use ton_net_cell::{Cell, Slice};
+use ton_net_cell::{Cell, Dict, Lookup, Slice};
 
 use crate::coins::Coins;
-use crate::dict::{self, Lookup};
 use crate::error::BlockError;
 
 /// The constructor tag a shard state begins with.
@@ -144,7 +143,7 @@ impl ShardState {
         let Some(root) = slice.load_maybe_ref()? else {
             return Ok(Lookup::Absent);
         };
-        let entry = match dict::lookup(root, ACCOUNT_KEY_BITS, account_id)? {
+        let entry = match Dict::from_root(Some(root.clone()), ACCOUNT_KEY_BITS)?.get(account_id)? {
             Lookup::Found(entry) => entry,
             Lookup::Absent => return Ok(Lookup::Absent),
             Lookup::Pruned => return Ok(Lookup::Pruned),
@@ -297,7 +296,9 @@ impl McStateExtra {
         let Some(root) = slice.load_maybe_ref()? else {
             return Ok(Lookup::Absent);
         };
-        let entry = match dict::lookup(root, WORKCHAIN_KEY_BITS, &workchain.to_be_bytes())? {
+        let entry = match Dict::from_root(Some(root.clone()), WORKCHAIN_KEY_BITS)?
+            .get(&workchain.to_be_bytes())?
+        {
             Lookup::Found(entry) => entry,
             Lookup::Absent => return Ok(Lookup::Absent),
             Lookup::Pruned => return Ok(Lookup::Pruned),

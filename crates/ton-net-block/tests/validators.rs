@@ -13,7 +13,8 @@
 //! what makes this a check: an implementation compared against itself proves only that
 //! it is consistent.
 
-use ton_net_block::{dict, Block, BlockError, Lookup, ValidatorSet};
+use ton_net_block::{Block, BlockError, Lookup, ValidatorSet};
+use ton_net_cell::Dict;
 use ton_net_tl::{deserialize, lite};
 
 /// One forward link from the block the mainnet config pins.
@@ -275,12 +276,16 @@ fn a_config_proof_covers_only_the_parameter_it_answers_for() {
     let block = Block::from_proof(&link.config_proof, &link.from.root_hash).expect("it roots");
     let config = block.config().expect("a key block carries a configuration");
 
+    let params = Dict::from_root(Some(config.clone()), 32).expect("a 32-bit dictionary");
     assert!(matches!(
-        dict::lookup(&config, 32, &PREVIOUS_VALIDATORS.to_be_bytes()).expect("the lookup runs"),
+        params
+            .get(&PREVIOUS_VALIDATORS.to_be_bytes())
+            .expect("the lookup runs"),
         Lookup::Pruned
     ));
 
-    let entry = dict::lookup(&config, 32, &CURRENT_VALIDATORS.to_be_bytes())
+    let entry = params
+        .get(&CURRENT_VALIDATORS.to_be_bytes())
         .expect("the lookup runs")
         .found()
         .expect("the proof covers the parameter it was sent for");
