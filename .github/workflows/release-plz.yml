@@ -1,0 +1,103 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: 2026 Nirapod Labs
+
+# Opens the pull request that becomes a release, and tags the commit when it merges.
+#
+# This does not publish. Publishing is `release.yml`, on the tag this produces, and
+# the split is deliberate: the decision to release and the act of releasing are
+# reviewed separately, so a merge is what authorizes a publish rather than being one.
+#
+# What release-plz contributes is the bookkeeping nobody does reliably by hand: it
+# reads the conventional commits since the last tag, works out the version, writes it
+# into seven crate manifests and eight package files, and runs a semver check that
+# refuses a bump the public API does not admit. What it does not contribute is the
+# changelog, which release-plz.toml turns off with the reasoning: a generated entry
+# says "check a block proof chain" where a reader upgrading a verifier needs to know
+# whether they were exposed to anything.
+name: release-plz
+
+on:
+  push:
+    branches: [main]
+  # A release is a decision, and sometimes the decision is made without a commit to
+  # hang it on.
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+# The pull request and the tag are the whole output. `contents: write` is what
+# creates the tag; `pull-requests: write` is what opens the branch that carries the
+# version bump. Nothing here reaches a registry, so nothing here needs `id-token`.
+permissions:
+  contents: write
+  pull-requests: write
+
+# Two runs racing would open two release pull requests for the same commit range.
+concurrency:
+  group: release-plz-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release-pr:
+    # A fork has neither the token nor a reason to open a release on this repository.
+    if: github.repository == 'nirapod-labs/ton-net'
+    runs-on: ubuntu-latest
+    steps:
+      # release-plz compares against the last tag, so a shallow clone would make
+      # every release look like the first one.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
+        with:
+          toolchain: stable
+
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+
+      - uses: taiki-e/install-action@a6b2e2dcd845ddd7f509ce4f3ed3d922b80cc5d9 # v2.84.0
+        with:
+          tool: release-plz@0.3.166
+
+      # Opens or updates the release pull request. It carries the version bump and
+      # nothing else: release-plz.toml sets `dependencies_update = false` so a release
+      # diff stays a release rather than a dependency sweep.
+      - name: open the release pull request
+        run: release-plz release-pr --git-token "$GITHUB_TOKEN"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # Once the release pull request merges, the manifests carry a version the tags
+      # do not, and this closes that gap. `release.yml` wakes on the tag it pushes.
+      #
+      # The tag is cut here rather than by `release-plz release`, which also publishes:
+      # this job has no rights to mint a registry token and should not acquire any, and
+      # a tag standing without a publish is recoverable where the reverse is not.
+      # `git_release_enable` in release-plz.toml therefore governs a subcommand nothing
+      # runs; the GitHub release is created by `release.yml`, from the changelog.
+      #
+      # Idempotent because a push to main that is not a merged release is the common
+      # case: the tag either already exists or the version has not moved, and both
+      # mean there is nothing to do.
+      - name: tag a merged release
+        run: |
+          set -euo pipefail
+          version=$(node -p "require('./bindings/node/package.json').version")
+          if [ -z "$version" ]; then
+            echo "::error::no version in bindings/node/package.json"
+            exit 1
+          fi
+          if git rev-parse -q --verify "refs/tags/v$version" >/dev/null; then
+            echo "v$version is already tagged; nothing to release"
+            exit 0
+          fi
+          # check-versions.mjs is what proves this one string is the version in all
+          # seven crates and all eight packages. Tagging on a tree it rejects would
+          # publish a version that means something different in each manifest.
+          node scripts/check-versions.mjs
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "v$version" -m "ton-net v$version"
+          git push origin "v$version"
+          echo "tagged v$version"

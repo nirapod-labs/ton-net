@@ -74,8 +74,31 @@ branch:
    optional dependencies follow the bumped crates.
 3. Push. CI has to be green, including the version check and the publish dry-run.
 
-Merging the pull request tags the release and publishes the crates in dependency
-order.
+Merging the pull request tags the release. The tag is what publishes.
+
+## Which file does what
+
+Two workflows, split so that deciding to release and releasing are separate acts
+and a merge authorizes a publish rather than being one.
+
+- **`.github/workflows/release-plz.yml`** opens and updates the release pull
+  request on every push to `main`, and cuts the annotated tag once that pull
+  request has merged and the declared version is ahead of the tags. It reaches no
+  registry and holds no credential. The tag is cut with `git` rather than by
+  `release-plz release`, which would also publish; `git_release_enable` in
+  `release-plz.toml` therefore governs a subcommand nothing runs.
+- **`.github/workflows/release.yml`** wakes on the tag. It reruns the whole gate,
+  because a tag is not evidence that the commit under it ever had a full run and
+  crates.io yanks but never deletes. Then it publishes the six crates bottom up,
+  then the platform packages, then the main package, then writes the GitHub
+  release from the changelog section for that version. If the section is still
+  called `[Unreleased]` the job fails, which is the reminder to move the heading.
+
+Both publish jobs run in a GitHub environment named `release`, which is also what
+the trusted publishers are scoped to. Put a required reviewer on that environment:
+it means minting the OIDC token needs a person, so pushing a tag is not by itself
+enough to publish. That environment has to exist before the first automated run,
+and it is the one piece of setup neither workflow can do for itself.
 
 ## The npm side
 
