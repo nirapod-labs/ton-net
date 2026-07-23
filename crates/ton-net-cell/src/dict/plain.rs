@@ -3,9 +3,11 @@
 
 //! The plain `HashmapE n X`: a dictionary whose nodes hold only a label and a value.
 
+use core::borrow::Borrow;
+
 use super::{
-    check_key_bits, collapse, descend, key_of, leaf, lookup, rebuild, rest, split, walk_step,
-    DictEntry, Entry, Lookup, Pending, Shape,
+    check_key_bits, collapse, descend, key_of, leaf, lookup, rebuild, reroot, rest, split,
+    walk_step, DictEntry, Entry, Lookup, Pending, Shape,
 };
 use crate::builder::Builder;
 use crate::cell::Cell;
@@ -87,6 +89,44 @@ impl Dict {
     pub fn from_root(root: Option<Cell>, key_bits: u16) -> Result<Self, CellError> {
         check_key_bits(key_bits)?;
         Ok(Self { root, key_bits })
+    }
+
+    /// A dictionary holding every item, built in one call.
+    ///
+    /// Each item is a key and the value stored under it. A key given more than once keeps
+    /// the last value it was given, and the result is the one canonical dictionary for its
+    /// final key set: the same tree [`set`](Dict::set) builds one entry at a time, and the
+    /// same whatever order the items arrive in.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use ton_net_cell::{Builder, Dict};
+    ///
+    /// let mut value = Builder::new();
+    /// value.store_uint(1, 8)?;
+    /// let dict = Dict::from_items(32, [(1u32.to_be_bytes(), &value), (2u32.to_be_bytes(), &value)])?;
+    /// assert_eq!(dict.count()?, 2);
+    /// # Ok::<(), ton_net_cell::CellError>(())
+    /// ```
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CellError`] as [`set`](Dict::set) does for the first item whose key is too
+    /// short or whose label and value will not share one cell.
+    pub fn from_items<K, V>(
+        key_bits: u16,
+        items: impl IntoIterator<Item = (K, V)>,
+    ) -> Result<Self, CellError>
+    where
+        K: AsRef<[u8]>,
+        V: Borrow<Builder>,
+    {
+        let mut dict = Self::new(key_bits)?;
+        for (key, value) in items {
+            dict.set(key.as_ref(), value.borrow())?;
+        }
+        Ok(dict)
     }
 
     /// The root cell, or nothing when the dictionary is empty.
@@ -342,6 +382,49 @@ impl Dict {
         }
         Ok(())
     }
+
+    /// The sub-dictionary of every entry whose key begins with `prefix`.
+    ///
+    /// `prefix` is read as its first `prefix_bits` bits, most significant bit of the first
+    /// byte first. The result is a dictionary over the remaining `key_bits - prefix_bits`
+    /// bits of the key, holding each matching entry under its key with the prefix taken off,
+    /// and it is the one canonical dictionary for that narrower key set. A prefix no key
+    /// begins with gives an empty dictionary.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use ton_net_cell::{Builder, Dict};
+    ///
+    /// let mut value = Builder::new();
+    /// value.store_uint(1, 8)?;
+    /// let dict = Dict::from_items(16, [(0xab01u16.to_be_bytes(), &value), (0x1234u16.to_be_bytes(), &value)])?;
+    /// let under_ab = dict.subdict(&[0xab], 8)?;
+    /// assert_eq!(under_ab.key_bits(), 8);
+    /// assert_eq!(under_ab.count()?, 1);
+    /// # Ok::<(), ton_net_cell::CellError>(())
+    /// ```
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CellError::Malformed`] if `prefix_bits` is wider than the key,
+    /// [`CellError::KeyLength`] if `prefix` is too short to hold `prefix_bits`,
+    /// [`CellError::Pruned`] if reaching the sub-dictionary would cross a branch a proof has
+    /// pruned away, or [`CellError`] if the tree does not read as a dictionary.
+    pub fn subdict(&self, prefix: &[u8], prefix_bits: u16) -> Result<Self, CellError> {
+        if prefix_bits > self.key_bits {
+            return Err(CellError::Malformed("dictionary prefix wider than the key"));
+        }
+        let want = key_of(prefix, prefix_bits)?;
+        let narrower = self.key_bits - prefix_bits;
+        match self.root.clone() {
+            Some(root) => match reroot(&root, self.key_bits, &want)? {
+                Some(cell) => Self::from_root(Some(cell), narrower),
+                None => Self::new(narrower),
+            },
+            None => Self::new(narrower),
+        }
+    }
 }
 
 impl IntoIterator for &Dict {
@@ -490,6 +573,158 @@ mod tests {
         assert!(matches!(
             dict.get(&1u32.to_be_bytes()).expect("get"),
             Lookup::Absent
+        ));
+    }
+
+    /// The key and its own low byte as a value, ready for [`Dict::from_items`].
+    fn items(keys: &[u32]) -> Vec<([u8; 4], Builder)> {
+        keys.iter()
+            .map(|&k| (k.to_be_bytes(), value(u64::from(k & 0xff))))
+            .collect()
+    }
+
+    #[test]
+    fn from_items_builds_the_canonical_dictionary_in_one_call() {
+        // The bulk build must land on the same tree the one-at-a-time path does, which is
+        // the only tree the key set has.
+        let bulk = Dict::from_items(32, items(&[1, 5, 9, 2, 7, 200])).expect("from_items");
+        let mut one_at_a_time = Dict::new(32).expect("a dictionary");
+        for (key, value) in items(&[1, 5, 9, 2, 7, 200]) {
+            one_at_a_time.set(&key, &value).expect("set");
+        }
+        assert_eq!(
+            bulk.root().map(Cell::repr_hash),
+            one_at_a_time.root().map(Cell::repr_hash),
+        );
+    }
+
+    #[test]
+    fn from_items_keeps_the_last_value_given_for_a_key() {
+        let repeated = [
+            (7u32.to_be_bytes(), value(1)),
+            (7u32.to_be_bytes(), value(2)),
+            (7u32.to_be_bytes(), value(3)),
+        ];
+        let dict = Dict::from_items(32, repeated).expect("from_items");
+        let Lookup::Found(entry) = dict.get(&7u32.to_be_bytes()).expect("get") else {
+            panic!("the key is there")
+        };
+        assert_eq!(
+            entry.slice().expect("reads").load_uint(8).expect("value"),
+            3
+        );
+        assert_eq!(dict.count().expect("count"), 1);
+    }
+
+    #[test]
+    fn from_items_does_not_depend_on_the_order_items_arrive() {
+        let forward = Dict::from_items(32, items(&[1, 2, 3, 100, 200, 255])).expect("forward");
+        let mut reversed = items(&[1, 2, 3, 100, 200, 255]);
+        reversed.reverse();
+        let backward = Dict::from_items(32, reversed).expect("backward");
+        assert_eq!(
+            forward.root().map(Cell::repr_hash),
+            backward.root().map(Cell::repr_hash),
+        );
+    }
+
+    #[test]
+    fn from_items_over_nothing_is_an_empty_dictionary() {
+        let none: [([u8; 4], Builder); 0] = [];
+        assert!(Dict::from_items(32, none).expect("from_items").is_empty());
+    }
+
+    #[test]
+    fn subdict_holds_the_entries_under_a_prefix_with_it_removed() {
+        // Sixteen-bit keys carved on the high byte: only those sharing it survive, and each
+        // keeps its low byte as its new key.
+        let keys: [u16; 6] = [0xab00, 0xab01, 0xabff, 0x1234, 0xab7f, 0x0001];
+        let entries: Vec<([u8; 2], Builder)> = keys
+            .iter()
+            .map(|&k| (k.to_be_bytes(), value(u64::from(k & 0xff))))
+            .collect();
+        let dict = Dict::from_items(16, entries).expect("dict");
+
+        let under_ab = dict.subdict(&[0xab], 8).expect("subdict");
+        assert_eq!(under_ab.key_bits(), 8);
+        let carved: Vec<u8> = under_ab
+            .iter()
+            .map(|entry| entry.expect("an entry").0[0])
+            .collect();
+        assert_eq!(carved, vec![0x00, 0x01, 0x7f, 0xff]);
+    }
+
+    #[test]
+    fn subdict_of_no_prefix_is_the_whole_dictionary() {
+        let dict = dict_of(&[1, 2, 3, 100]);
+        let same = dict.subdict(&[], 0).expect("subdict");
+        assert_eq!(same.key_bits(), 32);
+        assert_eq!(
+            same.root().map(Cell::repr_hash),
+            dict.root().map(Cell::repr_hash),
+        );
+    }
+
+    #[test]
+    fn subdict_of_a_prefix_no_key_has_is_empty() {
+        let dict = Dict::from_items(
+            16,
+            [
+                (0x1234u16.to_be_bytes(), value(1)),
+                (0x12ffu16.to_be_bytes(), value(2)),
+            ],
+        )
+        .expect("dict");
+        assert!(dict.subdict(&[0xaa], 8).expect("subdict").is_empty());
+    }
+
+    #[test]
+    fn subdict_by_the_whole_key_is_the_single_entry_under_it() {
+        let dict = dict_of(&[7, 8, 9]);
+        let only = dict.subdict(&7u32.to_be_bytes(), 32).expect("subdict");
+        assert_eq!(only.key_bits(), 0);
+        // A zero-bit dictionary holds one entry, reached by the empty key.
+        let Lookup::Found(entry) = only.get(&[]).expect("get") else {
+            panic!("the entry is there")
+        };
+        assert_eq!(
+            entry.slice().expect("reads").load_uint(8).expect("value"),
+            7
+        );
+    }
+
+    #[test]
+    fn a_carved_sub_dictionary_is_the_one_a_fresh_build_gives() {
+        // Carving rewrites the top edge's label under the narrower key. Written any other
+        // way it would read back the same and hash differently, so a fresh build over the
+        // stripped keys is the oracle the re-labelling has to reproduce.
+        let keys: [u16; 7] = [0xab00, 0xab01, 0xab80, 0xabff, 0xab7f, 0xab02, 0xabfe];
+        let wide: Vec<([u8; 2], Builder)> = keys
+            .iter()
+            .map(|&k| (k.to_be_bytes(), value(u64::from(k & 0xff))))
+            .collect();
+        let sub = Dict::from_items(16, wide)
+            .expect("dict")
+            .subdict(&[0xab], 8)
+            .expect("subdict");
+
+        let narrow: Vec<([u8; 1], Builder)> = keys
+            .iter()
+            .map(|&k| ([(k & 0xff) as u8], value(u64::from(k & 0xff))))
+            .collect();
+        let fresh = Dict::from_items(8, narrow).expect("fresh");
+
+        assert_eq!(
+            sub.root().map(Cell::repr_hash),
+            fresh.root().map(Cell::repr_hash),
+        );
+    }
+
+    #[test]
+    fn a_prefix_wider_than_the_key_is_refused() {
+        assert!(matches!(
+            dict_of(&[1]).subdict(&[0; 5], 33),
+            Err(CellError::Malformed(_))
         ));
     }
 }

@@ -460,6 +460,75 @@ fn rebuild<S: Shape>(shape: &S, mut path: Vec<Step>, mut child: Cell) -> Result<
     Ok(child)
 }
 
+/// Re-roots at the subtree every key beginning with `want` lives under.
+///
+/// Walks down spending `want` a bit at a time. Where it runs out exactly at a node's edge,
+/// that node already carries the right label under the right width and stands as the new
+/// root unchanged. Where it runs out partway along a label, the node is rewritten with what
+/// is left of that label under the narrower key the sub-dictionary spends; everything the
+/// node held below is carried over untouched, so an augmented fork's summary still describes
+/// the same subtree. A prefix that parts from the tree has no key under it, which is `None`.
+/// A prefix that runs into a pruned branch cannot be followed, which is an error.
+///
+/// It is written over the cells rather than over a [`Shape`] because it neither reads nor
+/// recomputes a summary: the subtree beneath the new root does not change, so whatever
+/// summary it carried is still the one it should.
+fn reroot(root: &Cell, key_bits: u16, want: &[bool]) -> Result<Option<Cell>, CellError> {
+    let mut node = root.clone();
+    let mut remaining = key_bits;
+    let mut matched = 0usize;
+
+    loop {
+        if node.is_exotic() {
+            return Err(CellError::Pruned);
+        }
+        let ahead = rest(want, matched);
+        if ahead.is_empty() {
+            // The prefix is spent at this node's edge, so the node is the new root as it
+            // stands: its label is already written under the key the sub-dictionary spends.
+            return Ok(Some(node));
+        }
+
+        let mut slice = node.parse();
+        let label = read_label(&mut slice, remaining)?;
+        let len = label.len();
+        if diverges(&label, ahead).is_some() {
+            return Ok(None);
+        }
+
+        if ahead.len() <= len {
+            // The prefix ends inside this label. What is left of the label becomes the new
+            // root's, under the narrower key, and the node's contents come over as they are;
+            // store_slice takes both the bits and the references still ahead of the cursor.
+            #[allow(
+                clippy::cast_possible_truncation,
+                reason = "ahead.len() <= len and read_label bounds len to at most remaining, a u16, so ahead.len() fits a u16 and remaining - it does not underflow"
+            )]
+            let new_max = remaining - ahead.len() as u16;
+            let mut fresh = Builder::new();
+            store_label(&mut fresh, rest(&label, ahead.len()), new_max)?;
+            fresh.store_slice(slice)?;
+            return Ok(Some(fresh.build()?));
+        }
+
+        // The prefix reaches past this label. A leaf holds nothing past it, so a prefix that
+        // long names no key; otherwise the next prefix bit picks the branch to follow.
+        if len == usize::from(remaining) {
+            return Ok(None);
+        }
+        matched += len;
+        let branch = usize::from(rest(want, matched).first().copied().unwrap_or(false));
+        matched += 1;
+        node = node.reference(branch).ok_or(NO_BRANCH)?.clone();
+        #[allow(
+            clippy::cast_possible_truncation,
+            reason = "the len == remaining case returned above, so len < remaining <= u16::MAX and len fits a u16 with room for the branch bit"
+        )]
+        let spent = len as u16;
+        remaining -= spent + 1;
+    }
+}
+
 /// A node a walk has still to visit: the node, the key bits spelled out above it, and the
 /// bits still to spend at it.
 type Pending = (Cell, Vec<bool>, u16);

@@ -436,6 +436,82 @@ fn an_augmented_dictionary_is_read_but_not_rewritten() {
     assert!(found.found().is_some());
 }
 
+#[test]
+fn a_dictionary_rebuilt_through_from_items_keeps_its_root_hash() {
+    // from_items is the one-call path to the same canonical tree Set builds a key at a time.
+    // Feeding a mainnet dictionary its own entries has to reproduce the hash the network
+    // computed, in either order, the same oracle the one-at-a-time rebuild answers to.
+    let mut rebuilt = 0usize;
+    for sample in samples() {
+        let dict = Dict::from_root(Some(sample.root.clone()), sample.key_bits).expect("a root");
+        let Ok(entries) = dict.iter().collect::<Result<Vec<_>, _>>() else {
+            continue;
+        };
+        for reversed in [false, true] {
+            let ordered: Vec<_> = if reversed {
+                entries.iter().rev().collect()
+            } else {
+                entries.iter().collect()
+            };
+            let mut items: Vec<(Vec<u8>, Builder)> = Vec::new();
+            for (key, entry) in ordered {
+                let value = entry.slice().expect("the leaf reads").to_builder().unwrap();
+                items.push((key.clone(), value));
+            }
+            let fresh = Dict::from_items(sample.key_bits, items).expect("from_items");
+            assert_eq!(
+                fresh.root().map(Cell::repr_hash),
+                Some(sample.root.repr_hash()),
+                "{} did not rebuild through from_items to its own root hash",
+                sample.what
+            );
+        }
+        rebuilt += 1;
+    }
+    assert!(rebuilt > 0, "no dictionary was complete enough to rebuild");
+}
+
+#[test]
+fn a_sub_dictionary_carved_from_mainnet_is_the_one_a_fresh_build_gives() {
+    // Carving relabels the top edge under a key one byte narrower. A label written any other
+    // way reads back the same and hashes differently, so a fresh build over the stripped
+    // keys is the oracle the re-labelling has to reproduce.
+    let mut carved = 0usize;
+    for sample in samples() {
+        if sample.key_bits <= 8 {
+            continue;
+        }
+        let dict = Dict::from_root(Some(sample.root.clone()), sample.key_bits).expect("a root");
+        let Ok(entries) = dict.iter().collect::<Result<Vec<_>, _>>() else {
+            continue;
+        };
+        let Some((first_key, _)) = entries.first() else {
+            continue;
+        };
+        let lead = first_key[0];
+        let narrower = sample.key_bits - 8;
+
+        let mut items: Vec<(Vec<u8>, Builder)> = Vec::new();
+        for (key, entry) in &entries {
+            if key[0] == lead {
+                let value = entry.slice().expect("the leaf reads").to_builder().unwrap();
+                items.push((key[1..].to_vec(), value));
+            }
+        }
+        let fresh = Dict::from_items(narrower, items).expect("fresh");
+        let sub = dict.subdict(&[lead], 8).expect("subdict");
+        assert_eq!(sub.key_bits(), narrower);
+        assert_eq!(
+            sub.root().map(Cell::repr_hash),
+            fresh.root().map(Cell::repr_hash),
+            "{}: a carved sub-dictionary is not the one a fresh build gives",
+            sample.what
+        );
+        carved += 1;
+    }
+    assert!(carved > 0, "no dictionary was complete enough to carve");
+}
+
 // ---------------------------------------------------------------------------
 // Fixtures
 // ---------------------------------------------------------------------------
