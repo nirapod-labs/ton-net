@@ -43,5 +43,9 @@ proptest.workspace = true
 name = "cells"
 harness = false
 
+[[bench]]
+name = "dict"
+harness = false
+
 [lints]
 workspace = true
