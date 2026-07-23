@@ -26,6 +26,7 @@ use crate::slice::Slice;
 mod aug;
 mod label;
 mod plain;
+mod typed;
 
 pub use aug::{AugDict, AugDictIter, AugEntry, Augmentation};
 pub use plain::{Dict, DictIter};
