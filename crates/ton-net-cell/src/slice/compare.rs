@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileCopyrightText: 2026 Nirapod Labs
 
-//! Comparing the bits two slices have left to read.
+//! Inspecting the bits a slice has left to read.
 //!
 //! A comparison reads from each slice's current position to its end, so two cursors that
 //! have already read a differing prefix compare by what remains rather than by the whole
-//! cell. Neither slice is advanced; the comparison works on copies.
+//! cell. A run of one bit value at either end is counted the same way, over the remaining
+//! window rather than the whole cell. None of this advances a cursor; the work is done on
+//! a copy or by reading the underlying data in place.
 
 use std::cmp::Ordering;
 
@@ -37,6 +39,36 @@ impl Slice<'_> {
                 (Err(_), Err(_)) => return Ordering::Equal,
             }
         }
+    }
+
+    /// Counts the run of `bit` at the front of what is left, without advancing.
+    ///
+    /// The count stops at the first bit that differs or at the end of the slice, so it is
+    /// how many times [`load_bit`](Slice::load_bit) would return `bit` before returning
+    /// anything else. A dictionary label reads its own `hml_same` run this way.
+    #[must_use]
+    pub fn count_leading(&self, bit: bool) -> usize {
+        let mut probe = self.clone();
+        let mut run = 0;
+        while matches!(probe.load_bit(), Ok(seen) if seen == bit) {
+            run += 1;
+        }
+        run
+    }
+
+    /// Counts the run of `bit` at the back of what is left, without advancing.
+    ///
+    /// The count is measured from the last remaining bit toward the cursor and stops at the
+    /// first bit that differs, so it never counts bits already read.
+    #[must_use]
+    pub fn count_trailing(&self, bit: bool) -> usize {
+        let data = self.cell.data();
+        let remaining = self.remaining_bits();
+        let mut run = 0;
+        while run < remaining && super::bit_at(data, self.bit + remaining - 1 - run) == bit {
+            run += 1;
+        }
+        run
     }
 }
 
@@ -88,5 +120,49 @@ mod tests {
         here.load_bit().expect("skip the differing bit");
         there.load_bit().expect("skip the differing bit");
         assert!(here.bits_equal(&there), "what remains is the same");
+    }
+
+    #[test]
+    fn a_leading_run_is_counted_up_to_the_first_differing_bit() {
+        let cell = cell_of_bits(&[true, true, true, false, true, false, false]);
+        let slice = cell.parse();
+        assert_eq!(slice.count_leading(true), 3);
+        assert_eq!(slice.count_leading(false), 0);
+    }
+
+    #[test]
+    fn a_trailing_run_is_counted_from_the_last_bit_back() {
+        let cell = cell_of_bits(&[true, true, true, false, true, false, false]);
+        let slice = cell.parse();
+        assert_eq!(slice.count_trailing(false), 2);
+        assert_eq!(slice.count_trailing(true), 0);
+    }
+
+    #[test]
+    fn a_count_measures_only_what_is_left() {
+        let cell = cell_of_bits(&[true, true, true, false, true, false, false]);
+        let mut slice = cell.parse();
+        slice.skip_bits(4).expect("four bits are there"); // leaves [true, false, false]
+        assert_eq!(slice.count_leading(true), 1);
+        assert_eq!(slice.count_trailing(false), 2);
+    }
+
+    #[test]
+    fn an_all_same_run_counts_the_whole_remainder() {
+        let cell = cell_of_bits(&[false, false, false, false]);
+        let slice = cell.parse();
+        assert_eq!(slice.count_leading(false), 4);
+        assert_eq!(slice.count_trailing(false), 4);
+    }
+
+    #[test]
+    fn a_spent_slice_counts_nothing() {
+        let cell = cell_of_bits(&[true, false]);
+        let mut slice = cell.parse();
+        slice.skip_bits(2).expect("two bits are there");
+        assert_eq!(slice.count_leading(true), 0);
+        assert_eq!(slice.count_leading(false), 0);
+        assert_eq!(slice.count_trailing(true), 0);
+        assert_eq!(slice.count_trailing(false), 0);
     }
 }
