@@ -397,6 +397,18 @@ impl Cell {
         crate::boc::serialize_boc(std::slice::from_ref(self))
     }
 
+    /// Opens a builder holding a copy of this cell's bits and references.
+    ///
+    /// A cell is immutable, so this is the way to change one: read it into a builder, add to
+    /// it or rebuild from it, and [`build`](crate::Builder::build) a new cell.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CellError`] if the bits or references do not fit a builder.
+    pub fn to_builder(&self) -> Result<crate::Builder, CellError> {
+        self.parse().to_builder()
+    }
+
     /// The two descriptor bytes as a bag of cells stores them.
     ///
     /// These carry the whole level mask, unlike the descriptors inside a representation
@@ -532,6 +544,14 @@ impl PartialEq for Cell {
 
 impl Eq for Cell {}
 
+impl std::hash::Hash for Cell {
+    /// A cell hashes by its [`repr_hash`](Cell::repr_hash), the identity
+    /// [`eq`](Cell::eq) compares, so equal cells share a bucket and a cell can key a map.
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.repr_hash().hash(state);
+    }
+}
+
 impl fmt::Debug for Cell {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Cell")
@@ -556,6 +576,37 @@ fn hex(bytes: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::Builder;
+
+    /// A one-byte ordinary cell holding `byte`.
+    fn cell_of(byte: u64) -> Cell {
+        let mut builder = Builder::new();
+        builder.store_uint(byte, 8).expect("a byte fits");
+        builder.build().expect("well formed")
+    }
+
+    #[test]
+    fn equal_cells_share_a_hash_key() {
+        use std::collections::HashSet;
+        let mut set = HashSet::new();
+        set.insert(cell_of(0xAB));
+        assert!(
+            set.contains(&cell_of(0xAB)),
+            "an equal cell is the same key"
+        );
+        assert!(!set.contains(&cell_of(0xCD)), "a different cell is not");
+    }
+
+    #[test]
+    fn a_cell_returns_to_a_builder() {
+        let cell = cell_of(0xAB);
+        let rebuilt = cell
+            .to_builder()
+            .expect("to a builder")
+            .build()
+            .expect("well formed");
+        assert_eq!(rebuilt.repr_hash(), cell.repr_hash());
+    }
 
     #[test]
     fn tags_round_trip_for_every_exotic_kind() {
