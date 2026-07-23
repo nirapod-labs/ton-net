@@ -380,6 +380,25 @@ fn a_carved_accounts_sub_dictionary_stays_consistent_and_canonical() {
     );
 }
 
+#[test]
+fn combining_two_halves_of_the_accounts_dictionary_rebuilds_the_validators_hash() {
+    // Split the eleven entries into two dictionaries and combine them back. The union has to
+    // land on the same canonical tree the validators wrote, summaries and all, which is the
+    // hash the block was served under.
+    let real = AugDict::from_root(SumCurrencies, Some(account_blocks()), ACCOUNT_KEY_BITS).unwrap();
+    let all = entries(&real);
+    let mid = all.len() / 2;
+
+    let mut left =
+        AugDict::from_items(SumCurrencies, ACCOUNT_KEY_BITS, all[..mid].iter().cloned()).unwrap();
+    let right =
+        AugDict::from_items(SumCurrencies, ACCOUNT_KEY_BITS, all[mid..].iter().cloned()).unwrap();
+    left.combine_with(&right).unwrap();
+
+    assert_eq!(hex(left.root().unwrap().repr_hash()), ACCOUNT_BLOCKS_ROOT);
+    assert_eq!(left.root_extra().unwrap().unwrap().grams, TOTAL_GRAMS);
+}
+
 /// Each `AccountBlock`, as the transactions edge it carries and the summary above it.
 fn transaction_edges() -> Vec<(Cell, Currencies)> {
     let real = AugDict::from_root(SumCurrencies, Some(account_blocks()), ACCOUNT_KEY_BITS).unwrap();

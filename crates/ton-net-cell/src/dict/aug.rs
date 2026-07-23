@@ -544,6 +544,52 @@ impl<A: Augmentation> AugDict<A> {
         };
         Self::from_root(self.aug.clone(), root, narrower)
     }
+
+    /// Merges `other` into this dictionary, recomputing every summary the union changes.
+    ///
+    /// The two must be over the same key width and hold disjoint keys; a key in both is a
+    /// conflict this cannot resolve, so it is refused rather than one value chosen over the
+    /// other. The result is the one canonical dictionary for the union of the two key sets,
+    /// summaries and all. Nothing is changed unless the whole merge succeeds.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CellError::Malformed`] if the key widths differ or the two share a key,
+    /// [`CellError::Pruned`] if either side hides part of itself behind a pruned branch, or
+    /// a [`CellError`] as [`set`](AugDict::set) does. Whatever [`Augmentation::combine`]
+    /// reports is returned as it stands.
+    pub fn combine_with(&mut self, other: &Self) -> Result<(), CellError>
+    where
+        A: Clone,
+    {
+        if other.key_bits != self.key_bits {
+            return Err(CellError::Malformed(
+                "combining dictionaries of different key widths",
+            ));
+        }
+
+        // The other side is read whole, and every key checked against this one, before this
+        // dictionary is touched, so a conflict or a pruned branch is found before any change.
+        let mut additions = Vec::new();
+        for item in other {
+            let (key, found) = item?;
+            if !matches!(self.get(&key)?, Lookup::Absent) {
+                return Err(CellError::Malformed(
+                    "combining dictionaries that share a key",
+                ));
+            }
+            let value = found.entry.slice()?.to_builder()?;
+            additions.push((key, found.extra, value));
+        }
+
+        // Built into a copy so a store that fails leaves this dictionary as it was.
+        let mut merged = self.clone();
+        for (key, extra, value) in &additions {
+            merged.set(key, extra, value)?;
+        }
+        *self = merged;
+        Ok(())
+    }
 }
 
 impl<'a, A: Augmentation> IntoIterator for &'a AugDict<A> {
@@ -744,5 +790,37 @@ mod tests {
         assert_eq!(sub.root_extra().expect("extra"), Some(3));
         sub.validate()
             .expect("a carved augmented dictionary still sums");
+    }
+
+    #[test]
+    fn combining_two_halves_rebuilds_the_whole() {
+        let whole = counted(&[1, 2, 3, 100, 200]);
+        let mut left = counted(&[1, 2, 3]);
+        left.combine_with(&counted(&[100, 200]))
+            .expect("disjoint keys combine");
+        assert_eq!(
+            left.root().map(Cell::repr_hash),
+            whole.root().map(Cell::repr_hash),
+        );
+        assert_eq!(left.root_extra().expect("extra"), Some(5));
+    }
+
+    #[test]
+    fn combining_dictionaries_that_share_a_key_is_refused_and_changes_nothing() {
+        let mut dict = counted(&[1, 2]);
+        assert!(matches!(
+            dict.combine_with(&counted(&[2, 3])),
+            Err(CellError::Malformed(_))
+        ));
+        assert_eq!(dict.count().expect("count"), 2, "the refused combine held");
+    }
+
+    #[test]
+    fn combining_with_an_empty_dictionary_changes_nothing() {
+        let mut dict = counted(&[1, 2, 3]);
+        let before = dict.root().expect("not empty").repr_hash().to_owned();
+        dict.combine_with(&AugDict::new(CountSum, 32).expect("empty"))
+            .expect("an empty side combines");
+        assert_eq!(dict.root().expect("not empty").repr_hash(), &before);
     }
 }
