@@ -27,7 +27,7 @@ mod virtualize;
 
 pub use proof::create_proof;
 pub use update::{apply_update, combine_updates, create_update, may_apply, validate_update};
-pub use virtualize::virtualize;
+pub use virtualize::{is_virtualized, rebuild_with_refs, virtualize};
 
 use crate::builder::Builder;
 use crate::cell::{Cell, CellType};

@@ -9,6 +9,7 @@
 //! proof to that copy is virtualization: taking the content and requiring the proof's stored
 //! hash and depth to be the ones that content gives.
 
+use crate::builder::Builder;
 use crate::cell::{Cell, CellType};
 use crate::error::CellError;
 
@@ -71,10 +72,51 @@ pub fn virtualize(proof: &Cell) -> Result<Cell, CellError> {
     Ok(content.clone())
 }
 
+/// Whether `cell` stands above level zero, the mark a proof leaves on what it covers.
+///
+/// A plain tree of ordinary cells is significant only at level zero, so its level is zero.
+/// A tree that carries a pruned branch or a Merkle cell stands one level higher, since
+/// reading it in full means resolving what those stand for. This reports that raised level,
+/// which is how a caller tells a subtree it can read whole from one that a proof left
+/// standing in for the rest.
+#[must_use]
+pub fn is_virtualized(cell: &Cell) -> bool {
+    cell.level() > 0
+}
+
+/// Rebuilds an ordinary `cell` over `refs` in place of its own references, keeping its data.
+///
+/// This is the join a tree transform leans on: rewrite a node's children, virtualized or
+/// otherwise, then stand the node back up over them with its bits unchanged so its shape is
+/// the same and only its references are new. The cell has to be ordinary, since an exotic
+/// cell's meaning is fixed by the hashes it carries and cannot take arbitrary children.
+///
+/// # Errors
+///
+/// Returns [`CellError::Malformed`] if `cell` is exotic, or a [`CellError`] if the parts do
+/// not form a cell, which for more than four references is [`CellError::NoRoomForRefs`].
+pub fn rebuild_with_refs(cell: &Cell, refs: &[Cell]) -> Result<Cell, CellError> {
+    if cell.is_exotic() {
+        return Err(CellError::Malformed(
+            "only an ordinary cell rebuilds with new references",
+        ));
+    }
+    let mut builder = Builder::new();
+    let mut bits = cell.parse();
+    for _ in 0..cell.bit_len() {
+        builder.store_bit(bits.load_bit()?)?;
+    }
+    for child in refs {
+        builder.store_ref(child.clone())?;
+    }
+    builder.build()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::builder::Builder;
+    use crate::UsageTree;
 
     /// A Merkle proof cell over `content`, claiming `hash` and `depth` for the tree it
     /// stands for.
@@ -102,6 +144,16 @@ mod tests {
         let mut builder = Builder::new();
         builder.store_uint(byte, 8).expect("a byte fits");
         builder.build().expect("a leaf is well formed")
+    }
+
+    /// An ordinary cell holding `byte` and the given children.
+    fn node(byte: u64, children: &[&Cell]) -> Cell {
+        let mut builder = Builder::new();
+        builder.store_uint(byte, 8).expect("a byte fits");
+        for &child in children {
+            builder.store_ref(child.clone()).expect("a reference fits");
+        }
+        builder.build().expect("a node is well formed")
     }
 
     #[test]
@@ -146,6 +198,66 @@ mod tests {
             virtualize(&forged),
             Err(CellError::Malformed(
                 "merkle proof depth does not match its content"
+            ))
+        );
+    }
+
+    #[test]
+    fn a_plain_tree_is_not_virtualized_but_a_pruned_one_is() {
+        assert!(
+            !is_virtualized(&leaf(0xab)),
+            "a plain leaf stands at level zero"
+        );
+
+        // Pruning a branch away leaves the tree standing one level up.
+        let kept = leaf(0x11);
+        let root = node(0xaa, &[&kept, &leaf(0x22)]);
+        let mut usage = UsageTree::new(root);
+        usage.mark(&kept);
+        let skeleton = usage.prune().expect("the skeleton builds");
+        assert!(
+            is_virtualized(&skeleton),
+            "a pruned branch raises the level"
+        );
+    }
+
+    #[test]
+    fn rebuilding_with_the_same_refs_reproduces_the_cell() {
+        let one = leaf(0x11);
+        let two = leaf(0x22);
+        let original = node(0xaa, &[&one, &two]);
+        let same = rebuild_with_refs(&original, &[one, two]).expect("rebuilds");
+        assert_eq!(same.repr_hash(), original.repr_hash());
+    }
+
+    #[test]
+    fn rebuilding_with_new_refs_swaps_the_children() {
+        let original = node(0xaa, &[&leaf(0x11)]);
+        let replacement = leaf(0x99);
+        let rebuilt =
+            rebuild_with_refs(&original, std::slice::from_ref(&replacement)).expect("rebuilds");
+        assert_eq!(rebuilt.data(), original.data(), "the bits are unchanged");
+        assert_eq!(
+            rebuilt
+                .reference(0)
+                .expect("one child is there")
+                .repr_hash(),
+            replacement.repr_hash(),
+            "the child is the new one",
+        );
+        assert_ne!(rebuilt.repr_hash(), original.repr_hash());
+    }
+
+    #[test]
+    fn an_exotic_cell_does_not_rebuild_with_new_refs() {
+        // A Merkle proof's meaning is the hashes it carries, so it cannot take arbitrary
+        // children.
+        let content = leaf(0xab);
+        let proof = merkle_over(&content, content.hash(), content.depth());
+        assert_eq!(
+            rebuild_with_refs(&proof, &[]),
+            Err(CellError::Malformed(
+                "only an ordinary cell rebuilds with new references"
             ))
         );
     }
