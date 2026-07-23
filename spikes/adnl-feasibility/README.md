@@ -7,7 +7,7 @@ every byte directly rather than through an ADNL library.
 It checks the client's lowest layer against a live server: the TL constructor
 tags, the x25519 handshake and key derivation, the AES-256-CTR stream framing,
 and the liteserver query wrapper. The crate lines match
-[NET-ADR-003](../../docs/adr/NET-ADR-003-dependencies.md); the wire layout
+[NET-ADR-004](../../docs/adr/NET-ADR-004-dependencies.md); the wire layout
 follows [docs/protocol/wire-format.md](../../docs/protocol/wire-format.md).
 
 ## Run

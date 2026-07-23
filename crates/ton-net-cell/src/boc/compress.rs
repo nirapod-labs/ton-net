@@ -11,7 +11,7 @@
 //! The decode side is on the untrusted boundary. A compressed bag names the length it
 //! expands to, and [`decompress`] refuses a length past a hard cap before anything is
 //! allocated, so a small hostile input cannot drive a large allocation. The expansion runs
-//! on `lz4_flex`'s bounds-checked safe-decode path (NET-ADR-012).
+//! on `lz4_flex`'s bounds-checked safe-decode path (NET-ADR-010).
 //!
 //! Gated behind the `compress` feature.
 

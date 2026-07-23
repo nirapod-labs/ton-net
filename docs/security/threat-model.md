@@ -3,178 +3,352 @@ SPDX-License-Identifier: Apache-2.0
 SPDX-FileCopyrightText: 2026 Nirapod Labs
 -->
 
-# Threat model
+# ton-net threat model
 
-What an attacker controls at each boundary this library crosses, what the code
-refuses, and what it does not. The README states the conclusion in two
-paragraphs; this is the working out, so that a claim can be checked against the
-function that makes it true rather than believed.
+ton-net talks to a TON liteserver it does not trust and returns chain state a
+program can act on. This document names the adversary, states what is being
+protected, and points at the code that protects it. Every claim here names the
+file that enforces it, and the trust properties it rests on are fixed in
+NET-ADR-003, NET-ADR-005, and NET-ADR-006, above the custody position of
+NET-ADR-001.
 
-The scope is what ton-net does today: reading TON through a liteserver. Sending
-is not in it, because the library does not sign or broadcast anything, so there
-is no key to steal here and no transaction to alter.
+## The adversary and the asset
 
-## The attacker
+The adversary is the server, and anyone on the wire. A client speaks to a
+liteserver over ADNL. That server is untrusted by design: it can answer falsely,
+answer slowly, withhold an answer, replay an old one, or pad a real one with
+junk. Anyone able to read or rewrite bytes on the network path has no more power
+than the server, and the reason is structural rather than a matter of transport
+hardening. Trust in this library rests on validator signatures over blocks and on
+one pinned anchor, never on the identity of the peer that delivered the bytes. A
+machine in the middle that rewrites every packet is still, to the verifier, a
+server whose answers are checked or refused. The ADNL framing reduces on-path
+tampering to that same case: a flipped byte fails the per-frame checksum, and a
+desynchronized stream fails the length check, both as a `FrameError` that ends
+the call rather than as data (`crates/ton-net-adnl/src/frame.rs`).
 
-**A liteserver is assumed hostile.** Not distrusted as a precaution: hostile as
-the design case. Anyone can run one, the bundled configuration lists eighteen
-operated by people this project has never met, and a client picks whichever
-answers. Every guarantee below has to survive a server that answers with
-whatever it likes.
+The asset is the correctness of what the client believes. The library holds no
+user key and persists no secret (NET-ADR-001): the network config carries only
+public data (`crates/ton-net/src/config.rs`), and the only secrets computed
+anywhere are the ephemeral per-session ADNL keys, which protect the transport and
+nothing of the user's. There is no key to exfiltrate and no balance to move. What
+an attacker can try to corrupt is the client's picture of the chain: an account's
+balance, a contract's state, which block is current. The design exists to make a
+false picture fail closed as a named error rather than pass as an answer.
 
-That is the whole reason the library exists. A client that believes what a
-liteserver says has outsourced the question "what is my balance" to a stranger.
+One guarantee frames the rest. A `Verified<T>` is as trustworthy as the block in
+its anchor and no more, and it has no public constructor, so a value of that type
+is a claim the type system keeps honest rather than a convention a caller can opt
+out of (`crates/ton-net/src/verified.rs`). A server-reported value is a distinct
+type, and there is no operation that turns one into the other
+(`crates/ton-net/src/lib.rs`). The sections below are the checks that stand
+between a server's bytes and a `Verified` value.
 
-**A network attacker** on the path is a weaker case than the above, because a
-hostile server can do everything a network attacker can and more. It is worth
-naming separately only where the transport is what stops it.
+## The untrusted-decode boundary
 
-**A local attacker** with the process memory or the ability to move the system
-clock is out of scope, except that the clock has a section below, because moving
-it is the one local capability that changes an answer rather than reading one.
+Every byte the client reads from a peer reaches a decoder first. A decoder that
+unwinds on hostile input is a denial of service in whatever process embedded the
+library, so the rule is that a malformed reply returns an error and never
+panics.
 
-## Boundary 1: the transport
+The rule is enforced as a lint block, identical at the top of all six crates that
+touch peer bytes (`crates/ton-net-tl/src/lib.rs`,
+`crates/ton-net-cell/src/lib.rs`, `crates/ton-net-block/src/lib.rs`,
+`crates/ton-net-adnl/src/lib.rs`, `crates/ton-net-lite/src/lib.rs`,
+`crates/ton-net/src/lib.rs`):
 
-An ADNL session runs over TCP to an address and public key from the
-configuration.
+```rust
+#![deny(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::unreachable,
+    clippy::todo,
+    clippy::indexing_slicing
+)]
+#![forbid(unsafe_code)]
+```
 
-**What an attacker controls.** Every byte in both directions, if they are on the
-path. The server's own bytes, always.
+`unwrap`, `expect`, `panic`, `unreachable`, and `todo` are denied because each is
+a way to unwind on input the sender controls. `indexing_slicing` is denied
+because `buf[i]` on an attacker-supplied index is the same failure spelled
+differently, so slice access goes through checked forms instead: the bag-of-cells
+reader advances with `checked_add` and `slice::get`, returning
+`CellError::Truncated` rather than reading past the end
+(`crates/ton-net-cell/src/boc.rs`, `Reader`), and frame parsing splits with
+`split_at_checked` rather than by offset (`crates/ton-net-adnl/src/frame.rs`).
+`unsafe` is forbidden outright, so no decode path can reach for a raw pointer to
+go faster. Arithmetic is deliberately left out of the deny set: every count these
+formats carry is bounded before it is used, and each subtraction sits within a
+few lines of the guard that makes it safe, so denying it would bury the real
+bounds under `checked_sub`.
 
-**Refused.**
+The block is on the library, not the tests, because a test is the opposite case,
+where an `unwrap` is the assertion. Two escape hatches exist and are the only
+two: `Config::mainnet` uses `expect` on a checked-in file that a test in the same
+module holds to parse, and the ADNL cipher constructor uses `expect` on constant
+ranges of a fixed-length array. Neither sits on a path that reads peer bytes, and
+each is annotated with the reason at the call site.
 
-- A server that cannot prove it holds the private key for the configured public
-  key. The handshake derives the session keys from a shared secret with that
-  key; an impostor derives different keys and every frame after it fails to
-  decrypt.
-- A degenerate key exchange. A low-order server key decompresses cleanly but
-  drives the shared secret to zero, which would hand both sides a session key an
-  observer can compute. Refused rather than used.
-- A frame whose checksum does not match its contents, and a length field past
-  what the protocol allows.
-- Reuse of a connection whose read was cancelled mid-frame. The stream cipher
-  has already advanced, so every later frame would decrypt to noise; the
-  connection is marked `Desynchronized` instead of being returned to the pool.
-- A call with no answer, and a call whose answer arrives after `CALL_TIMEOUT`.
+This boundary is the fifth of the five invariant trust properties every part of
+the surface is built under (NET-ADR-003). It is what lets the sections below
+assume that a hostile encoding produces an error to handle rather than a crash to
+survive.
 
-**Not refused.** The server chosen from the list is the server talked to. There
-is no quorum across servers, so a single hostile server is the ordinary case,
-not a detected one. It cannot lie about chain contents, which is boundary 3, but
-it can stall, disconnect, or answer nothing at all. Availability is not a
-property this library provides; correctness under a hostile server is.
+## A tampered or withheld Merkle proof
 
-Traffic analysis is out of scope. The session is encrypted, and an observer
-still learns that a TON liteserver is being talked to, and roughly how much.
+A liteserver answers a read with a Merkle proof: a copy of the block's cell tree
+with the branches the answer does not need replaced by pruned placeholders. The
+attack is to tamper with that proof, to substitute a placeholder for a real
+answer, or to withhold the part being read and hope the client reads silence as
+an answer. The defense is that a proof is recomputed against a hash the client
+already trusts, never read as an answer on the server's say-so
+(`crates/ton-net-block/src/proof.rs`).
 
-## Boundary 2: the bytes
+`verify_merkle_proof` takes a cell and the root it must stand for. It requires
+the cell to be a Merkle proof (else `BlockError::NotAMerkleProof`), requires the
+root hash the proof carries to equal the expected root (else
+`ProofNotAnchored`), and then recomputes the hash of the tree actually attached
+and requires that to equal the expected root as well (else `ProofInconsistent`).
+The recomputation is the whole point: the stored hash is a claim until the
+content is hashed against it. A bag of several proof roots is selected by the
+hash a root claims, which is safe precisely because the claim is then checked, so
+a root that lies about what it covers fails rather than being believed
+(`rooted_at`).
 
-Everything a server sends is parsed before it is checked: TL messages, ADNL
-frames, bags of cells, TL-B structures inside them.
+A withheld branch cannot pass as an answer, because a pruned placeholder reads as
+nothing. When the accounts dictionary prunes away the account being read, the
+lookup returns `Lookup::Pruned` and the read fails with `BlockError::NotCovered`,
+which is a different outcome from a proof that the account is absent. A server
+that returns a proof declining to cover the question has not answered it.
 
-**What an attacker controls.** The entire input, including length fields, cell
-counts, reference indices, and depths. A parser here is the first thing that
-touches attacker-chosen bytes, and it runs inside whatever process embedded the
-library.
+The subtler tamper is a pruned branch swapped in for an account's own code or
+data. A pruned branch answers at level zero with the hash of the subtree it
+replaced, so standing one in leaves the root's level-zero hash byte for byte the
+same, and a check that compared only that hash would accept a placeholder's bytes
+as proved contract state. The level mask is what sees it: every cell is held to
+the mask its children imply, so one pruned branch anywhere below raises the
+root's level above zero. `verify_account` refuses an account root that is exotic
+or whose level mask is nonzero (else `BlockError::NotBound`) before it compares
+the account's hash to the dictionary entry. A state that does not bind to the
+proved block, an account claimed present that the proof shows absent, or an
+account claimed absent with state bytes attached, all fail as `NotBound`.
 
-**Refused.** Structurally, by bounding every count before anything is allocated
-for it: `TooManyCells` above 2^17, `TooDeep` past 1024 references, `TooWide`,
-`NotEnoughBits`, `NotEnoughRefs`, `BadReference` for an index that points
-outside the bag or backwards, `Truncated`, `Checksum`, `NotABagOfCells`.
+For an account in a basechain shard, the shard block itself is derived rather than
+believed. The masterchain records the latest block of every shard, so a proof of
+the masterchain state proves which shard block an account's state has to come
+from, which stops a server from answering out of a shard block of its own
+choosing (`verify_shard_block`). The one input the whole chain of checks trusts
+is the masterchain block root hash the caller supplies, and where that comes from
+is the subject of the trust-anchor section below.
 
-**The property that matters more than any single check** is that a decoder
-returns an error rather than unwinding. A panic in a parser is a denial of
-service in the host process, so `unwrap`, `expect`, `panic`, `unreachable`,
-`todo` and slice indexing are denied in every library crate, and the exceptions
-are named in the source with the argument for why the case cannot arise.
+## A forged or replayed block
 
-Two properties in `ton-net-cell` assert the outcome rather than the coding rule:
-arbitrary bytes and truncated encodings are refused and never fatal. Arithmetic
-is deliberately outside that lint set, which is why the properties exist: an
-overflow would still abort a debug build, and one did, in `Slice::load_bytes`,
-where a byte-to-bit multiplication wrapped and the length check passed on the
-wrapped value.
+The trust anchor moves forward by block sync: the client walks a proof chain from
+the block it trusts to the head the server reports, checking every link
+(`crates/ton-net-block/src/chain.rs`, `crates/ton-net/src/sync.rs`). The server
+picks the route and the client believes nothing about it. Every field of every
+link is a claim until a check settles it, including which blocks the route passes
+through and which direction it runs. Two attacks live here: forging a block the
+validators never committed, and replaying a real block from the past.
 
-**Not refused.** Resource use within the bounds. A server can send a bag that is
-large but legal and make the client do the work of parsing it.
+Forgery is answered by signatures. A block's file hash is the one field of its
+identity no Merkle proof can establish, being a hash of the serialized block file
+rather than of the cell tree, so a header proof shows what a block says about
+itself while only the signatures show it is the block the network committed
+(NET-ADR-006). `verify_link` reads the validator set from the source key block's
+own configuration proof, reads the destination header from its proof and requires
+it to match the identity and key-block flag the link claims, rebuilds the exact
+bytes the validators signed, sums the weight of the valid signatures from
+distinct members, and requires that weight to carry the link. The threshold is
+strict and exact (`crates/ton-net-block/src/validators.rs`):
 
-## Boundary 3: the proof chain
+```rust
+carries(weight)  =  u128::from(weight) * 3  >  u128::from(total_weight) * 2
+```
 
-This is the boundary the library is for.
+More than two thirds, promoted to `u128` so the multiplication cannot wrap, with
+no rounding and no floating point. Exactly two thirds does not carry; the first
+integer above it does. The denominator is summed over the masterchain signing
+subset alone, the first `min(main, total)` descriptors of configuration parameter
+34, never the declared total that counts every validator in every shard. The
+arithmetic is exact on purpose: the thinnest link on the real chain from the
+pinned block carries 66.6712% of its set, 0.0046 percentage points above the
+threshold, a margin at which an `f64` comparison would be a coin toss. Below that
+threshold the link fails with `BlockError::NotEnoughWeight`.
 
-**What an attacker controls.** The contents of every answer: blocks, proofs,
-signature sets, account states, and the claim that a sync is complete.
+The signed bytes are rebuilt rather than trusted (`signed_message` in `chain.rs`,
+`crates/ton-net-block/src/signature.rs`). Mainnet has used two signed forms, and a
+walk that crosses the changeover carries both. The older form signs a block
+identity outright. The newer Simplex form signs a finalize vote that names a
+candidate only by hash, so on its own it says nothing about which block it is
+for; the client reads the candidate that travels with the set and requires it to
+name the link's destination, otherwise real signatures lifted from one block
+would carry another. The session id is signed alongside the vote, so a signature
+raised in one consensus session cannot be replayed into another. A set of any
+third form is refused by name as `BlockError::UnknownSignedForm`, never read as
+one of these. The ed25519 rule itself is libsodium's
+`crypto_sign_verify_detached`, the rule the network uses: canonical `A`, `R`, and
+`S`, neither `A` nor `R` of small order, `S` below the group order, and the
+equation compared without cofactor slack. Being stricter would refuse a signature
+the validators accepted and stall a thin link, so the target is exactly that set.
 
-**Refused.**
+Two more forgery angles are closed where the weight is summed (`carried_weight`
+in `chain.rs`, and set construction in `validators.rs`). A signer outside the set
+contributes nothing rather than failing the whole set, so a hostile peer cannot
+stall a client by adding one foreign signature. A validator named twice in a
+signature set is counted once, and a signature is added to the tally only after
+it verifies, so a bad duplicate cannot displace a real one. A set that names the
+same key twice is refused when it is read, because a key counted twice would be
+paid twice toward the threshold.
 
-- A proof that is not a Merkle proof (`NotAMerkleProof`), or whose root does not
-  hash to what it claims (`ProofInconsistent`).
-- A proof not anchored to the block it is supposed to answer for
-  (`ProofNotAnchored`), and a subtree the proof does not actually cover
-  (`NotCovered`).
-- A link that does not connect to the previous one (`ChainBroken`), and one that
-  runs backwards (`BackwardLink`).
-- A signature set carrying less than two thirds of the weight of the validator
-  set that had to sign (`NotEnoughWeight`). The validator set is derived from
-  each key block's own configuration proof, not taken from the server.
-- A signature set in a form this release does not recognise
-  (`UnknownSignedForm`), rather than assumed to be one it does.
-- A withheld account dictionary presented as a proved absence. A pruned
-  dictionary and an empty one both open with a clear bit, so the two are
-  distinguished explicitly and a withheld answer is refused rather than read as
-  "no such account".
-- A substituted account body under a level-1 pruned branch, which answers for
-  the hash it replaced.
-- A pruned branch carrying references, which would otherwise hash the same
-  whatever hangs beneath it.
+Replay is answered by the clock, because nothing inside a proof records when it
+was served. A fully signed, genuinely committed block from last year passes every
+check above. The block's own generation time against the local clock is the only
+freshness signal there is (NET-ADR-005). `fresh_enough` refuses a proven head
+older than the configured bound with `Error::Stale`
+(`crates/ton-net/src/sync.rs`), the bound defaulting to 600 seconds and settable
+through `Config::with_max_head_age`, a bound of zero refusing every head. A block
+stamped more than 300 seconds ahead of the local clock is reported as
+`Error::ClockBehind` rather than accepted, because the age measurement saturates:
+to a clock a year slow, every block from the last year would read as brand new
+and the freshness bound would switch itself off. Reporting a wrong clock rather
+than obeying it keeps the one anti-replay check from silently failing open. This
+is why the local clock is named as the second trusted input alongside the anchor.
 
-**The guarantee.** A value that reaches a caller as `Verified<T>` was proved
-against a block reached by a signature-checked walk. That type cannot be
-constructed outside the crate, so it is not a label a caller can apply to
-something unproven.
+## A resource-exhaustion attempt
 
-**Not refused.** A server can refuse to answer, answer slowly, or serve a
-genuine older chain. The first two are availability. The third is the clock's
-job.
+Sync is the first place a server decides how much work the client does, so the
+bounds ship with it rather than as a later hardening pass, and they are read off
+the wire before any expensive work runs (NET-ADR-005,
+`crates/ton-net/src/sync.rs`). `within_bounds` inspects a reply before the cell
+engine parses a proof or the curve arithmetic touches a signature, because
+everything it checks is a count or a length that costs nothing to read: at most
+64 links per reply, at most 1,048,576 bytes per Merkle proof, at most 1,024
+signatures per set. Across a whole sync the `Walk` counter refuses more than
+4,096 links or more than 512 replies, and `advanced` refuses a reply that leaves
+the anchor where it was, so a server answering forever without progress ends the
+sync rather than running it in circles. `worth_continuing` stops a walk that has
+itself run longer than the freshness bound, since nothing it could still reach
+would pass the freshness check. Each of these ends the sync with a named
+`Error::Sync`, and none relaxes a check to let a sync succeed.
 
-## Boundary 4: what is still trusted
+One amplifier is specific to signature checking and is bounded where it lives.
+Signatures are verified before duplicates are removed, which is the sound order,
+but it means a set padded with copies of one member would cost a curve operation
+per copy. `carried_weight` spends a per-link budget of twice the set size on
+verification attempts, so a set stuffed with duplicates is refused rather than
+run (`crates/ton-net-block/src/chain.rs`).
 
-Two things, and they are the whole list.
+The cell engine carries its own bounds, because a bag of cells arrives from the
+same untrusted server and a Merkle proof is attacker-shaped by design
+(NET-ADR-010, `crates/ton-net-cell/src/boc.rs`). A parsed cell is roughly 250
+bytes of live heap and the smallest one on the wire is two bytes, so without a
+bound a bag would expand by two orders of magnitude on the way in. `parse_boc`
+refuses a declared cell count past `MAX_CELLS`, which is 131,072, with
+`CellError::TooManyCells`, and a reference chain past `MAX_DEPTH`, which is 1,024,
+with `CellError::TooDeep`, the depth bound also keeping a deep graph from
+overflowing the stack when it is later walked or dropped. The count is checked
+against the bytes before anything is allocated for it: the header reader refuses a
+count larger than `MAX_CELLS`, then refuses a count whose minimum two bytes per
+cell exceed what remains (`CellError::Truncated`), and requires the declared cell
+area to account for exactly the bytes left, so a bag cannot claim one length and
+carry another (`crates/ton-net-cell/src/boc/header.rs`). A reference that does not
+point strictly forward is `CellError::BadReference`, which also rules out cycles.
+Underneath all of this the ADNL frame layer refuses a frame body past 16,777,216
+bytes before any allocation follows it (`crates/ton-net-adnl/src/frame.rs`),
+though the real work bounds are the smaller ones above, set where the work is.
 
-**The pinned block.** A walk starts somewhere, and that somewhere is the key
-block in the network configuration. Fetching it would move the root of trust to
-whoever served it, and every later proof would then verify cleanly against
-whatever chain that party invented, which is why the configuration is bundled
-and the anchor is never fetched. A caller who does not want to trust that file
-passes their own block: `Client::connect_from` takes one, and
-`BlockIdExt::new` constructs one from an identity obtained out of band.
+## The trust anchor, the one trusted input
 
-The liteserver list in the same file needs no trust at all, since every answer
-from it is proof-checked. The two halves of that file have opposite trust
-requirements, which is why `Config::mainnet` says so.
+A verifier needs a root: some block held true before anything has been checked,
+from which every later fact is derived. That root cannot come from a server,
+because a server that supplied it could then invent a chain that verifies cleanly
+against it. The root is a single masterchain key block named `init_block` in the
+network config, and it is the only value a verified read takes on trust from the
+chain's side of the world (NET-ADR-005, `crates/ton-net/src/config.rs`).
+Everything else is earned one validator signature set at a time.
 
-**The local clock.** A proof establishes that a block is real and was committed.
-It says nothing about when it was handed over, so a server replaying a genuine
-chain from last year passes every check above. The clock is the only thing that
-catches that.
+The config carries two things whose trust requirements are opposite, and the code
+says so at the point a caller might refresh it (`Config::mainnet` documentation).
+The liteserver list needs no trust: every answer a server gives is checked against
+a proof, so a hostile server can stall or lie and the lie is refused. The
+`init_block` is the other case. A fetched one moves this client's root of trust to
+whoever served it, after which every proof verifies cleanly against whatever chain
+that party invented. Refreshing a server list and moving the anchor are therefore
+different decisions, and fetching a config makes the second one whether or not the
+caller intends it. A caller who already trusts a block, such as one saved from an
+earlier run through `Client::anchor`, hands it in through `Client::connect_from`
+and starts the walk from there rather than trusting a fresh fetch.
 
-The library treats a clock more than `MAX_CLOCK_SKEW` (300 seconds) behind the
-proven head as the thing that is wrong, and reports `ClockBehind` rather than
-passing: to a clock a year behind, every block from the last year reads as brand
-new and the freshness bound stops applying at all. Within tolerance, a head
-older than the caller's limit is `Stale`.
+The anchor is always a key block, never a proved head, because only a key block
+carries the validator set that makes the next step checkable (NET-ADR-005). A
+sync hands its proved head to the read that wanted it and keeps the last key block
+of the walk, so the next sync starts from a block a chain can continue from. That
+single rule is what removes backward links from the picture, and a backward link
+is refused by name as `BlockError::BackwardLink` rather than read and
+half-checked.
 
-So a client whose clock is wrong has a weaker freshness guarantee than one whose
-clock is right, and it is told, instead of being told nothing.
+The bundled mainnet anchor is a point-in-time snapshot of what the public mainnet
+config published, at masterchain sequence number 46894135, not a block this
+library chose. Its root hash and file hash are pinned in
+`crates/ton-net/src/config.rs` and asserted by a test in that module, and
+restated in NET-ADR-005. A first sync walks forward from it, so the further it
+recedes the longer that walk runs, which makes refreshing the snapshot release
+work rather than routine upkeep. The anchor holds no secret, but it is a root of
+trust: anything that can write to wherever a caller stores it can choose what the
+client believes. The library stores nothing and picks no location, so that
+storage is the caller's own threat-model decision.
 
-## What this model does not cover
+## The custody position
 
-- **Sending.** No signing, no broadcast, no key handling. When that arrives it
-  is a different model.
-- **TVM execution.** Get-method results are the server's word today
-  (`ServerReported`); NET-ADR-010 covers what a local TVM would change.
-- **DHT.** Peer discovery is v0.8.0. Until then the server list is the
-  configuration's.
-- **Supply chain.** Covered by the dependency policy in `deny.toml`, the pinned
-  actions, and the notices, not here.
-- **Availability.** Named in three places above because it keeps recurring: this
-  library is about not being lied to, not about always getting an answer.
+The library holds no user key today, and no key path exists in the current code
+to hold one. The read path signs nothing, and the only secret it
+computes is the ephemeral per-session ADNL key that secures the transport, which
+is not the user's and protects nothing of the user's. This is the non-custodial
+position of NET-ADR-001, and
+the read path realizes it structurally: there is no field, no argument, and no
+call that takes a user's private key or seed.
+
+The write path is committed scope and the project's floor (NET-ADR-003), and it
+is where key material first enters the picture. It enters through a signer seam:
+the caller supplies the signing operation, and the library constructs and
+broadcasts the external message around a signature the caller produced, never
+holding or seeing a private key or a seed. Constructing and broadcasting a
+message is not custody. Signing with a key the library held would be, and the
+library will not do that. That line is what lets the write path be in scope
+without the library taking control of user funds, and the custody question for
+any part of it is settled in a security review before that code is written
+(NET-ADR-001, NET-ADR-003). Because the seam is not yet built, this section
+records a design commitment rather than a shipped check, and it is noted as such.
+
+The consequence for this threat model is that the adversary here cannot reach a
+key by attacking the client, because there is no key on this side to reach. The
+attack surface is confined to what the client believes, which the read-path checks
+above are built to protect, and the write path is arranged so that the same
+confinement holds once it exists: a compromised or hostile server can refuse to
+broadcast a message or lie about a result, and the result is checked like any
+other read, but it can never obtain the signing key, because the library never
+has it.
+
+## Residual trusted inputs and assumptions
+
+Three inputs are trusted by construction, and naming them is part of stating the
+model honestly.
+
+- The pinned anchor. One masterchain key block is believed before anything is
+  checked. A caller who wants a different root supplies it explicitly, and a
+  caller who fetches a fresh config trusts that config's source for the anchor.
+- The local clock. It is the only freshness signal a proof cannot provide, so a
+  client whose clock is wrong has a weaker replay guarantee than one whose clock
+  is right. A clock far enough behind is reported rather than obeyed, so the check
+  fails loudly instead of silently switching off.
+- The vetted cryptography. The ed25519 verification, the SHA-256 and SHA-512
+  digests, and the AES-CTR stream are the single audited copy of each primitive
+  the workspace carries (NET-ADR-004). Their correctness is assumed here and
+  earned by keeping one copy of each rather than many.
+
+Everything else a client believes is derived from the first of these by
+cryptography, refused as a named error when it does not check out, and never
+upgraded from a server-reported value to a verified one without the proof that
+makes the difference.

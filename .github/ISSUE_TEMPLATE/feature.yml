@@ -9,7 +9,7 @@ body:
     attributes:
       value: >-
         The scope is fixed in
-        [NET-ADR-002](https://github.com/nirapod-labs/ton-net/blob/main/docs/adr/NET-ADR-002-scope.md)
+        [NET-ADR-003](https://github.com/nirapod-labs/ton-net/blob/main/docs/adr/NET-ADR-003-scope.md)
         and the order in [the roadmap](https://github.com/nirapod-labs/ton-net/blob/main/docs/roadmap.md).
         Worth checking both first: several things that look missing are scheduled,
         and a few are deliberately out of scope.
