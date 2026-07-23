@@ -127,37 +127,62 @@ types from a raw `ServerReportedResult`, so a consumer cannot mistake trust leve
 
 ## Repository shape
 
-The nirapod-labs multi-language monorepo pattern (as in signet), adapted to a Rust
-core, and matching the matrix-rust-sdk layout.
+Crates sit flat under `crates/`, each named for the directory it occupies, beside
+a virtual manifest at the root. This is the layout matrix-rust-sdk and
+rust-analyzer both use at twenty and thirty times this size.
+[NET-ADR-011](adr/NET-ADR-011-code-structure.md) records why, and how a crate is
+expected to grow inside.
 
 ```
 ton-net/
-  core/                  Rust workspace: the whole client stack
-    tl/                    TL codec (tl-proto + TON schemas)
-    crypto/                primitive wrappers
-    adnl/                  channel, handshake, transports (TCP/UDP/WS)
-    dht/                   Kademlia client
-    liteserver/            liteServer.* query layer
-    cell/                  cell/BoC, exotic cells, hashing
-    proof/                 check_*_proof, block TL-B
-    sync/                  key-block anchor + getBlockProof walk
-    tvm/                   local get-method execution
-    client/                the composed high-level Client
+  crates/
+    ton-net-tl/          TL codec and TON schemas
+    ton-net-cell/        cells, bags of cells, exotic cells, hashing, dictionaries
+    ton-net-block/       block TL-B, proof checking, validator sets
+    ton-net-adnl/        handshake, frame ciphers, the Transport seam
+    ton-net-lite/        liteServer.* query layer
+    ton-net/             the composed client: config, sync, addresses
   bindings/
-    node/                  napi-rs
-    wasm/                  wasm-bindgen (WS transport)
-    python/                pyo3 + maturin
-    apple/                 UniFFI -> Swift package
-    android/               UniFFI -> Kotlin/AAR
-    flutter/               flutter_rust_bridge (optional)
-  conformance/           canonical byte vectors + per-binding runners
-  examples/              resolve-address, verified-account, run-get-method
-  tools/                 vector generation against the reference node
-  docs/                  adr/ · design/ · protocol/ · this file
+    node/                napi-rs
+  spikes/                feasibility work, own lockfile, outside the workspace
+  scripts/
+  docs/                  adr/ · design/ · protocol/ · security/ · this file
 ```
 
-Not every tree exists at once; the layout is the target and the
-[roadmap](roadmap.md) is the order.
+Dependencies run one way, in four layers. `ton-net-tl` and `ton-net-cell` take
+nothing from the others, and the facade composes rather than decodes.
+
+```
+  ton-net-tl          ton-net-cell
+      |     \               |
+      |      \        ton-net-block
+  ton-net-adnl \            |
+      |         \___________|
+  ton-net-lite              |
+      \___________________ _|
+                |
+             ton-net
+                |
+            bindings/*
+```
+
+Still to come, in [roadmap](roadmap.md) order and under the same flat rule:
+
+```
+    ton-net-dht/         Kademlia client, separate because a browser target
+                         cannot reach it at all
+    ton-net-wallet/      the write path (v0.5.0)
+    ton-net-tvm/         get-method execution (v0.10.0), separate for its size
+                         and because proofs do not require an interpreter
+  bindings/
+    wasm/  apple/  android/  python/  flutter/
+  conformance/           canonical byte vectors and per-binding runners
+```
+
+Crypto primitives stay in the crate that uses them until a second crate needs the
+same one. The binding surface is declared once and converted per target rather
+than mirrored per language, which is the part that has to be settled before the
+second binding rather than after the fourth.
 
 ---
 
