@@ -264,6 +264,37 @@ impl PfxDict {
         Ok(())
     }
 
+    /// Removes the exact key of `key_len` bits, reporting whether it was there.
+    ///
+    /// When a fork is left with one child, that child is merged back into the edge above it,
+    /// so the tree stays the minimal one for the keys that remain: removing a key restores
+    /// exactly the dictionary that never held it. The dictionary is left untouched when the
+    /// key was not present.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CellError::Malformed`] if `key_len` is wider than the dictionary,
+    /// [`CellError::KeyLength`] if `key` is too short, [`CellError::Pruned`] if the removal
+    /// falls in a pruned branch, or a [`CellError`] if the tree does not read as a prefix
+    /// dictionary.
+    pub fn remove(&mut self, key: &[u8], key_len: u16) -> Result<bool, CellError> {
+        let bits = pfx_key_of(key, key_len, self.key_bits)?;
+        let Some(root) = self.root.clone() else {
+            return Ok(false);
+        };
+        match remove_from(&root, self.key_bits, &bits)? {
+            Removal::NotFound => Ok(false),
+            Removal::Gone => {
+                self.root = None;
+                Ok(true)
+            }
+            Removal::Rebuilt(cell) => {
+                self.root = Some(cell);
+                Ok(true)
+            }
+        }
+    }
+
     /// Checks the tree reads as a well-formed prefix dictionary.
     ///
     /// Every fork must leave at least one key bit for the branch it splits on, hold exactly
@@ -463,6 +494,99 @@ fn split(
     fork.store_ref(left)?;
     fork.store_ref(right)?;
     fork.build()
+}
+
+/// What removing a key did to a subtree.
+enum Removal {
+    /// The key was not under this subtree, so it is unchanged.
+    NotFound,
+    /// This node was the leaf holding the key, so its parent must drop the branch to it.
+    Gone,
+    /// A descendant was removed and this is the rebuilt subtree.
+    Rebuilt(Cell),
+}
+
+/// Removes `key` from under `node`, reporting what became of the subtree. `remaining` is the
+/// key width budget at `node`.
+fn remove_from(node: &Cell, remaining: u16, key: &[bool]) -> Result<Removal, CellError> {
+    if node.is_exotic() {
+        return Err(CellError::Pruned);
+    }
+    let mut slice = node.parse();
+    let label = read_label(&mut slice, remaining)?;
+    if diverges(&label, key).is_some() || key.len() < label.len() {
+        return Ok(Removal::NotFound);
+    }
+
+    let is_fork = slice.load_bit()?;
+    let below = remaining - label_width(&label);
+    let tail = rest(key, label.len());
+
+    if !is_fork {
+        // A leaf holds the key only when the key ends exactly here.
+        if tail.is_empty() {
+            return Ok(Removal::Gone);
+        }
+        return Ok(Removal::NotFound);
+    }
+    if below == 0 {
+        return Err(CellError::Malformed(
+            "a prefix-code fork with no key bits left",
+        ));
+    }
+    if tail.is_empty() {
+        // The key ends at a fork, so it is no stored leaf.
+        return Ok(Removal::NotFound);
+    }
+
+    let branch = usize::from(tail.first().copied().unwrap_or(false));
+    let child = node.reference(branch).ok_or(NO_BRANCH)?;
+    match remove_from(child, below - 1, rest(tail, 1))? {
+        Removal::NotFound => Ok(Removal::NotFound),
+        // The branch lost its leaf, so the fork has one child left: merge it up.
+        Removal::Gone => Ok(Removal::Rebuilt(collapse(
+            node,
+            remaining,
+            &label,
+            1 - branch,
+        )?)),
+        Removal::Rebuilt(new_child) => Ok(Removal::Rebuilt(rebuild_fork(
+            &label, remaining, node, branch, new_child,
+        )?)),
+    }
+}
+
+/// Merges a fork's surviving branch back into the edge above it, now the other branch is gone.
+///
+/// The branch bit that led to the survivor rejoins the label, so the merged edge spells the
+/// same key path in one node that the fork and the survivor spelled in two.
+fn collapse(
+    node: &Cell,
+    remaining: u16,
+    label: &[bool],
+    survivor: usize,
+) -> Result<Cell, CellError> {
+    let sibling = node.reference(survivor).ok_or(NO_BRANCH)?;
+    if sibling.is_exotic() {
+        return Err(CellError::Pruned);
+    }
+    let below = remaining - label_width(label);
+    if below == 0 {
+        return Err(CellError::Malformed(
+            "a prefix-code fork with no key bits left",
+        ));
+    }
+
+    let mut merged_label = label.to_vec();
+    merged_label.push(survivor == 1);
+    let mut slice = sibling.parse();
+    let sibling_label = read_label(&mut slice, below - 1)?;
+    merged_label.extend_from_slice(&sibling_label);
+
+    let mut merged = Builder::new();
+    store_label(&mut merged, &merged_label, remaining)?;
+    merged.store_slice(slice)?;
+    merged.build()
 }
 
 /// Checks `node` and everything visible below it reads as a prefix dictionary.
@@ -731,6 +855,56 @@ mod tests {
             reread.root().map(Cell::repr_hash),
             dict.root().map(Cell::repr_hash),
         );
+    }
+
+    #[test]
+    fn removing_a_key_merges_the_edge_that_is_left() {
+        // Keys 100 and 101 fork on the third bit. Removing 100 must collapse the fork so the
+        // root becomes the single leaf 101, the same tree a build of 101 alone gives. This is
+        // the scenario a reference client's own delete test checks.
+        let mut dict = PfxDict::new(8).expect("a dictionary");
+        dict.set(&[0b1000_0000], 3, &val(0xa1)).expect("set 100");
+        dict.set(&[0b1010_0000], 3, &val(0xb2)).expect("set 101");
+
+        assert!(dict.remove(&[0b1000_0000], 3).expect("remove 100"));
+        let Lookup::Found(entry) = dict.get(&[0b1010_0000], 3).expect("query") else {
+            panic!("101 remains")
+        };
+        assert_eq!(value_of(&entry), 0xb2);
+        assert_eq!(dict.iter().count(), 1);
+
+        let mut only = PfxDict::new(8).expect("a dictionary");
+        only.set(&[0b1010_0000], 3, &val(0xb2)).expect("set 101");
+        assert_eq!(
+            dict.root().map(Cell::repr_hash),
+            only.root().map(Cell::repr_hash),
+            "the collapsed tree is the one 101 alone builds"
+        );
+
+        assert!(!dict.remove(&[0b1000_0000], 3).expect("second remove"));
+    }
+
+    #[test]
+    fn removing_the_only_key_empties_the_dictionary() {
+        let mut dict = PfxDict::new(8).expect("a dictionary");
+        dict.set(&[0b1100_0000], 2, &val(0x01)).expect("set 11");
+        assert!(dict.remove(&[0b1100_0000], 2).expect("remove"));
+        assert!(dict.is_empty());
+        assert_eq!(dict.get(&[0b1100_0000], 2).expect("query"), Lookup::Absent);
+    }
+
+    #[test]
+    fn removing_a_key_that_is_not_there_changes_nothing() {
+        let mut dict = PfxDict::new(8).expect("a dictionary");
+        dict.set(&[0b1000_0000], 2, &val(0xaa)).expect("set 10");
+        dict.set(&[0b1100_0000], 2, &val(0xbb)).expect("set 11");
+        let before = *dict.root().expect("not empty").repr_hash();
+        assert!(!dict.remove(&[0b0000_0000], 2).expect("remove absent"));
+        assert_eq!(*dict.root().expect("not empty").repr_hash(), before);
+        assert!(!PfxDict::new(8)
+            .expect("empty")
+            .remove(&[0b1000_0000], 2)
+            .expect("remove from empty"));
     }
 
     #[test]
