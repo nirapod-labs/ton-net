@@ -293,6 +293,32 @@ impl Dict {
         Ok(None)
     }
 
+    /// The entry at `key`, or the one before it in ascending key order.
+    ///
+    /// The floor to [`entry_at_or_after`](Dict::entry_at_or_after)'s ceiling. `key` is
+    /// compared as bytes against the keys the dictionary holds, so it reads best given a key
+    /// of the dictionary's own width.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CellError`] as [`iter`](Dict::iter) does.
+    pub fn entry_at_or_before(
+        &self,
+        key: &[u8],
+    ) -> Result<Option<(Vec<u8>, DictEntry)>, CellError> {
+        let mut floor = None;
+        for item in self {
+            let (found, entry) = item?;
+            if found.as_slice() <= key {
+                floor = Some((found, entry));
+            } else {
+                // The walk is ascending, so once it passes the key nothing nearer remains.
+                break;
+            }
+        }
+        Ok(floor)
+    }
+
     /// Keeps only the entries `keep` returns true for.
     ///
     /// Every entry is shown to `keep` once, and the dictionary is left holding those it kept.
@@ -423,6 +449,27 @@ mod tests {
         // Past the last key returns nothing.
         assert!(dict
             .entry_at_or_after(&99u32.to_be_bytes())
+            .expect("query")
+            .is_none());
+    }
+
+    #[test]
+    fn an_entry_at_or_before_a_key_is_the_floor() {
+        let dict = dict_of(&[10, 20, 30]);
+        let (key, _) = dict
+            .entry_at_or_before(&25u32.to_be_bytes())
+            .expect("query")
+            .expect("a floor");
+        assert_eq!(key, 20u32.to_be_bytes());
+        // Exactly on a key returns that key.
+        let (key, _) = dict
+            .entry_at_or_before(&20u32.to_be_bytes())
+            .expect("query")
+            .expect("a floor");
+        assert_eq!(key, 20u32.to_be_bytes());
+        // Before the first key returns nothing.
+        assert!(dict
+            .entry_at_or_before(&5u32.to_be_bytes())
             .expect("query")
             .is_none());
     }
