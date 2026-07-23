@@ -22,6 +22,8 @@ use crate::cell::{Cell, CellType};
 use crate::error::CellError;
 use crate::merkle::create_proof;
 
+mod trace;
+
 /// The level mask of a pruned branch in a single-level proof: it stands at level one and
 /// answers at level zero with the hash of what it replaced.
 const PRUNED_AT_LEVEL_ONE: u8 = 0b001;
@@ -35,17 +37,26 @@ const PRUNED_AT_LEVEL_ONE: u8 = 0b001;
 pub struct UsageTree {
     root: Cell,
     used: HashSet<[u8; 32]>,
+    /// Whether a [`note`](UsageTree::note) records the cell it hands back. An explicit
+    /// [`mark`](UsageTree::mark) ignores this; only the load-notification path obeys it, so
+    /// a stretch of reads can be left out of the trace without losing what was marked by
+    /// hand.
+    tracing: bool,
 }
 
 impl UsageTree {
-    /// A usage tree over `root`, with the root itself marked.
+    /// A usage tree over `root`, with the root itself marked and tracing on.
     ///
     /// The root is always kept: a tree pruned down to nothing stands for nothing.
     #[must_use]
     pub fn new(root: Cell) -> Self {
         let mut used = HashSet::new();
         used.insert(*root.repr_hash());
-        Self { root, used }
+        Self {
+            root,
+            used,
+            tracing: true,
+        }
     }
 
     /// The tree this usage was recorded over.
@@ -63,6 +74,17 @@ impl UsageTree {
     #[must_use]
     pub fn touched(&self, cell: &Cell) -> bool {
         self.used.contains(cell.repr_hash())
+    }
+
+    /// Marks `cell` and every cell on the path from the root down to it.
+    ///
+    /// Marking a cell without its ancestors prunes an ancestor away and takes the cell with
+    /// it, so keeping a deep cell means keeping its whole path. This walks the tree to find
+    /// `cell`, marks the path, and reports whether the cell was there to find. It marks
+    /// regardless of the tracing switch, which governs only the load-notification path.
+    pub fn mark_path(&mut self, cell: &Cell) -> bool {
+        let root = self.root.clone();
+        mark_path_to(&root, cell.repr_hash(), &mut self.used)
     }
 
     /// Rebuilds the tree keeping the marked cells and standing in for the rest.
@@ -131,6 +153,23 @@ fn pruned_branch(cell: &Cell) -> Result<Cell, CellError> {
     builder.store_bytes(cell.hash())?;
     builder.store_uint(u64::from(cell.depth()), 16)?;
     builder.finish(CellType::PrunedBranch, PRUNED_AT_LEVEL_ONE)
+}
+
+/// Marks the path from `node` down to the cell whose hash is `target`, if it is below
+/// `node`, and reports whether it was found. Every cell on the found path is marked, the
+/// target and each of its ancestors, so pruning keeps the target reachable.
+fn mark_path_to(node: &Cell, target: &[u8; 32], used: &mut HashSet<[u8; 32]>) -> bool {
+    if node.repr_hash() == target {
+        used.insert(*target);
+        return true;
+    }
+    for child in node.refs() {
+        if mark_path_to(child, target, used) {
+            used.insert(*node.repr_hash());
+            return true;
+        }
+    }
+    false
 }
 
 #[cfg(test)]
@@ -268,5 +307,36 @@ mod tests {
             covered.reference(1).expect("the dropped side").cell_type(),
             CellType::PrunedBranch,
         );
+    }
+
+    #[test]
+    fn mark_path_keeps_a_deep_cell_in_one_call() {
+        let deep = leaf(0x33);
+        let middle = node(0x22, &[&deep]);
+        let root = node(0xaa, &[&middle]);
+
+        // One call marks the whole path, where marking the deep cell alone would prune it.
+        let mut usage = UsageTree::new(root.clone());
+        assert!(usage.mark_path(&deep), "the deep cell is in the tree");
+        let skeleton = usage.prune().expect("the skeleton builds");
+        assert_eq!(skeleton.hash(), root.hash());
+        let middle_side = skeleton.reference(0).expect("the middle child is there");
+        assert_eq!(middle_side.cell_type(), CellType::Ordinary);
+        assert_eq!(
+            middle_side
+                .reference(0)
+                .expect("the deep child is there")
+                .hash(),
+            deep.hash(),
+            "the deep cell survived because its path was marked",
+        );
+    }
+
+    #[test]
+    fn mark_path_reports_a_cell_that_is_not_in_the_tree() {
+        let root = node(0xaa, &[&leaf(0x11)]);
+        let stranger = leaf(0x99);
+        let mut usage = UsageTree::new(root);
+        assert!(!usage.mark_path(&stranger), "a stranger is not found");
     }
 }
