@@ -11,6 +11,8 @@ use sha2::{Digest, Sha256};
 use crate::error::CellError;
 use crate::slice::Slice;
 
+mod dump;
+
 /// The most data bits a cell may hold.
 pub const MAX_BITS: u16 = 1023;
 
@@ -341,6 +343,49 @@ impl Cell {
     #[must_use]
     pub fn parse(&self) -> Slice<'_> {
         Slice::new(self)
+    }
+
+    /// Renders the cell and the tree below it as text, in the hex bitstring notation.
+    ///
+    /// Each cell is one line: its data as `x{...}`, whole nibbles in hex and a trailing
+    /// partial nibble completed with a set bit and zeros and marked `_`, so `x{}` is empty,
+    /// `x{A}` is `1010`, and `x{B_}` is `101`. Every reference is indented one step under
+    /// the cell that holds it, and an exotic cell is named by its kind. This is for reading
+    /// a tree, not a wire form; [`to_boc`](Cell::to_boc) is the way back to bytes.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use ton_net_cell::parse_boc;
+    /// let bytes = [0xb5, 0xee, 0x9c, 0x72, 0x01, 0x01, 0x01, 0x01, 0x00, 0x03, 0x00,
+    ///              0x00, 0x02, 0xab];
+    /// let roots = parse_boc(&bytes)?;
+    /// assert_eq!(roots[0].dump(), "x{AB}");
+    /// # Ok::<(), ton_net_cell::CellError>(())
+    /// ```
+    #[must_use]
+    pub fn dump(&self) -> String {
+        dump::hex(self)
+    }
+
+    /// Renders the cell and the tree below it as text, one character per data bit.
+    ///
+    /// This is [`dump`](Cell::dump) with each cell's data written as `b{...}` in binary, a
+    /// `0` or `1` for every bit, which needs no completion because it writes them all.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use ton_net_cell::parse_boc;
+    /// let bytes = [0xb5, 0xee, 0x9c, 0x72, 0x01, 0x01, 0x01, 0x01, 0x00, 0x03, 0x00,
+    ///              0x00, 0x02, 0xab];
+    /// let roots = parse_boc(&bytes)?;
+    /// assert_eq!(roots[0].dump_bits(), "b{10101011}");
+    /// # Ok::<(), ton_net_cell::CellError>(())
+    /// ```
+    #[must_use]
+    pub fn dump_bits(&self) -> String {
+        dump::binary(self)
     }
 
     /// Serializes this cell, and everything it references, as a single-root bag of cells.

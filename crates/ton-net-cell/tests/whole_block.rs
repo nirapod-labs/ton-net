@@ -121,6 +121,21 @@ fn a_whole_block_parses_and_hashes_to_the_identity_it_was_served_under() {
 }
 
 #[test]
+fn a_whole_block_renders_as_a_tree_with_its_tag_legible() {
+    // Rendering a real block exercises the dump over a deep tree with exotic cells in it.
+    // The block tag is a fact from the schema, so the hex form writes it at the front: it
+    // is the same tag the parse test reads back off the wire.
+    let block = &parse_boc(&unhex(BASECHAIN)).expect("the block parses")[0];
+    let text = block.dump();
+    assert!(
+        text.starts_with("x{11EF55AA"),
+        "the block tag is not legible at the front of the dump"
+    );
+    // A block holds four references, so the tree is more than the root's own line.
+    assert!(text.contains('\n'), "a block renders as more than one line");
+}
+
+#[test]
 fn a_cell_may_carry_the_hash_and_depth_it_computes() {
     let plain = parse_boc(&PLAIN).expect("the plain form parses");
     let hash = *plain[0].repr_hash();
