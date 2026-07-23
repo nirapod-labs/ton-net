@@ -93,7 +93,9 @@ mod proptests;
 pub use boc::{parse_boc, serialize_boc, MAX_CELLS, MAX_DEPTH};
 pub use builder::Builder;
 pub use cell::{Cell, CellType, MAX_BITS, MAX_REFS};
-pub use dict::{AugDict, AugDictIter, AugEntry, Augmentation, Dict, DictEntry, DictIter, Lookup};
+pub use dict::{
+    AugDict, AugDictIter, AugEntry, Augmentation, Dict, DictEntry, DictIter, ForkExtra, Lookup,
+};
 pub use error::CellError;
 pub use merkle::{
     apply_update, create_proof, create_update, may_apply, validate_update, virtualize,

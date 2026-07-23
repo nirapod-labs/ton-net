@@ -6,8 +6,8 @@
 
 use super::label::read_label;
 use super::{
-    check_key_bits, collapse, descend, key_of, leaf, lookup, rebuild, rest, split, walk_step,
-    DictEntry, Entry, Lookup, Pending, Shape,
+    check_key_bits, collapse, collect_fork_extras, descend, key_of, leaf, lookup, rebuild, rest,
+    split, validate_tree, walk_step, DictEntry, Entry, ForkExtra, Lookup, Pending, Shape,
 };
 use crate::builder::Builder;
 use crate::cell::Cell;
@@ -239,6 +239,37 @@ impl<A: Augmentation> AugDict<A> {
             .transpose()
     }
 
+    /// Every interior fork's stored summary, each with the key prefix that reaches it, in
+    /// ascending order.
+    ///
+    /// A leaf's summary comes back from [`iter`](AugDict::iter) beside its key; this is the
+    /// complement, the summaries the forks above the leaves carry. A pruned branch is
+    /// opaque, so the walk does not descend into one.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`CellError`] if the tree does not read as an augmented dictionary.
+    pub fn fork_extras(&self) -> Result<Vec<ForkExtra<A::Extra>>, CellError> {
+        collect_fork_extras(&Aug(&self.aug), self.root.as_ref(), self.key_bits)
+    }
+
+    /// Checks every fork carries the summary its two children combine to.
+    ///
+    /// This is the read-side complement of the recombination a write performs: for each
+    /// fork it recomputes the summary from the children as they stand and requires the
+    /// result to match what the fork stores, so a tree whose summaries were copied forward
+    /// over a changed subtree is caught. A pruned branch is opaque, so a fork above one is
+    /// left unchecked while the rest of the visible tree is still verified.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CellError::Malformed`] if a fork's summary disagrees with its children,
+    /// or a [`CellError`] if the tree does not read as an augmented dictionary. Whatever
+    /// [`Augmentation::combine`] reports is returned as it stands.
+    pub fn validate(&self) -> Result<(), CellError> {
+        validate_tree(&Aug(&self.aug), self.root.as_ref(), self.key_bits)
+    }
+
     /// Looks `key` up, returning the summary its leaf carries alongside the value.
     ///
     /// The three outcomes are described on [`Lookup`], and mean here what they mean for
@@ -382,5 +413,100 @@ impl<A: Augmentation> Iterator for AugDictIter<'_, A> {
                 Some(Err(error))
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A summary that counts the leaves below a node.
+    struct CountSum;
+
+    impl Augmentation for CountSum {
+        type Extra = u32;
+
+        fn read(&self, slice: &mut Slice<'_>) -> Result<u32, CellError> {
+            slice.load_u32()
+        }
+
+        fn combine(&self, left: &u32, right: &u32) -> Result<u32, CellError> {
+            Ok(left + right)
+        }
+
+        fn write(&self, extra: &u32, into: &mut Builder) -> Result<(), CellError> {
+            into.store_uint(u64::from(*extra), 32)?;
+            Ok(())
+        }
+    }
+
+    /// The same summary read and written the same way, but combined wrongly, so a tree its
+    /// forks were built for reads as inconsistent under it.
+    struct CountOff;
+
+    impl Augmentation for CountOff {
+        type Extra = u32;
+
+        fn read(&self, slice: &mut Slice<'_>) -> Result<u32, CellError> {
+            slice.load_u32()
+        }
+
+        fn combine(&self, left: &u32, right: &u32) -> Result<u32, CellError> {
+            Ok(left + right + 1)
+        }
+
+        fn write(&self, extra: &u32, into: &mut Builder) -> Result<(), CellError> {
+            into.store_uint(u64::from(*extra), 32)?;
+            Ok(())
+        }
+    }
+
+    /// An augmented dictionary over 32-bit keys, one leaf per key, each counting as one.
+    fn counted(keys: &[u32]) -> AugDict<CountSum> {
+        let mut dict = AugDict::new(CountSum, 32).expect("a sane key width");
+        let mut value = Builder::new();
+        value.store_uint(0, 8).expect("fits");
+        for key in keys {
+            dict.set(&key.to_be_bytes(), &1, &value).expect("sets");
+        }
+        dict
+    }
+
+    #[test]
+    fn fork_extras_carry_the_summary_of_the_subtree_below_each() {
+        // Keys 1, 2 and 3 fork twice: the root over all three, then a sub-fork over 2 and 3.
+        let dict = counted(&[1, 2, 3]);
+        let forks = dict.fork_extras().expect("reads");
+        assert_eq!(forks.len(), 2, "a root fork and one sub-fork");
+        assert_eq!(forks[0].1, 3, "the root fork counts every leaf");
+        assert_eq!(forks[1].1, 2, "the sub-fork counts its two leaves");
+    }
+
+    #[test]
+    fn a_leaf_only_dictionary_has_no_forks() {
+        let dict = counted(&[42]);
+        assert!(dict.fork_extras().expect("reads").is_empty());
+        dict.validate().expect("a single leaf is consistent");
+    }
+
+    #[test]
+    fn validate_passes_a_tree_its_own_writes_built() {
+        counted(&[1, 2, 3, 100, 1000, 70_000, 0xffff_ffff])
+            .validate()
+            .expect("every fork sums its children");
+    }
+
+    #[test]
+    fn validate_catches_a_summary_that_disagrees_with_its_children() {
+        // The forks were built to sum; read back under a rule that adds one more, every
+        // fork's stored summary is now short and validate must refuse the tree.
+        let root = counted(&[1, 2, 3]).root().expect("not empty").clone();
+        let reread = AugDict::from_root(CountOff, Some(root), 32).expect("a valid root");
+        assert_eq!(
+            reread.validate(),
+            Err(CellError::Malformed(
+                "augmented fork summary disagrees with its children"
+            ))
+        );
     }
 }

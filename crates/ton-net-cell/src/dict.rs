@@ -31,6 +31,12 @@ mod typed;
 pub use aug::{AugDict, AugDictIter, AugEntry, Augmentation};
 pub use plain::{Dict, DictIter};
 
+/// A dictionary fork's key prefix and the summary it carries.
+///
+/// The prefix is the key bits everything below the fork shares; the summary is what the
+/// fork stores over that subtree. [`AugDict::fork_extras`] yields one per interior fork.
+pub type ForkExtra<E> = (Vec<bool>, E);
+
 #[cfg(test)]
 use label::bounded_width;
 use label::{read_label, store_label};
@@ -505,6 +511,110 @@ fn walk_step<S: Shape>(
         }
     }
     Ok(None)
+}
+
+/// Every fork's stored summary, with the key prefix that leads to it, in pre-order.
+///
+/// A leaf carries a summary too, but [`walk_step`] already reads those alongside their
+/// keys; this is the complement, the summaries the interior forks carry. A pruned branch
+/// is opaque, so the walk does not descend into one.
+fn collect_fork_extras<S: Shape>(
+    shape: &S,
+    root: Option<&Cell>,
+    key_bits: u16,
+) -> Result<Vec<ForkExtra<S::Extra>>, CellError> {
+    let mut out = Vec::new();
+    if let Some(root) = root {
+        collect_forks(shape, root, key_bits, Vec::new(), &mut out)?;
+    }
+    Ok(out)
+}
+
+/// Descends `node`, pushing each fork's summary onto `out`. `prefix` is the key bits above
+/// it.
+fn collect_forks<S: Shape>(
+    shape: &S,
+    node: &Cell,
+    remaining: u16,
+    prefix: Vec<bool>,
+    out: &mut Vec<(Vec<bool>, S::Extra)>,
+) -> Result<(), CellError> {
+    if node.is_exotic() {
+        return Ok(());
+    }
+    let mut slice = node.parse();
+    let label = read_label(&mut slice, remaining)?;
+    let len = label.len();
+    let mut here = prefix;
+    here.extend_from_slice(&label);
+    if len < usize::from(remaining) {
+        out.push((here.clone(), shape.read_extra(&mut slice)?));
+        #[allow(
+            clippy::cast_possible_truncation,
+            reason = "read_label bounds len to at most remaining, and this branch runs only when len < remaining, so len fits a u16"
+        )]
+        let below = remaining - len as u16 - 1;
+        let left = node.reference(0).ok_or(NO_BRANCH)?;
+        let right = node.reference(1).ok_or(NO_BRANCH)?;
+        let mut left_prefix = here.clone();
+        left_prefix.push(false);
+        collect_forks(shape, left, below, left_prefix, out)?;
+        here.push(true);
+        collect_forks(shape, right, below, here, out)?;
+    }
+    Ok(())
+}
+
+/// Checks every fork's stored summary is the one its children combine to.
+///
+/// This is the read-side complement of the combine a write performs: it rebuilds each fork
+/// in place, recomputing the summary from the children as stored, and requires the rebuilt
+/// node to hash to the one on the tree. A pruned child cannot be summarised, so a fork
+/// above one is left unchecked while the rest of the visible tree still is.
+fn validate_tree<S: Shape>(shape: &S, root: Option<&Cell>, key_bits: u16) -> Result<(), CellError> {
+    match root {
+        None => Ok(()),
+        Some(root) => validate_node(shape, root, key_bits),
+    }
+}
+
+/// Checks `node` and everything visible below it.
+fn validate_node<S: Shape>(shape: &S, node: &Cell, remaining: u16) -> Result<(), CellError> {
+    if node.is_exotic() {
+        return Ok(());
+    }
+    let mut slice = node.parse();
+    let label = read_label(&mut slice, remaining)?;
+    let len = label.len();
+    if len == usize::from(remaining) {
+        return Ok(());
+    }
+    #[allow(
+        clippy::cast_possible_truncation,
+        reason = "read_label bounds len to at most remaining, and this runs only when len < remaining, so len fits a u16"
+    )]
+    let below = remaining - len as u16 - 1;
+    let left = node.reference(0).ok_or(NO_BRANCH)?;
+    let right = node.reference(1).ok_or(NO_BRANCH)?;
+
+    // A fork whose child is pruned cannot have its summary recomputed, so its own check is
+    // skipped; the visible child is still walked.
+    if !left.is_exotic() && !right.is_exotic() {
+        let mut fork = Builder::new();
+        store_label(&mut fork, &label, remaining)?;
+        let extra = shape.fork_extra(left, right, below)?;
+        shape.write_extra(&extra, &mut fork)?;
+        fork.store_ref(left.clone())?;
+        fork.store_ref(right.clone())?;
+        if fork.build()?.repr_hash() != node.repr_hash() {
+            return Err(CellError::Malformed(
+                "augmented fork summary disagrees with its children",
+            ));
+        }
+    }
+
+    validate_node(shape, left, below)?;
+    validate_node(shape, right, below)
 }
 
 #[cfg(test)]

@@ -296,6 +296,27 @@ fn every_fork_summarises_the_two_subtrees_below_it() {
 }
 
 #[test]
+fn validate_accepts_the_real_accounts_dictionary() {
+    // The same check as the walk above, run through the dictionary's own validate: every
+    // fork of a real block sums the two subtrees below it.
+    let real = AugDict::from_root(SumCurrencies, Some(account_blocks()), ACCOUNT_KEY_BITS).unwrap();
+    real.validate()
+        .expect("every mainnet fork sums its children");
+}
+
+#[test]
+fn fork_extras_lists_every_fork_the_block_carries() {
+    let real = AugDict::from_root(SumCurrencies, Some(account_blocks()), ACCOUNT_KEY_BITS).unwrap();
+    let listed = real.fork_extras().unwrap();
+    assert_eq!(listed.len(), 10, "ten forks over eleven leaves");
+    assert_eq!(
+        listed[0].1,
+        real.root_extra().unwrap().unwrap(),
+        "the first fork in pre-order is the root, over the whole dictionary"
+    );
+}
+
+#[test]
 fn the_leaves_add_up_to_what_the_block_says_they_do() {
     let real = AugDict::from_root(SumCurrencies, Some(account_blocks()), ACCOUNT_KEY_BITS).unwrap();
     let total: u128 = entries(&real).iter().map(|(_, extra, _)| extra.grams).sum();
