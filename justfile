@@ -100,6 +100,9 @@ hooks:
 lint:
     cargo clippy --all-targets -- -D warnings
     cargo clippy -p ton-net-node --all-targets -- -D warnings
+    # The cell crate's optional features are off by the line above, so they are linted
+    # here too, or their code rots unseen behind a feature flag.
+    cargo clippy -p ton-net-cell --all-features --all-targets -- -D warnings
 
 # Every file carries a copyright holder and a license identifier.
 licenses:
@@ -107,10 +110,12 @@ licenses:
 
 test:
     cargo test
+    cargo test -p ton-net-cell --all-features
 
 doc:
     RUSTDOCFLAGS="-D warnings" cargo doc --no-deps
     RUSTDOCFLAGS="-D warnings" cargo doc --no-deps -p ton-net-node
+    RUSTDOCFLAGS="-D warnings" cargo doc --no-deps -p ton-net-cell --all-features
 
 # Reaches a live mainnet liteserver. Each test skips if its server is unreachable.
 test-live:

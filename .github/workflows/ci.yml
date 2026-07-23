@@ -94,13 +94,19 @@ jobs:
       - name: format
         run: cargo fmt --all -- --check
       - name: clippy
-        run: cargo clippy --all-targets -- -D warnings
+        run: |
+          cargo clippy --all-targets -- -D warnings
+          cargo clippy -p ton-net-cell --all-features --all-targets -- -D warnings
       - name: docs
         env:
           RUSTDOCFLAGS: -D warnings
-        run: cargo doc --no-deps
+        run: |
+          cargo doc --no-deps
+          cargo doc --no-deps -p ton-net-cell --all-features
       - name: tests
-        run: cargo test
+        run: |
+          cargo test
+          cargo test -p ton-net-cell --all-features
 
   mutants:
     name: would a test notice a missing check

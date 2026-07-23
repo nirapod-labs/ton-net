@@ -41,9 +41,9 @@ pub fn compress(bag: &[u8]) -> Vec<u8> {
 
 /// Decompresses an LZ4-compressed bag, refusing one that would expand past the cap.
 ///
-/// The compressed form names the length it expands to. That length is checked against
-/// [`MAX_DECOMPRESSED`] before the decoder allocates, so a small input cannot name a large
-/// allocation, and the expansion itself runs on the bounds-checked decode path.
+/// The compressed form names the length it expands to. That length is checked against a
+/// hard cap before the decoder allocates, so a small input cannot name a large allocation,
+/// and the expansion itself runs on the bounds-checked decode path.
 ///
 /// # Errors
 ///
