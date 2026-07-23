@@ -44,7 +44,8 @@
 //! their meaning: at level zero a pruned branch answers with the hash of the subtree it
 //! replaced, so a pruned copy of a tree hashes to the same value as the full tree. That
 //! substitution is what makes a Merkle proof checkable, and [`Cell::hash_at`] reaches
-//! the other levels. [`virtualize`] reads the tree a Merkle proof stands for.
+//! the other levels. [`virtualize`] reads the tree a Merkle proof stands for, and a
+//! [`UsageTree`] records the cells a read touches so a proof can be built of just those.
 //!
 //! # Untrusted input
 //!
@@ -80,6 +81,7 @@ mod dict;
 mod error;
 mod merkle;
 mod slice;
+mod usage;
 
 // Building a cell goes through a crate-private constructor, deliberately: outside this
 // crate a cell can only come from parsing. So the properties over generated trees have
@@ -94,6 +96,7 @@ pub use dict::{AugDict, AugDictIter, AugEntry, Augmentation, Dict, DictEntry, Di
 pub use error::CellError;
 pub use merkle::virtualize;
 pub use slice::Slice;
+pub use usage::UsageTree;
 
 // The README ships to crates.io and cannot be replaced once a version is published,
 // so its examples are compiled here rather than trusted. Doc-only: this does not
