@@ -12,7 +12,7 @@ use crate::cell::Cell;
 use crate::error::CellError;
 
 /// The number of bytes needed to hold `value`, at least one.
-fn byte_width(value: u64) -> usize {
+pub(super) fn byte_width(value: u64) -> usize {
     let bits = u64::BITS - value.leading_zeros();
     (bits.div_ceil(8)).max(1) as usize
 }
@@ -21,7 +21,7 @@ fn byte_width(value: u64) -> usize {
 ///
 /// A width past the eight bytes a `u64` holds asks for a number wider than the value,
 /// which no caller here does; writing all eight is what keeps this total.
-fn push_be(out: &mut Vec<u8>, value: u64, width: usize) {
+pub(super) fn push_be(out: &mut Vec<u8>, value: u64, width: usize) {
     let bytes = value.to_be_bytes();
     out.extend(bytes.into_iter().skip(bytes.len().saturating_sub(width)));
 }
@@ -32,7 +32,7 @@ fn push_be(out: &mut Vec<u8>, value: u64, width: usize) {
 /// Cells are shared by representation hash, so a subtree reached by two parents is
 /// stored once. Reverse post-order depth-first search gives the ordering, and the walk
 /// is iterative so a deep graph cannot overflow the stack.
-fn topological(roots: &[Cell]) -> Result<(Vec<Cell>, Vec<Vec<usize>>), CellError> {
+pub(super) fn topological(roots: &[Cell]) -> Result<(Vec<Cell>, Vec<Vec<usize>>), CellError> {
     enum Step {
         Visit(Cell),
         Emit(Cell),
@@ -76,7 +76,7 @@ fn topological(roots: &[Cell]) -> Result<(Vec<Cell>, Vec<Vec<usize>>), CellError
 }
 
 /// Maps each cell's identity to its position.
-fn index_of(order: &[Cell]) -> HashMap<[u8; 32], usize> {
+pub(super) fn index_of(order: &[Cell]) -> HashMap<[u8; 32], usize> {
     order
         .iter()
         .enumerate()

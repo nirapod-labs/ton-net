@@ -157,6 +157,31 @@ fn metadata_matches_the_hashes_the_engine_computed() {
 }
 
 #[test]
+fn the_streaming_serializer_matches_the_whole_one_on_a_real_bag() {
+    // The chunk stream has to be the one-buffer serializer byte for byte, on a bag the node
+    // itself produced, not one this crate wrote. Run the chunks together and they are the
+    // same bytes, and those bytes carry the same cell identities the proof did.
+    use ton_net_cell::{serialize_boc, serialize_boc_chunks};
+
+    let roots = parse_boc(&proof()).expect("the captured proof parses");
+    let streamed: Vec<u8> = serialize_boc_chunks(&roots)
+        .expect("streams")
+        .flatten()
+        .collect();
+    let whole = serialize_boc(&roots).expect("serializes");
+    assert_eq!(
+        streamed, whole,
+        "the chunk stream is the whole serialization"
+    );
+
+    let reparsed = parse_boc(&streamed).expect("the streamed bytes parse");
+    assert_eq!(reparsed.len(), roots.len());
+    for (streamed_root, original) in reparsed.iter().zip(&roots) {
+        assert_eq!(streamed_root.repr_hash(), original.repr_hash());
+    }
+}
+
+#[test]
 fn a_flipped_byte_anywhere_is_caught_or_parses_to_something_else() {
     // The parser must never panic on mutated bytes. Every single-byte change either
     // fails to parse or yields a different, still well-formed graph.

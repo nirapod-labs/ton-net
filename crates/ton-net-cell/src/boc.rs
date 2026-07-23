@@ -11,6 +11,7 @@
 use crate::error::CellError;
 
 mod header;
+mod large;
 mod lazy;
 mod parse;
 mod random;
@@ -20,6 +21,7 @@ mod view;
 #[cfg(feature = "compress")]
 pub mod compress;
 
+pub use large::{serialize_boc_chunks, serialize_boc_chunks_with, BocChunks};
 pub use lazy::LazyBoc;
 pub use parse::parse_boc;
 pub use serialize::{file_hash, serialize_boc, serialize_boc_with, BocOptions};
@@ -52,8 +54,12 @@ pub const MAX_CELLS: usize = 1 << 17;
 pub const MAX_DEPTH: usize = 1024;
 
 /// The CRC-32C (Castagnoli) checksum a bag of cells may carry, reflected form.
-fn crc32c(bytes: &[u8]) -> u32 {
-    let mut crc = 0xFFFF_FFFFu32;
+/// The CRC-32C state before any bytes, so a running checksum can be built one chunk at a
+/// time by the streaming serializer rather than over one contiguous buffer.
+const CRC32C_INIT: u32 = 0xFFFF_FFFF;
+
+/// Folds `bytes` into a running CRC-32C state.
+fn crc32c_update(mut crc: u32, bytes: &[u8]) -> u32 {
     for &byte in bytes {
         crc ^= u32::from(byte);
         for _ in 0..8 {
@@ -64,7 +70,12 @@ fn crc32c(bytes: &[u8]) -> u32 {
             };
         }
     }
-    !crc
+    crc
+}
+
+/// The CRC-32C of `bytes`, the checksum a bag of cells trails itself with.
+fn crc32c(bytes: &[u8]) -> u32 {
+    !crc32c_update(CRC32C_INIT, bytes)
 }
 
 /// A reader that returns an error rather than reading past the end.

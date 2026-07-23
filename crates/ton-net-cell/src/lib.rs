@@ -93,8 +93,8 @@ mod proptests;
 #[cfg(feature = "compress")]
 pub use boc::compress;
 pub use boc::{
-    file_hash, parse_boc, serialize_boc, serialize_boc_with, BocOptions, BocView, LazyBoc,
-    MAX_CELLS, MAX_DEPTH,
+    file_hash, parse_boc, serialize_boc, serialize_boc_chunks, serialize_boc_chunks_with,
+    serialize_boc_with, BocChunks, BocOptions, BocView, LazyBoc, MAX_CELLS, MAX_DEPTH,
 };
 pub use builder::Builder;
 #[cfg(feature = "json")]
