@@ -20,6 +20,7 @@ use std::collections::HashSet;
 use crate::builder::Builder;
 use crate::cell::{Cell, CellType};
 use crate::error::CellError;
+use crate::merkle::create_proof;
 
 /// The level mask of a pruned branch in a single-level proof: it stands at level one and
 /// answers at level zero with the hash of what it replaced.
@@ -78,6 +79,20 @@ impl UsageTree {
     pub fn prune(&self) -> Result<Cell, CellError> {
         prune_cell(&self.root, &self.used)
     }
+
+    /// Builds a Merkle proof of the marked cells over the recorded tree.
+    ///
+    /// This prunes the tree to the marked cells and stands the proof for the tree's root, so
+    /// the proof reveals every marked cell, stands in for the rest, and verifies against the
+    /// tree's own root hash. It composes [`prune`](UsageTree::prune) with proof creation.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CellError::Malformed`] if a marked cell is exotic or the tree does not
+    /// rebuild.
+    pub fn prove(&self) -> Result<Cell, CellError> {
+        create_proof(&self.prune()?)
+    }
 }
 
 /// Rebuilds `cell` against the marked set, standing in for whatever is not marked.
@@ -121,6 +136,7 @@ fn pruned_branch(cell: &Cell) -> Result<Cell, CellError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::merkle::virtualize;
 
     /// An ordinary leaf cell holding one byte.
     fn leaf(byte: u64) -> Cell {
@@ -231,5 +247,26 @@ mod tests {
         // The ordinary tree above still prunes without complaint.
         usage.mark(&root);
         assert!(usage.prune().is_ok());
+    }
+
+    #[test]
+    fn a_usage_tree_proves_the_marked_cells() {
+        let kept = leaf(0x11);
+        let dropped = leaf(0x22);
+        let root = node(0xaa, &[&kept, &dropped]);
+
+        let mut usage = UsageTree::new(root.clone());
+        usage.mark(&kept);
+        let proof = usage.prove().expect("the proof builds");
+
+        // The proof stands for the whole tree by its root; reading back through it lands on
+        // a copy that hashes to the same root with the unmarked side pruned.
+        assert_eq!(proof.cell_type(), CellType::MerkleProof);
+        let covered = virtualize(&proof).expect("the proof virtualizes");
+        assert_eq!(covered.hash(), root.hash());
+        assert_eq!(
+            covered.reference(1).expect("the dropped side").cell_type(),
+            CellType::PrunedBranch,
+        );
     }
 }

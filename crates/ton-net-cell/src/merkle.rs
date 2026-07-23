@@ -19,6 +19,7 @@
 //! account and a shard proof each cover a single tree, and a block's state update covers a
 //! pair of them at one level. The offset is added when a structure that needs it does.
 
+use crate::builder::Builder;
 use crate::cell::{Cell, CellType};
 use crate::error::CellError;
 
@@ -27,6 +28,9 @@ const COVERED_HASH: usize = 1;
 
 /// The offset of a Merkle proof's covered depth within its data, past the root hash.
 const COVERED_DEPTH: usize = COVERED_HASH + 32;
+
+/// The tag byte a Merkle proof carries as the first octet of its data.
+const MERKLE_PROOF_TAG: u64 = 0x03;
 
 /// Reads the tree a Merkle proof stands for.
 ///
@@ -81,10 +85,46 @@ pub fn virtualize(proof: &Cell) -> Result<Cell, CellError> {
     Ok(content.clone())
 }
 
+/// Builds a Merkle proof standing for `content`.
+///
+/// The proof holds `content` as its one reference, with the content's own level-zero hash
+/// and depth stored in its data. It is the inverse of [`virtualize`]: virtualizing the
+/// result gives `content` back, and the block crate's proof engine accepts it against the
+/// root `content` hashes to.
+///
+/// `content` is the tree the proof reveals, an ordinary tree with the branches to withhold
+/// already replaced by pruned branches, which is what [`UsageTree::prune`] produces.
+///
+/// # Errors
+///
+/// Returns [`CellError::Malformed`] if `content` is exotic, since a proof stands for an
+/// ordinary tree and wrapping a pruned branch or another proof yields a shape nothing here
+/// reads, or if the proof cell does not form.
+///
+/// [`UsageTree::prune`]: crate::UsageTree::prune
+pub fn create_proof(content: &Cell) -> Result<Cell, CellError> {
+    // A proof stands for an ordinary tree, and the block engine that reads one requires its
+    // covered root to be ordinary. Wrapping an exotic cell has no such reading.
+    if content.is_exotic() {
+        return Err(CellError::Malformed(
+            "a merkle proof stands for an ordinary tree",
+        ));
+    }
+
+    // A Merkle cell resolves one level of what it covers: the proof stands one level up from
+    // its content, so its mask is the content's shifted down by one. The cell model implies
+    // exactly this from the child and refuses any other, so it is the mask that forms.
+    let mut builder = Builder::new();
+    builder.store_uint(MERKLE_PROOF_TAG, 8)?;
+    builder.store_bytes(content.hash())?;
+    builder.store_uint(u64::from(content.depth()), 16)?;
+    builder.store_ref(content.clone())?;
+    builder.finish(CellType::MerkleProof, content.level_mask() >> 1)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::builder::Builder;
 
     /// A Merkle proof cell over `content`, claiming `hash` and `depth` for the tree it
     /// stands for.
@@ -156,6 +196,31 @@ mod tests {
             virtualize(&forged),
             Err(CellError::Malformed(
                 "merkle proof depth does not match its content"
+            ))
+        );
+    }
+
+    #[test]
+    fn a_proof_built_over_content_virtualizes_back_to_it() {
+        let content = leaf(0xab);
+        let proof = create_proof(&content).expect("an ordinary tree is provable");
+        assert_eq!(proof.cell_type(), CellType::MerkleProof);
+        // Building a proof and reading back through it is the round trip: the tree the proof
+        // reveals is the content it was built over.
+        let covered = virtualize(&proof).expect("the built proof virtualizes");
+        assert_eq!(covered.repr_hash(), content.repr_hash());
+    }
+
+    #[test]
+    fn a_proof_of_a_proof_is_refused() {
+        // A proof stands for an ordinary tree. Its content is exotic, so wrapping it again
+        // has no reading and is refused rather than built into a shape nothing virtualizes.
+        let content = leaf(0xab);
+        let proof = create_proof(&content).expect("an ordinary tree is provable");
+        assert_eq!(
+            create_proof(&proof),
+            Err(CellError::Malformed(
+                "a merkle proof stands for an ordinary tree"
             ))
         );
     }

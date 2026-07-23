@@ -44,8 +44,9 @@
 //! their meaning: at level zero a pruned branch answers with the hash of the subtree it
 //! replaced, so a pruned copy of a tree hashes to the same value as the full tree. That
 //! substitution is what makes a Merkle proof checkable, and [`Cell::hash_at`] reaches
-//! the other levels. [`virtualize`] reads the tree a Merkle proof stands for, and a
-//! [`UsageTree`] records the cells a read touches so a proof can be built of just those.
+//! the other levels. [`virtualize`] reads the tree a Merkle proof stands for,
+//! [`create_proof`] builds one, and a [`UsageTree`] records the cells a read touches so
+//! [`UsageTree::prove`] builds a proof of just those.
 //!
 //! # Untrusted input
 //!
@@ -94,7 +95,7 @@ pub use builder::Builder;
 pub use cell::{Cell, CellType, MAX_BITS, MAX_REFS};
 pub use dict::{AugDict, AugDictIter, AugEntry, Augmentation, Dict, DictEntry, DictIter, Lookup};
 pub use error::CellError;
-pub use merkle::virtualize;
+pub use merkle::{create_proof, virtualize};
 pub use slice::Slice;
 pub use usage::UsageTree;
 

@@ -12,8 +12,11 @@
 //! Pruning runs the other way: a whole block is recorded down to one path and rebuilt with
 //! the rest stood in for, and the pruned block still hashes to the identity it was served
 //! under. That is the property a Merkle proof rests on, held to real bytes.
+//!
+//! Building runs alongside it: a proof built here over the tree a server's proof stands for
+//! reproduces that server's proof cell byte for byte, which pins the layout to real bytes.
 
-use ton_net_cell::{parse_boc, virtualize, CellType, UsageTree};
+use ton_net_cell::{create_proof, parse_boc, virtualize, CellType, UsageTree};
 
 /// The account proof captured from mainnet, a bag of Merkle proofs.
 const ACCOUNT_PROOF: &str = include_str!("fixtures/account-proof.hex");
@@ -128,4 +131,23 @@ fn pruning_a_mainnet_block_to_a_path_keeps_its_root_hash() {
             "reference {side} should be pruned"
         );
     }
+}
+
+#[test]
+fn a_proof_built_here_reproduces_the_server_proof() {
+    let roots = parse_boc(&unhex(ACCOUNT_PROOF)).expect("the proof parses");
+    let mut proofs = 0usize;
+    for root in &roots {
+        if root.cell_type() != CellType::MerkleProof {
+            continue;
+        }
+        proofs += 1;
+        // The tree the server's proof stands for, wrapped again here, has to reproduce the
+        // server's proof cell exactly. A different tag position, field width or byte order
+        // would part from real bytes right here.
+        let content = virtualize(root).expect("the server proof virtualizes");
+        let rebuilt = create_proof(&content).expect("the covered tree is provable");
+        assert_eq!(rebuilt.repr_hash(), root.repr_hash());
+    }
+    assert!(proofs >= 1, "the bag holds no merkle proofs to rebuild");
 }
