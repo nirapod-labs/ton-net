@@ -7,6 +7,7 @@ use crate::cell::Cell;
 use crate::error::CellError;
 
 mod address;
+mod compare;
 mod snake;
 
 pub use address::MsgAddress;
