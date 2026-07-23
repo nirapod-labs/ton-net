@@ -20,7 +20,7 @@ const CHUNK_TARGET: usize = 16 * 1024;
 /// Serializes a bag of cells as a stream of byte chunks, the streaming form of
 /// [`serialize_boc`](super::serialize_boc).
 ///
-/// The iterator yields the header, then the cells in chunks of roughly [`CHUNK_TARGET`] bytes,
+/// The iterator yields the header, then the cells in chunks of roughly 16 KiB,
 /// then the checksum, and the whole of it run together is exactly what
 /// [`serialize_boc`](super::serialize_boc) returns for the same roots. The cell ordering and
 /// sizes are worked out up front, so what is held past that is one chunk at a time rather than
