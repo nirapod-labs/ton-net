@@ -26,7 +26,7 @@ use ton_net_cell::{
     parse_boc, AugDict, Augmentation, Builder, Cell, CellError, CellType, Lookup, Slice, MAX_BITS,
 };
 
-const BASECHAIN: &str = include_str!("fixtures/block-basechain.hex");
+const BASECHAIN: &str = include_str!("../fixtures/block-basechain.hex");
 
 /// The root hash the validators computed for `account_blocks`, as it stands in the block.
 const ACCOUNT_BLOCKS_ROOT: &str =

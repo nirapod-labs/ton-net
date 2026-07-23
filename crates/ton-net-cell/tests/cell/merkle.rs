@@ -21,13 +21,13 @@ use ton_net_cell::{
 };
 
 /// The account proof captured from mainnet, a bag of Merkle proofs.
-const ACCOUNT_PROOF: &str = include_str!("fixtures/account-proof.hex");
+const ACCOUNT_PROOF: &str = include_str!("../fixtures/account-proof.hex");
 
 /// The masterchain block hash the bag was captured under. One proof stands for it.
 const PROOF_BLOCK_HASH: &str = "2f138b6a0e45ec466c1f44326f7d7d638c5f8514786f67160aa2fe2dd6ae0323";
 
 /// A whole basechain block, and the root hash the liteserver served it under.
-const BASECHAIN_BLOCK: &str = include_str!("fixtures/block-basechain.hex");
+const BASECHAIN_BLOCK: &str = include_str!("../fixtures/block-basechain.hex");
 const BASECHAIN_ROOT: &str = "80cbafe6a27bb13ff6f7aa1a103d8a30989fba77c737457160b372359fcf5696";
 
 /// Decodes a hex-dump fixture into bytes, skipping `#` comment lines and whitespace.

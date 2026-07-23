@@ -11,7 +11,7 @@
 use ton_net_cell::{parse_boc, Cell, CellType};
 
 /// The captured proof bytes, hex encoded.
-const PROOF_HEX: &str = include_str!("fixtures/account-proof.hex");
+const PROOF_HEX: &str = include_str!("../fixtures/account-proof.hex");
 
 /// The root hash of the masterchain block the proof was read at.
 const BLOCK_ROOT_HASH: &str = "2f138b6a0e45ec466c1f44326f7d7d638c5f8514786f67160aa2fe2dd6ae0323";

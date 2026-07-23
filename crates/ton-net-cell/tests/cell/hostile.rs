@@ -18,7 +18,7 @@
 use ton_net_cell::{parse_boc, Cell};
 
 /// A real proof, the starting point every mutation works from.
-const PROOF_HEX: &str = include_str!("fixtures/account-proof.hex");
+const PROOF_HEX: &str = include_str!("../fixtures/account-proof.hex");
 
 /// A fixed-seed xorshift, so a failure reproduces exactly.
 struct Rng(u64);

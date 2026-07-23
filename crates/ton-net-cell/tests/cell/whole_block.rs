@@ -21,8 +21,8 @@
 use ton_net_cell::{parse_boc, serialize_boc, Cell, CellError};
 
 /// A masterchain block, and the basechain block the same head named.
-const MASTERCHAIN: &str = include_str!("fixtures/block-masterchain.hex");
-const BASECHAIN: &str = include_str!("fixtures/block-basechain.hex");
+const MASTERCHAIN: &str = include_str!("../fixtures/block-masterchain.hex");
+const BASECHAIN: &str = include_str!("../fixtures/block-basechain.hex");
 
 /// What the liteserver said each block's root hash was, recorded when it was captured.
 const MASTERCHAIN_ROOT: &str = "e55bf9675a44540e6399b171a63045b48294a56e9c67ddb442c10f02adac15e0";
