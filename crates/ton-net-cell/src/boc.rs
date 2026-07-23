@@ -23,9 +23,9 @@ pub use serialize::{file_hash, serialize_boc, serialize_boc_with, BocOptions};
 pub use view::BocView;
 
 // The read path is spread across the header and parse children and the view over it, so the
-// two entry points those children share are named here for them to reach through the parent.
+// entry points those children share are named here for them to reach through the parent.
 use header::read_header;
-use parse::read_and_build;
+use parse::{read_and_build, verify_roots};
 
 /// The four bytes every bag of cells begins with.
 const MAGIC: [u8; 4] = [0xb5, 0xee, 0x9c, 0x72];

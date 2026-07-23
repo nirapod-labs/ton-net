@@ -7,8 +7,13 @@
 //! reads and checks the header, which is cheap and builds no cells, and leaves the cells for
 //! a later call. That lets a large or unfamiliar bag be inspected, its cells counted or its
 //! flags read, and refused if it is corrupt, before anything is allocated for its graph.
+//!
+//! From there a bag can be taken two ways. [`materialize`](BocView::materialize) builds the
+//! whole graph, as `parse_boc` does. [`verify`](BocView::verify) checks every cell and
+//! returns only the roots' hashes, keeping a summary per cell rather than a cell, so a bag
+//! too large to hold as a graph can still be verified and its identity read.
 
-use super::{read_and_build, read_header, Header, Reader};
+use super::{read_and_build, read_header, verify_roots, Header, Reader};
 use crate::cell::Cell;
 use crate::error::CellError;
 
@@ -90,12 +95,33 @@ impl<'a> BocView<'a> {
         };
         read_and_build(&mut reader, &self.header)
     }
+
+    /// Hash-verifies every cell in the bag and returns its roots' identities, without
+    /// building the cell graph.
+    ///
+    /// This runs the same checks [`materialize`](BocView::materialize) runs, over the same
+    /// cells, but keeps a summary of each cell, tens of bytes, rather than the cell, so a bag
+    /// far larger than its graph would fit in memory can still be verified and its root hashes
+    /// read. The returned hashes are the roots' representation hashes, the identities a
+    /// [`materialize`](BocView::materialize) of the same bag reports through
+    /// [`Cell::repr_hash`](crate::Cell::repr_hash).
+    ///
+    /// # Errors
+    ///
+    /// As [`materialize`](BocView::materialize), for the cells it reads and verifies.
+    pub fn verify(&self) -> Result<Vec<[u8; 32]>, CellError> {
+        let mut reader = Reader {
+            bytes: self.bytes,
+            at: self.header.body_offset,
+        };
+        verify_roots(&mut reader, &self.header)
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{parse_boc, serialize_boc_with, BocOptions, Builder};
+    use crate::{parse_boc, serialize_boc, serialize_boc_with, BocOptions, Builder};
 
     /// A one-cell bag holding `byte`, with or without the offset index, and a checksum.
     fn bag_of(byte: u64, index: bool) -> Vec<u8> {
@@ -110,6 +136,17 @@ mod tests {
             },
         )
         .expect("serializes")
+    }
+
+    /// A two-cell bag: a root holding `0xab` and a reference holding `0xcd`.
+    fn two_cell_bag() -> Vec<u8> {
+        let mut child = Builder::new();
+        child.store_uint(0xcd, 8).expect("a byte fits");
+        let mut root = Builder::new();
+        root.store_uint(0xab, 8).expect("a byte fits");
+        root.store_ref(child.build().expect("a cell forms"))
+            .expect("a ref fits");
+        serialize_boc(&[root.build().expect("a cell forms")]).expect("serializes")
     }
 
     #[test]
@@ -137,6 +174,34 @@ mod tests {
         let parsed = parse_boc(&bag).unwrap();
         assert_eq!(materialized.len(), parsed.len());
         assert_eq!(materialized[0].repr_hash(), parsed[0].repr_hash());
+    }
+
+    #[test]
+    fn verify_gives_the_same_root_hashes_as_materialize() {
+        let bag = two_cell_bag();
+        let view = BocView::open(&bag).expect("the header reads");
+        let verified = view.verify().expect("the bag verifies");
+        let materialized = view.materialize().expect("the cells build");
+        assert_eq!(verified.len(), materialized.len(), "one hash per root");
+        for (hash, cell) in verified.iter().zip(&materialized) {
+            assert_eq!(
+                hash,
+                cell.repr_hash(),
+                "a verified root hash is the built one"
+            );
+        }
+    }
+
+    #[test]
+    fn verify_and_materialize_agree_on_a_bag_that_parse_boc_reads() {
+        let bag = two_cell_bag();
+        let roots = parse_boc(&bag).expect("parse_boc reads it");
+        let verified = BocView::open(&bag)
+            .unwrap()
+            .verify()
+            .expect("verify reads it");
+        assert_eq!(verified.len(), roots.len());
+        assert_eq!(&verified[0], roots[0].repr_hash());
     }
 
     #[test]

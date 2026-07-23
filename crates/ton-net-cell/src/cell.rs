@@ -26,7 +26,8 @@ pub mod json;
 pub use exotic::CellType;
 pub use metadata::{Metadata, RefMetadata};
 
-use hash::{compute, Summary};
+use hash::compute;
+pub use hash::Summary;
 use level::{bits_descriptor, hash_index, level_of, refs_descriptor};
 
 /// The most data bits a cell may hold.
@@ -91,13 +92,9 @@ impl Cell {
         cell_type: CellType,
         level_mask: u8,
     ) -> Result<Self, CellError> {
-        if level_mask != implied_mask(cell_type, &refs, level_mask) {
-            return Err(CellError::Malformed(
-                "cell level mask is not the one its children imply",
-            ));
-        }
         let summaries: Vec<Summary> = refs.iter().map(Summary::of).collect();
-        let (hashes, depths) = compute(&data, bits, &summaries, cell_type, level_mask)?;
+        let (hashes, depths) =
+            summarize(&data, bits, &summaries, cell_type, level_mask)?.into_parts();
         Ok(Self {
             inner: Arc::new(Inner {
                 data,
@@ -330,7 +327,36 @@ impl Cell {
     }
 }
 
-/// The level mask a cell must carry, given its kind and its children.
+/// Computes a cell's identity from its parts and its children's summaries.
+///
+/// This is the hashing [`Cell::from_parts`] does, split out so a bag can be hash-verified
+/// without building its cells: a reader keeps a summary per cell and feeds each cell's
+/// children's summaries back through here. The level mask is checked against the children
+/// exactly as when a cell is built, so a summary is never computed over a mask the children
+/// do not justify.
+///
+/// # Errors
+///
+/// Returns [`CellError::Malformed`] if the level mask is not the one the cell's kind and
+/// children imply, or if an exotic cell is too short to hold the hashes its mask claims.
+pub fn summarize(
+    data: &[u8],
+    bits: u16,
+    refs: &[Summary],
+    cell_type: CellType,
+    mask: u8,
+) -> Result<Summary, CellError> {
+    let children_mask = refs.iter().fold(0u8, |acc, child| acc | child.level_mask());
+    if mask != implied_mask(cell_type, children_mask, mask) {
+        return Err(CellError::Malformed(
+            "cell level mask is not the one its children imply",
+        ));
+    }
+    let (hashes, depths) = compute(data, bits, refs, cell_type, mask)?;
+    Ok(Summary::from_parts(mask, hashes, depths))
+}
+
+/// The level mask a cell must carry, given its kind and the union of its children's masks.
 ///
 /// Only a pruned branch chooses its own mask; every other kind derives one. An ordinary
 /// cell stands as high as the highest thing below it, a Merkle cell resolves one level of
@@ -340,15 +366,12 @@ impl Cell {
 /// identity. A cell whose stored mask is higher than its children justify hashes the same
 /// at level zero but answers a different representation hash, so accepting one would let
 /// two cells that are equal disagree about what they are.
-fn implied_mask(cell_type: CellType, refs: &[Cell], stored: u8) -> u8 {
-    let children = refs
-        .iter()
-        .fold(0u8, |mask, child| mask | child.level_mask());
+fn implied_mask(cell_type: CellType, children_mask: u8, stored: u8) -> u8 {
     match cell_type {
         CellType::PrunedBranch => stored,
         CellType::LibraryReference => 0,
-        CellType::MerkleProof | CellType::MerkleUpdate => children >> 1,
-        CellType::Ordinary => children,
+        CellType::MerkleProof | CellType::MerkleUpdate => children_mask >> 1,
+        CellType::Ordinary => children_mask,
     }
 }
 

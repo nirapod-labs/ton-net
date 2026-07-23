@@ -14,8 +14,9 @@ use crate::error::CellError;
 /// values are all a parent needs from a child. Carrying them as a summary rather than a whole
 /// cell is what lets a bag be hash-verified without building its graph: the reader keeps a
 /// summary per cell, tens of bytes, in place of a cell, hundreds.
-pub(super) struct Summary {
-    /// The child's level mask.
+#[derive(Clone)]
+pub struct Summary {
+    /// The cell's level mask.
     level_mask: u8,
     /// One hash per significant level, lowest first.
     hashes: Vec<[u8; 32]>,
@@ -25,13 +26,47 @@ pub(super) struct Summary {
 
 impl Summary {
     /// Reads a built cell's identity into a summary.
-    pub(super) fn of(cell: &Cell) -> Self {
+    pub fn of(cell: &Cell) -> Self {
         let (hashes, depths) = cell.stored();
         Self {
             level_mask: cell.level_mask(),
             hashes: hashes.to_vec(),
             depths: depths.to_vec(),
         }
+    }
+
+    /// A summary from parts already computed, as [`summarize`](super::summarize) returns.
+    pub fn from_parts(level_mask: u8, hashes: Vec<[u8; 32]>, depths: Vec<u16>) -> Self {
+        Self {
+            level_mask,
+            hashes,
+            depths,
+        }
+    }
+
+    /// The summarised cell's level mask.
+    pub fn level_mask(&self) -> u8 {
+        self.level_mask
+    }
+
+    /// The summarised cell's significant hashes, lowest level first.
+    pub fn hashes(&self) -> &[[u8; 32]] {
+        &self.hashes
+    }
+
+    /// The depth beside each hash.
+    pub fn depths(&self) -> &[u16] {
+        &self.depths
+    }
+
+    /// The identity of the summarised cell itself: its hash at its own level.
+    pub fn repr_hash(&self) -> [u8; 32] {
+        self.hash_at(level_of(self.level_mask))
+    }
+
+    /// Consumes the summary, returning its hashes and depths for a cell to hold.
+    pub fn into_parts(self) -> (Vec<[u8; 32]>, Vec<u16>) {
+        (self.hashes, self.depths)
     }
 
     /// The summarised cell's hash at `level`, clamped to its topmost, as [`Cell::hash_at`].

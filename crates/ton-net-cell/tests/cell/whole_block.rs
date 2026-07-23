@@ -18,7 +18,7 @@
 //! state whose two subtrees are pruned, so they are also the only fixtures where exotic
 //! cells and stored hashes appear in the same bag.
 
-use ton_net_cell::{parse_boc, serialize_boc, Cell, CellError};
+use ton_net_cell::{parse_boc, serialize_boc, BocView, Cell, CellError};
 
 /// A masterchain block, and the basechain block the same head named.
 const MASTERCHAIN: &str = include_str!("../fixtures/block-masterchain.hex");
@@ -116,6 +116,36 @@ fn a_whole_block_parses_and_hashes_to_the_identity_it_was_served_under() {
             roots[0].parse().load_uint(32).expect("a tag"),
             BLOCK_TAG,
             "{what}: not a block"
+        );
+    }
+}
+
+#[test]
+fn a_view_verifies_a_whole_block_to_the_hash_a_full_parse_gives() {
+    // Verifying keeps a summary per cell rather than the cell, so a bag too large to hold as
+    // a graph could still be checked. Over a whole block, which carries stored hashes and
+    // exotic cells, the root it reports must be the one a full parse computes and the one the
+    // block was served under.
+    for (what, text, expected) in [
+        ("masterchain", MASTERCHAIN, MASTERCHAIN_ROOT),
+        ("basechain", BASECHAIN, BASECHAIN_ROOT),
+    ] {
+        let bag = unhex(text);
+        let verified = BocView::open(&bag)
+            .expect("the header reads")
+            .verify()
+            .expect("the block verifies");
+        let parsed = parse_boc(&bag).expect("the block parses");
+        assert_eq!(verified.len(), parsed.len(), "{what}: one hash per root");
+        assert_eq!(
+            hex(&verified[0]),
+            expected,
+            "{what}: verify does not give the served id"
+        );
+        assert_eq!(
+            &verified[0],
+            parsed[0].repr_hash(),
+            "{what}: verify and a full parse disagree"
         );
     }
 }

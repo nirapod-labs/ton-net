@@ -4,7 +4,7 @@
 //! Reading a bag's cells into a graph, once its header has been checked.
 
 use super::{bit_len, read_header, Header, Reader, MAX_DEPTH};
-use crate::cell::{Cell, CellType, MAX_BITS, MAX_REFS};
+use crate::cell::{summarize, Cell, CellType, Summary, MAX_BITS, MAX_REFS};
 use crate::error::CellError;
 
 /// A cell as read from the bag, with its references still as indices.
@@ -50,16 +50,13 @@ pub fn parse_boc(bytes: &[u8]) -> Result<Vec<Cell>, CellError> {
     read_and_build(&mut reader, &header)
 }
 
-/// Reads the cells of a bag whose header has been read, and returns its roots.
+/// Reads a bag's cells into raw form, references still as indices, and checks each cell's
+/// shape as it goes.
 ///
 /// `reader` sits at the first cell and `header` carries the counts the reads below trust,
-/// which [`read_header`] has already held to the bytes. Cells are built in the one order a
-/// bag stores them, every child before its parent, so each is finished before anything
-/// references it.
-pub(super) fn read_and_build(
-    reader: &mut Reader<'_>,
-    header: &Header,
-) -> Result<Vec<Cell>, CellError> {
+/// which [`read_header`] has already held to the bytes. The raw cells come back in bag
+/// order, every cell ahead of the ones it references.
+fn read_raw(reader: &mut Reader<'_>, header: &Header) -> Result<Vec<RawCell>, CellError> {
     let count = header.count;
     let ref_size = header.ref_size;
 
@@ -78,9 +75,8 @@ pub(super) fn read_and_build(
 
         // A cell may carry its own hashes and depths ahead of its data, one of each per
         // level its mask marks and one more besides. A whole block arrives this way; a
-        // Merkle proof does not, which is why the read path never met it. None of it is
-        // taken on trust: it is checked below against what the cell's own contents give,
-        // so a bag that describes itself wrongly is refused rather than believed.
+        // Merkle proof does not. None of it is taken on trust: it is checked against what
+        // the cell's own contents give, so a bag that describes itself wrongly is refused.
         let stored = if d1 & 16 != 0 {
             let per_level = level_mask.count_ones() as usize + 1;
             Some(reader.take(per_level * (32 + 2))?.to_vec())
@@ -118,10 +114,15 @@ pub(super) fn read_and_build(
             stored,
         });
     }
+    Ok(raw)
+}
 
-    // References point forward, so a descending pass meets every child before its parent.
-    // Depths accumulate in that same descending order, so position k holds cell
-    // `count-1-k`, which is the convention the build below reads its children by.
+/// Refuses a graph deeper than [`MAX_DEPTH`](super::MAX_DEPTH).
+///
+/// References point forward, so a descending pass meets every child before its parent, and
+/// depths accumulate in that order: position k holds the depth of cell `count - 1 - k`,
+/// the convention the builds below read their children by.
+fn check_depths(raw: &[RawCell], count: usize) -> Result<(), CellError> {
     let mut depth: Vec<usize> = Vec::with_capacity(count);
     for raw_cell in raw.iter().rev() {
         let mut deepest = 0usize;
@@ -133,6 +134,34 @@ pub(super) fn read_and_build(
         }
         depth.push(deepest);
     }
+    Ok(())
+}
+
+/// The bag's root cells, read from the positions the header names in a descending build.
+fn roots<T: Clone>(built: &[T], header: &Header, count: usize) -> Result<Vec<T>, CellError> {
+    header
+        .root_list
+        .iter()
+        .map(|&index| {
+            built
+                .get(count - 1 - index)
+                .cloned()
+                .ok_or(CellError::BadReference)
+        })
+        .collect()
+}
+
+/// Reads the cells of a bag whose header has been read, and returns its roots.
+///
+/// Cells are built in the one order a bag stores them, every child before its parent, so
+/// each is finished before anything references it.
+pub(super) fn read_and_build(
+    reader: &mut Reader<'_>,
+    header: &Header,
+) -> Result<Vec<Cell>, CellError> {
+    let count = header.count;
+    let raw = read_raw(reader, header)?;
+    check_depths(&raw, count)?;
 
     // Built in the same descending order. Position k in `built` holds cell `count-1-k`.
     let mut built: Vec<Cell> = Vec::with_capacity(count);
@@ -152,21 +181,58 @@ pub(super) fn read_and_build(
             raw_cell.level_mask,
         )?;
         if let Some(stored) = &raw_cell.stored {
-            check_stored(&cell, stored)?;
+            let (hashes, depths) = cell.stored();
+            check_stored(hashes, depths, stored)?;
         }
         built.push(cell);
     }
 
-    header
-        .root_list
-        .iter()
-        .map(|&index| {
-            built
-                .get(count - 1 - index)
-                .cloned()
-                .ok_or(CellError::BadReference)
-        })
-        .collect()
+    roots(&built, header, count)
+}
+
+/// Hash-verifies a bag's cells without building its graph, and returns its roots' identities.
+///
+/// This reads and checks every cell exactly as [`read_and_build`] does, but keeps a summary
+/// per cell, tens of bytes, rather than a whole cell, so a large bag can be verified and its
+/// root hashes read at a fraction of the memory the graph would take. The summaries feed each
+/// other bottom up through [`summarize`], the same hashing a built cell runs.
+///
+/// # Errors
+///
+/// As [`read_and_build`], for the cells it reads and the identities it computes.
+pub(super) fn verify_roots(
+    reader: &mut Reader<'_>,
+    header: &Header,
+) -> Result<Vec<[u8; 32]>, CellError> {
+    let count = header.count;
+    let raw = read_raw(reader, header)?;
+    check_depths(&raw, count)?;
+
+    // Position k in `summaries` holds cell `count-1-k`, as `built` does in read_and_build.
+    let mut summaries: Vec<Summary> = Vec::with_capacity(count);
+    for raw_cell in raw.iter().rev() {
+        let mut children = Vec::with_capacity(raw_cell.refs.len());
+        for &target in &raw_cell.refs {
+            let child = summaries
+                .get(count - 1 - target)
+                .ok_or(CellError::BadReference)?;
+            children.push(child.clone());
+        }
+        let summary = summarize(
+            &raw_cell.data,
+            raw_cell.bits,
+            &children,
+            raw_cell.cell_type,
+            raw_cell.level_mask,
+        )?;
+        if let Some(stored) = &raw_cell.stored {
+            check_stored(summary.hashes(), summary.depths(), stored)?;
+        }
+        summaries.push(summary);
+    }
+
+    let roots = roots(&summaries, header, count)?;
+    Ok(roots.iter().map(Summary::repr_hash).collect())
 }
 
 /// Determines a cell's kind, and holds an exotic cell to the shape that kind must have.
@@ -238,13 +304,14 @@ fn classify(
     Ok(cell_type)
 }
 
-/// Holds a cell to the hashes and depths it carried.
+/// Holds a cell's computed identity to the hashes and depths it carried.
 ///
 /// The stored copies are never used: the cell's identity comes from its own contents
 /// either way. What they are good for is disagreement, which means the sender computed
 /// something this crate did not, and there is no reading of that worth continuing from.
-fn check_stored(cell: &Cell, stored: &[u8]) -> Result<(), CellError> {
-    let (hashes, depths) = cell.stored();
+/// It takes the computed hashes and depths rather than a cell, so the graph-building read
+/// and the summary-only read can both reach it.
+fn check_stored(hashes: &[[u8; 32]], depths: &[u16], stored: &[u8]) -> Result<(), CellError> {
     if stored.len() != hashes.len() * 32 + depths.len() * 2 {
         return Err(CellError::Malformed(
             "cell stores a different number of hashes than its level mask allows",
