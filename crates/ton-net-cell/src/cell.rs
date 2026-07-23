@@ -18,11 +18,13 @@ mod dump;
 mod exotic;
 mod hash;
 mod level;
+mod metadata;
 
 #[cfg(feature = "json")]
 pub mod json;
 
 pub use exotic::CellType;
+pub use metadata::{Metadata, RefMetadata};
 
 use hash::compute;
 use level::{bits_descriptor, hash_index, level_of, refs_descriptor};
@@ -156,6 +158,17 @@ impl Cell {
     #[must_use]
     pub fn level_mask(&self) -> u8 {
         self.inner.level_mask
+    }
+
+    /// The cell's stored identity: its significant hashes and depths, its level mask, and
+    /// the same for each reference one level down.
+    ///
+    /// This reads back the values the cell computed when it was built, so it costs a copy
+    /// rather than a rehash. It is what a lazy or streaming bag reader consults to know a
+    /// subtree's identity before it has built the subtree.
+    #[must_use]
+    pub fn metadata(&self) -> Metadata {
+        metadata::of(self)
     }
 
     /// The hashes and depths this cell computed, in the order a bag of cells stores them.
@@ -412,5 +425,24 @@ mod tests {
             .build()
             .expect("well formed");
         assert_eq!(rebuilt.repr_hash(), cell.repr_hash());
+    }
+
+    #[test]
+    fn metadata_reports_the_stored_identity() {
+        let child = cell_of(0xCD);
+        let mut builder = Builder::new();
+        builder.store_uint(0xAB, 8).expect("a byte fits");
+        builder.store_ref(child.clone()).expect("a ref fits");
+        let parent = builder.build().expect("well formed");
+
+        let meta = parent.metadata();
+        assert_eq!(meta.level_mask, parent.level_mask());
+        assert_eq!(meta.hashes.first(), Some(parent.hash()));
+        assert_eq!(meta.depths.first(), Some(&parent.depth()));
+
+        let reference = meta.refs.first().expect("one reference");
+        assert_eq!(reference.level_mask, child.level_mask());
+        assert_eq!(reference.hashes.first(), Some(child.hash()));
+        assert_eq!(reference.depths.first(), Some(&child.depth()));
     }
 }

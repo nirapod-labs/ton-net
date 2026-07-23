@@ -131,6 +131,32 @@ fn every_pruned_branch_is_long_enough_to_read() {
 }
 
 #[test]
+fn metadata_matches_the_hashes_the_engine_computed() {
+    let roots = parse_boc(&proof()).expect("the captured proof parses");
+
+    // The proof holds every cell kind, so this walks ordinary cells, both Merkle kinds,
+    // and pruned branches, the last of which are significant at more than one level and so
+    // carry more than one hash. For each, the reported identity must be the identity the
+    // cell computed for itself, and each reference's must be that reference's own.
+    for cell in all_cells(&roots) {
+        let meta = cell.metadata();
+        assert_eq!(meta.level_mask, cell.level_mask());
+        assert_eq!(meta.hashes.len(), meta.depths.len());
+        assert_eq!(meta.hashes.first(), Some(cell.hash()));
+        assert_eq!(meta.hashes.last(), Some(cell.repr_hash()));
+        assert_eq!(meta.depths.first(), Some(&cell.depth()));
+
+        assert_eq!(meta.refs.len(), cell.refs().len());
+        for (reference, child) in meta.refs.iter().zip(cell.refs()) {
+            assert_eq!(reference.level_mask, child.level_mask());
+            assert_eq!(reference.hashes.first(), Some(child.hash()));
+            assert_eq!(reference.hashes.last(), Some(child.repr_hash()));
+            assert_eq!(reference.depths.first(), Some(&child.depth()));
+        }
+    }
+}
+
+#[test]
 fn a_flipped_byte_anywhere_is_caught_or_parses_to_something_else() {
     // The parser must never panic on mutated bytes. Every single-byte change either
     // fails to parse or yields a different, still well-formed graph.
