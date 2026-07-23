@@ -19,10 +19,17 @@ rust-version.workspace = true
 # `cargo bench` would otherwise run the unit tests with criterion's flags.
 bench = false
 
+[features]
+# JSON rendering of an ordinary cell tree, opt-in so the default build stays free of
+# serde_json. The crate already sits in a tree that carries serde_json for config
+# parsing, so this admits no new dependency, only a new use of one (NET-ADR-003).
+json = ["dep:serde_json"]
+
 [dependencies]
 # The representation hash is SHA-256, on the single copy NET-ADR-003 fixes.
 sha2.workspace = true
 thiserror.workspace = true
+serde_json = { workspace = true, optional = true }
 
 [dev-dependencies]
 criterion.workspace = true

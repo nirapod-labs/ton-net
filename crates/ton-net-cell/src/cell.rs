@@ -13,6 +13,9 @@ use crate::slice::Slice;
 
 mod dump;
 
+#[cfg(feature = "json")]
+pub mod json;
+
 /// The most data bits a cell may hold.
 pub const MAX_BITS: u16 = 1023;
 

@@ -95,6 +95,8 @@ pub use boc::{
     MAX_DEPTH,
 };
 pub use builder::Builder;
+#[cfg(feature = "json")]
+pub use cell::json;
 pub use cell::{Cell, CellType, MAX_BITS, MAX_REFS};
 pub use dict::{
     AugDict, AugDictIter, AugEntry, Augmentation, Dict, DictEntry, DictIter, ForkExtra, Lookup,
