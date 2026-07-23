@@ -90,7 +90,9 @@ mod usage;
 #[cfg(test)]
 mod proptests;
 
-pub use boc::{parse_boc, serialize_boc, MAX_CELLS, MAX_DEPTH};
+pub use boc::{
+    file_hash, parse_boc, serialize_boc, serialize_boc_with, BocOptions, MAX_CELLS, MAX_DEPTH,
+};
 pub use builder::Builder;
 pub use cell::{Cell, CellType, MAX_BITS, MAX_REFS};
 pub use dict::{

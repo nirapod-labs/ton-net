@@ -5,6 +5,8 @@
 
 use std::collections::{HashMap, HashSet};
 
+use sha2::{Digest, Sha256};
+
 use crate::cell::{Cell, CellType, MAX_BITS, MAX_REFS};
 use crate::error::CellError;
 
@@ -527,6 +529,30 @@ fn index_of(order: &[Cell]) -> HashMap<[u8; 32], usize> {
         .collect()
 }
 
+/// What to write into a bag of cells beyond the cells themselves.
+///
+/// The format carries two optional pieces past the header. An index gives the offset of
+/// each cell so a reader can reach one without walking the bag; a CRC-32C checksum trails
+/// the whole bag so a reader can refuse corrupted bytes before building anything. Neither
+/// changes which cells the bag holds, only how a reader may work over it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BocOptions {
+    /// Write the per-cell offset index.
+    pub index: bool,
+    /// Write the trailing CRC-32C checksum.
+    pub crc32c: bool,
+}
+
+impl Default for BocOptions {
+    /// A checksum and no index, the form [`serialize_boc`] writes.
+    fn default() -> Self {
+        Self {
+            index: false,
+            crc32c: true,
+        }
+    }
+}
+
 /// Serializes a cell graph as a bag of cells, with a checksum.
 ///
 /// A cell shared by more than one parent is stored once, keyed by its representation
@@ -554,6 +580,20 @@ fn index_of(order: &[Cell]) -> HashMap<[u8; 32], usize> {
 /// # Ok::<(), ton_net_cell::CellError>(())
 /// ```
 pub fn serialize_boc(roots: &[Cell]) -> Result<Vec<u8>, CellError> {
+    serialize_boc_with(roots, &BocOptions::default())
+}
+
+/// Serializes a cell graph as a bag of cells, choosing what to write beyond the cells.
+///
+/// This is [`serialize_boc`] with the index and checksum under the caller's control. A bag
+/// with an index states where each cell begins, and a bag with a checksum can be refused on
+/// the way back in if it is corrupt. Multiple roots are written by passing more than one:
+/// the shared cells beneath them are still stored once.
+///
+/// # Errors
+///
+/// As [`serialize_boc`].
+pub fn serialize_boc_with(roots: &[Cell], options: &BocOptions) -> Result<Vec<u8>, CellError> {
     if roots.is_empty() {
         return Err(CellError::Header("root count"));
     }
@@ -565,7 +605,10 @@ pub fn serialize_boc(roots: &[Cell]) -> Result<Vec<u8>, CellError> {
     let positions = index_of(&order);
     let ref_size = byte_width(count as u64);
 
+    // Each cell's end offset in the body is recorded as the body grows, which is what the
+    // index writes below and what lets a reader reach a cell without walking to it.
     let mut body = Vec::new();
+    let mut offsets = Vec::with_capacity(count);
     for (cell, refs) in order.iter().zip(&children) {
         let (d1, d2) = cell.stored_descriptors();
         body.push(d1);
@@ -574,18 +617,27 @@ pub fn serialize_boc(roots: &[Cell]) -> Result<Vec<u8>, CellError> {
         for &index in refs {
             push_be(&mut body, index as u64, ref_size);
         }
+        offsets.push(body.len());
     }
     let offset_size = byte_width(body.len() as u64);
 
     let mut out = Vec::with_capacity(body.len() + 32);
     out.extend_from_slice(&MAGIC);
-    // No index, a checksum, and the reference size in the low three bits. byte_width
-    // always returns a byte count from 1 to 8, which fits u8 in both pushes below.
+    // The flags byte carries the index and checksum choices in its top two bits and the
+    // reference size in its low three. byte_width returns a byte count from 1 to 8, which
+    // fits u8 in both pushes below.
     #[allow(
         clippy::cast_possible_truncation,
         reason = "byte_width returns 1 to 8, which fits u8"
     )]
-    out.push(0x40 | ref_size as u8);
+    let mut flags = ref_size as u8;
+    if options.index {
+        flags |= 0x80;
+    }
+    if options.crc32c {
+        flags |= 0x40;
+    }
+    out.push(flags);
     #[allow(
         clippy::cast_possible_truncation,
         reason = "byte_width returns 1 to 8, which fits u8"
@@ -602,11 +654,31 @@ pub fn serialize_boc(roots: &[Cell]) -> Result<Vec<u8>, CellError> {
             .ok_or(CellError::Malformed("a root was not reachable"))?;
         push_be(&mut out, index as u64, ref_size);
     }
+    // The index sits between the roots and the cells, so the cell-area size the header
+    // states covers the cells alone, exactly as the reader accounts for it.
+    if options.index {
+        for &offset in &offsets {
+            push_be(&mut out, offset as u64, offset_size);
+        }
+    }
     out.extend_from_slice(&body);
 
-    let checksum = crc32c(&out);
-    out.extend_from_slice(&checksum.to_le_bytes());
+    if options.crc32c {
+        let checksum = crc32c(&out);
+        out.extend_from_slice(&checksum.to_le_bytes());
+    }
     Ok(out)
+}
+
+/// The SHA-256 of a serialized bag, the hash a block or state is named by.
+///
+/// TON identifies a block by the pair of hashes of its two serialized bags, the root hash
+/// of the block cell and this file hash of the bytes that carry it. This computes the
+/// second over whatever bag is passed, which a caller pairs with the root hash a reader
+/// gives to name what it just read.
+#[must_use]
+pub fn file_hash(bag: &[u8]) -> [u8; 32] {
+    Sha256::digest(bag).into()
 }
 
 #[cfg(test)]
@@ -919,5 +991,87 @@ mod tests {
         let mut overcount = EXACT;
         overcount[6] = 0x03;
         assert_eq!(parse_boc(&overcount), Err(CellError::Truncated));
+    }
+
+    #[test]
+    fn every_option_combination_round_trips() {
+        let roots = parse_boc(&TWO_CELLS).unwrap();
+        let expected = *roots[0].repr_hash();
+        for index in [false, true] {
+            for crc32c in [false, true] {
+                let bag = serialize_boc_with(&roots, &BocOptions { index, crc32c }).unwrap();
+                let back = parse_boc(&bag).expect("the bag reads back");
+                assert_eq!(
+                    *back[0].repr_hash(),
+                    expected,
+                    "index={index} crc32c={crc32c}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn the_default_serialization_is_the_plain_one() {
+        // serialize_boc is serialize_boc_with under the default options, byte for byte.
+        let roots = parse_boc(&TWO_CELLS).unwrap();
+        assert_eq!(
+            serialize_boc(&roots).unwrap(),
+            serialize_boc_with(&roots, &BocOptions::default()).unwrap(),
+        );
+    }
+
+    #[test]
+    fn an_indexed_bag_states_where_each_cell_begins() {
+        // The index adds count offsets between the roots and the cells, so the bag is longer
+        // by exactly that, and still reads back to the same cells.
+        let roots = parse_boc(&TWO_CELLS).unwrap();
+        let plain = serialize_boc_with(
+            &roots,
+            &BocOptions {
+                index: false,
+                crc32c: true,
+            },
+        )
+        .unwrap();
+        let indexed = serialize_boc_with(
+            &roots,
+            &BocOptions {
+                index: true,
+                crc32c: true,
+            },
+        )
+        .unwrap();
+        assert!(indexed.len() > plain.len(), "the index takes room");
+        assert_eq!(
+            parse_boc(&indexed).unwrap()[0].repr_hash(),
+            roots[0].repr_hash(),
+        );
+    }
+
+    #[test]
+    fn the_file_hash_is_the_sha256_of_the_bag() {
+        let roots = parse_boc(&TWO_CELLS).unwrap();
+        let bag = serialize_boc(&roots).unwrap();
+        let expected: [u8; 32] = Sha256::digest(&bag).into();
+        assert_eq!(
+            file_hash(&bag),
+            expected,
+            "the file hash is the bag's sha256"
+        );
+
+        // A different bag names itself differently.
+        let other = serialize_boc(&parse_boc(&ONE_CELL).unwrap()).unwrap();
+        assert_ne!(file_hash(&bag), file_hash(&other));
+    }
+
+    #[test]
+    fn a_bag_of_two_roots_reads_back_both() {
+        let one = parse_boc(&ONE_CELL).unwrap().remove(0);
+        let two = parse_boc(&TWO_CELLS).unwrap().remove(0);
+        let bag = serialize_boc(&[one.clone(), two.clone()]).expect("two roots serialize");
+        let back = parse_boc(&bag).expect("the two-root bag reads back");
+        assert_eq!(back.len(), 2, "both roots come back");
+        assert_eq!(back[0].repr_hash(), one.repr_hash());
+        assert_eq!(back[1].repr_hash(), two.repr_hash());
     }
 }
