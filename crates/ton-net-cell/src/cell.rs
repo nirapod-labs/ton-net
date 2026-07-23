@@ -26,7 +26,7 @@ pub mod json;
 pub use exotic::CellType;
 pub use metadata::{Metadata, RefMetadata};
 
-use hash::compute;
+use hash::{compute, Summary};
 use level::{bits_descriptor, hash_index, level_of, refs_descriptor};
 
 /// The most data bits a cell may hold.
@@ -96,7 +96,8 @@ impl Cell {
                 "cell level mask is not the one its children imply",
             ));
         }
-        let (hashes, depths) = compute(&data, bits, &refs, cell_type, level_mask)?;
+        let summaries: Vec<Summary> = refs.iter().map(Summary::of).collect();
+        let (hashes, depths) = compute(&data, bits, &summaries, cell_type, level_mask)?;
         Ok(Self {
             inner: Arc::new(Inner {
                 data,

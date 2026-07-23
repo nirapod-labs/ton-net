@@ -8,6 +8,51 @@ use sha2::{Digest, Sha256};
 use super::{bits_descriptor, hash_index, level_of, refs_descriptor, Cell, CellType};
 use crate::error::CellError;
 
+/// A child's stored identity, enough to hash its parent without holding the child cell.
+///
+/// A parent's hash is taken over its children's hashes and depths, one per level, so those
+/// values are all a parent needs from a child. Carrying them as a summary rather than a whole
+/// cell is what lets a bag be hash-verified without building its graph: the reader keeps a
+/// summary per cell, tens of bytes, in place of a cell, hundreds.
+pub(super) struct Summary {
+    /// The child's level mask.
+    level_mask: u8,
+    /// One hash per significant level, lowest first.
+    hashes: Vec<[u8; 32]>,
+    /// The depth beside each hash.
+    depths: Vec<u16>,
+}
+
+impl Summary {
+    /// Reads a built cell's identity into a summary.
+    pub(super) fn of(cell: &Cell) -> Self {
+        let (hashes, depths) = cell.stored();
+        Self {
+            level_mask: cell.level_mask(),
+            hashes: hashes.to_vec(),
+            depths: depths.to_vec(),
+        }
+    }
+
+    /// The summarised cell's hash at `level`, clamped to its topmost, as [`Cell::hash_at`].
+    #[expect(
+        clippy::indexing_slicing,
+        reason = "clamped to the last hash, and a summary is built with at least one"
+    )]
+    fn hash_at(&self, level: u8) -> [u8; 32] {
+        let index = hash_index(self.level_mask, level);
+        let last = self.hashes.len().saturating_sub(1);
+        self.hashes[index.min(last)]
+    }
+
+    /// The summarised cell's depth at `level`, clamped to its topmost, as [`Cell::depth_at`].
+    fn depth_at(&self, level: u8) -> u16 {
+        let index = hash_index(self.level_mask, level);
+        let last = self.depths.len().saturating_sub(1);
+        self.depths.get(index.min(last)).copied().unwrap_or(0)
+    }
+}
+
 /// Reads a 32-byte hash out of `data` at `at`.
 fn read_hash(data: &[u8], at: usize) -> Result<[u8; 32], CellError> {
     let slice = data.get(at..at + 32).ok_or(CellError::Malformed(
@@ -45,7 +90,7 @@ fn read_depth(data: &[u8], at: usize) -> Result<u16, CellError> {
 pub(super) fn compute(
     data: &[u8],
     bits: u16,
-    refs: &[Cell],
+    refs: &[Summary],
     cell_type: CellType,
     mask: u8,
 ) -> Result<(Vec<[u8; 32]>, Vec<u16>), CellError> {
@@ -103,7 +148,7 @@ pub(super) fn compute(
             repr.extend_from_slice(&child.depth_at(child_level).to_be_bytes());
         }
         for child in refs {
-            repr.extend_from_slice(child.hash_at(child_level));
+            repr.extend_from_slice(&child.hash_at(child_level));
         }
 
         hashes.push(Sha256::digest(&repr).into());
