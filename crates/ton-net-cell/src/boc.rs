@@ -11,6 +11,7 @@
 use crate::error::CellError;
 
 mod header;
+mod lazy;
 mod parse;
 mod random;
 mod serialize;
@@ -19,6 +20,7 @@ mod view;
 #[cfg(feature = "compress")]
 pub mod compress;
 
+pub use lazy::LazyBoc;
 pub use parse::parse_boc;
 pub use serialize::{file_hash, serialize_boc, serialize_boc_with, BocOptions};
 pub use view::BocView;
