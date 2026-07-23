@@ -24,14 +24,15 @@ use crate::error::CellError;
 use crate::slice::Slice;
 
 mod aug;
+mod floor;
 mod label;
-mod pfx;
 mod plain;
+mod prefix;
 mod typed;
 
 pub use aug::{AugDict, AugDictIter, AugEntry, AugItem, Augmentation};
-pub use pfx::{PfxDict, PfxDictIter, PfxMatch};
 pub use plain::{Dict, DictIter};
+pub use prefix::{PfxDict, PfxDictIter, PfxMatch};
 
 /// A dictionary fork's key prefix and the summary it carries.
 ///
