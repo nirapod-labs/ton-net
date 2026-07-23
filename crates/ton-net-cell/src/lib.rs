@@ -95,7 +95,9 @@ pub use builder::Builder;
 pub use cell::{Cell, CellType, MAX_BITS, MAX_REFS};
 pub use dict::{AugDict, AugDictIter, AugEntry, Augmentation, Dict, DictEntry, DictIter, Lookup};
 pub use error::CellError;
-pub use merkle::{create_proof, virtualize};
+pub use merkle::{
+    apply_update, create_proof, create_update, may_apply, validate_update, virtualize,
+};
 pub use slice::Slice;
 pub use usage::UsageTree;
 

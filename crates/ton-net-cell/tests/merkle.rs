@@ -16,7 +16,9 @@
 //! Building runs alongside it: a proof built here over the tree a server's proof stands for
 //! reproduces that server's proof cell byte for byte, which pins the layout to real bytes.
 
-use ton_net_cell::{create_proof, parse_boc, virtualize, CellType, UsageTree};
+use ton_net_cell::{
+    create_proof, create_update, parse_boc, validate_update, virtualize, CellType, UsageTree,
+};
 
 /// The account proof captured from mainnet, a bag of Merkle proofs.
 const ACCOUNT_PROOF: &str = include_str!("fixtures/account-proof.hex");
@@ -150,4 +152,25 @@ fn a_proof_built_here_reproduces_the_server_proof() {
         assert_eq!(rebuilt.repr_hash(), root.repr_hash());
     }
     assert!(proofs >= 1, "the bag holds no merkle proofs to rebuild");
+}
+
+#[test]
+fn an_update_built_here_reproduces_a_mainnet_block_update() {
+    let roots = parse_boc(&unhex(BASECHAIN_BLOCK)).expect("the block parses");
+    let block = &roots[0];
+    // A block stores its state transition as a Merkle update, its third reference.
+    let update = block.reference(2).expect("a block holds a state update");
+    assert_eq!(update.cell_type(), CellType::MerkleUpdate);
+
+    // Rebuilt from the two sides the real update reveals, the update reproduces the real
+    // cell byte for byte, which pins the update layout to real liteserver bytes.
+    let old = update.reference(0).expect("the old side");
+    let new = update.reference(1).expect("the new side");
+    let rebuilt = create_update(old, new).expect("the update rebuilds");
+    assert_eq!(rebuilt.repr_hash(), update.repr_hash());
+
+    // It validates against itself, and names the new state the block leaves behind, which is
+    // the root an account proof for this block must reproduce.
+    validate_update(&rebuilt).expect("a mainnet update validates");
+    assert_eq!(&new.hash()[..], &update.data()[33..65]);
 }
