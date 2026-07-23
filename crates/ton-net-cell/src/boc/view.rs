@@ -13,7 +13,7 @@
 //! returns only the roots' hashes, keeping a summary per cell rather than a cell, so a bag
 //! too large to hold as a graph can still be verified and its identity read.
 
-use super::{build_cell, read_and_build, read_header, verify_roots, Header, Reader};
+use super::{read_and_build, read_header, Header, Reader};
 use crate::cell::Cell;
 use crate::error::CellError;
 
@@ -26,8 +26,8 @@ use crate::error::CellError;
 ///
 /// [`materialize`]: BocView::materialize
 pub struct BocView<'a> {
-    bytes: &'a [u8],
-    header: Header,
+    pub(super) bytes: &'a [u8],
+    pub(super) header: Header,
 }
 
 impl<'a> BocView<'a> {
@@ -94,46 +94,6 @@ impl<'a> BocView<'a> {
             at: self.header.body_offset,
         };
         read_and_build(&mut reader, &self.header)
-    }
-
-    /// Hash-verifies every cell in the bag and returns its roots' identities, without
-    /// building the cell graph.
-    ///
-    /// This runs the same checks [`materialize`](BocView::materialize) runs, over the same
-    /// cells, but keeps a summary of each cell, tens of bytes, rather than the cell, so a bag
-    /// far larger than its graph would fit in memory can still be verified and its root hashes
-    /// read. The returned hashes are the roots' representation hashes, the identities a
-    /// [`materialize`](BocView::materialize) of the same bag reports through
-    /// [`Cell::repr_hash`](crate::Cell::repr_hash).
-    ///
-    /// # Errors
-    ///
-    /// As [`materialize`](BocView::materialize), for the cells it reads and verifies.
-    pub fn verify(&self) -> Result<Vec<[u8; 32]>, CellError> {
-        let mut reader = Reader {
-            bytes: self.bytes,
-            at: self.header.body_offset,
-        };
-        verify_roots(&mut reader, &self.header)
-    }
-
-    /// Builds one cell of the bag, and only the cells it reaches.
-    ///
-    /// Where [`materialize`](BocView::materialize) builds the whole graph, this builds the
-    /// cell at `index` and its subtree, so a single cell of a large bag is read without
-    /// building the rest. `index` is a position among the bag's cells in the order the bag
-    /// stores them, the roots first, up to [`cell_count`](BocView::cell_count).
-    ///
-    /// # Errors
-    ///
-    /// [`CellError::BadReference`] if `index` is past the bag's cell count, and otherwise as
-    /// [`materialize`](BocView::materialize) for the cells it reads and builds.
-    pub fn cell(&self, index: usize) -> Result<Cell, CellError> {
-        let mut reader = Reader {
-            bytes: self.bytes,
-            at: self.header.body_offset,
-        };
-        build_cell(&mut reader, &self.header, index)
     }
 }
 

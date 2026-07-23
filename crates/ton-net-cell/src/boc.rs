@@ -12,6 +12,7 @@ use crate::error::CellError;
 
 mod header;
 mod parse;
+mod random;
 mod serialize;
 mod view;
 
