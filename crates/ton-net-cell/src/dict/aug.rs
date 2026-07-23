@@ -4,10 +4,12 @@
 //! The augmented `HashmapAug n X Y`: a dictionary whose every node also carries a summary
 //! of the subtree below it.
 
+use core::borrow::Borrow;
+
 use super::label::read_label;
 use super::{
-    check_key_bits, collapse, collect_fork_extras, descend, key_of, leaf, lookup, rebuild, rest,
-    split, validate_tree, walk_step, DictEntry, Entry, ForkExtra, Lookup, Pending, Shape,
+    check_key_bits, collapse, collect_fork_extras, descend, key_of, leaf, lookup, rebuild, reroot,
+    rest, split, validate_tree, walk_step, DictEntry, Entry, ForkExtra, Lookup, Pending, Shape,
 };
 use crate::builder::Builder;
 use crate::cell::Cell;
@@ -131,6 +133,9 @@ pub struct AugEntry<E> {
     /// The value under it, with the cursor already past the summary.
     pub entry: DictEntry,
 }
+
+/// A key and the augmented entry stored under it, the pair an [`AugDict`] query returns.
+pub type AugItem<E> = (Vec<u8>, AugEntry<E>);
 
 /// An augmented dictionary: TON's `HashmapAug n X Y`.
 ///
@@ -374,6 +379,171 @@ impl<A: Augmentation> AugDict<A> {
             done: false,
         }
     }
+
+    /// An augmented dictionary holding every item, built in one call.
+    ///
+    /// Each item is a key, the summary of the value under it, and the value. A key given
+    /// more than once keeps the last of each it was given, and the result is the one
+    /// canonical dictionary for its final key set, the same tree [`set`](AugDict::set) builds
+    /// one entry at a time and independent of the order the items arrive in.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CellError`] as [`set`](AugDict::set) does for the first item that will not
+    /// fit or whose key is too short.
+    pub fn from_items<K, V>(
+        aug: A,
+        key_bits: u16,
+        items: impl IntoIterator<Item = (K, A::Extra, V)>,
+    ) -> Result<Self, CellError>
+    where
+        K: AsRef<[u8]>,
+        V: Borrow<Builder>,
+    {
+        let mut dict = Self::new(aug, key_bits)?;
+        for (key, extra, value) in items {
+            dict.set(key.as_ref(), &extra, value.borrow())?;
+        }
+        Ok(dict)
+    }
+
+    /// The number of entries, computed by walking the dictionary.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CellError`] as [`iter`](AugDict::iter) does.
+    pub fn count(&self) -> Result<usize, CellError> {
+        self.iter()
+            .try_fold(0usize, |n, entry| entry.map(|_| n + 1))
+    }
+
+    /// The entry with the smallest key, or nothing when the dictionary is empty.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CellError`] as [`iter`](AugDict::iter) does.
+    pub fn min(&self) -> Result<Option<AugItem<A::Extra>>, CellError> {
+        self.iter().next().transpose()
+    }
+
+    /// The entry with the largest key, or nothing when the dictionary is empty.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CellError`] as [`iter`](AugDict::iter) does.
+    pub fn max(&self) -> Result<Option<AugItem<A::Extra>>, CellError> {
+        self.iter().last().transpose()
+    }
+
+    /// Removes the entry with the smallest key and returns it, or nothing when empty.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CellError`] as [`min`](AugDict::min) and [`remove`](AugDict::remove) do.
+    pub fn take_min(&mut self) -> Result<Option<AugItem<A::Extra>>, CellError> {
+        let Some((key, entry)) = self.min()? else {
+            return Ok(None);
+        };
+        self.remove(&key)?;
+        Ok(Some((key, entry)))
+    }
+
+    /// Removes the entry with the largest key and returns it, or nothing when empty.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CellError`] as [`max`](AugDict::max) and [`remove`](AugDict::remove) do.
+    pub fn take_max(&mut self) -> Result<Option<AugItem<A::Extra>>, CellError> {
+        let Some((key, entry)) = self.max()? else {
+            return Ok(None);
+        };
+        self.remove(&key)?;
+        Ok(Some((key, entry)))
+    }
+
+    /// The entry at `key`, or the next one after it in ascending key order.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CellError`] as [`iter`](AugDict::iter) does.
+    pub fn entry_at_or_after(&self, key: &[u8]) -> Result<Option<AugItem<A::Extra>>, CellError> {
+        for item in self {
+            let (found, entry) = item?;
+            if found.as_slice() >= key {
+                return Ok(Some((found, entry)));
+            }
+        }
+        Ok(None)
+    }
+
+    /// The entry at `key`, or the one before it in ascending key order.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CellError`] as [`iter`](AugDict::iter) does.
+    pub fn entry_at_or_before(&self, key: &[u8]) -> Result<Option<AugItem<A::Extra>>, CellError> {
+        let mut floor = None;
+        for item in self {
+            let (found, entry) = item?;
+            if found.as_slice() <= key {
+                floor = Some((found, entry));
+            } else {
+                break;
+            }
+        }
+        Ok(floor)
+    }
+
+    /// Keeps only the entries `keep` returns true for, recomputing summaries as it goes.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CellError`] as [`iter`](AugDict::iter) and [`remove`](AugDict::remove) do.
+    pub fn retain(
+        &mut self,
+        mut keep: impl FnMut(&[u8], &AugEntry<A::Extra>) -> bool,
+    ) -> Result<(), CellError> {
+        let mut to_remove = Vec::new();
+        for item in &*self {
+            let (key, entry) = item?;
+            if !keep(&key, &entry) {
+                to_remove.push(key);
+            }
+        }
+        for key in &to_remove {
+            self.remove(key)?;
+        }
+        Ok(())
+    }
+
+    /// The sub-dictionary of every entry whose key begins with `prefix`.
+    ///
+    /// As [`Dict::subdict`](crate::Dict::subdict), over the narrower `key_bits -
+    /// prefix_bits`-bit key that remains. The carve leaves every subtree it keeps untouched,
+    /// so each fork it carries still summarises the same two children and the result is a
+    /// consistent augmented dictionary its own [`validate`](AugDict::validate) accepts.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CellError::Malformed`] if `prefix_bits` is wider than the key,
+    /// [`CellError::KeyLength`] if `prefix` is too short to hold `prefix_bits`,
+    /// [`CellError::Pruned`] if reaching the sub-dictionary would cross a pruned branch, or
+    /// [`CellError`] if the tree does not read as an augmented dictionary.
+    pub fn subdict(&self, prefix: &[u8], prefix_bits: u16) -> Result<Self, CellError>
+    where
+        A: Clone,
+    {
+        if prefix_bits > self.key_bits {
+            return Err(CellError::Malformed("dictionary prefix wider than the key"));
+        }
+        let want = key_of(prefix, prefix_bits)?;
+        let narrower = self.key_bits - prefix_bits;
+        let root = match self.root.clone() {
+            Some(root) => reroot(&root, self.key_bits, &want)?,
+            None => None,
+        };
+        Self::from_root(self.aug.clone(), root, narrower)
+    }
 }
 
 impl<'a, A: Augmentation> IntoIterator for &'a AugDict<A> {
@@ -421,6 +591,7 @@ mod tests {
     use super::*;
 
     /// A summary that counts the leaves below a node.
+    #[derive(Clone)]
     struct CountSum;
 
     impl Augmentation for CountSum {
@@ -508,5 +679,70 @@ mod tests {
                 "augmented fork summary disagrees with its children"
             ))
         );
+    }
+
+    #[test]
+    fn count_min_and_max_read_the_ends() {
+        let dict = counted(&[5, 1, 9, 3]);
+        assert_eq!(dict.count().expect("count"), 4);
+        assert_eq!(
+            dict.min().expect("min").expect("nonempty").0,
+            1u32.to_be_bytes()
+        );
+        assert_eq!(
+            dict.max().expect("max").expect("nonempty").0,
+            9u32.to_be_bytes()
+        );
+    }
+
+    #[test]
+    fn an_entry_at_or_before_a_key_is_the_floor() {
+        let dict = counted(&[10, 20, 30]);
+        let (key, _) = dict
+            .entry_at_or_before(&25u32.to_be_bytes())
+            .expect("query")
+            .expect("a floor");
+        assert_eq!(key, 20u32.to_be_bytes());
+        assert!(dict
+            .entry_at_or_before(&5u32.to_be_bytes())
+            .expect("query")
+            .is_none());
+    }
+
+    #[test]
+    fn from_items_builds_the_same_augmented_tree_as_repeated_set() {
+        let items: Vec<([u8; 4], u32, Builder)> = [1u32, 2, 3, 100]
+            .iter()
+            .map(|&k| {
+                let mut value = Builder::new();
+                value.store_uint(0, 8).expect("a byte fits");
+                (k.to_be_bytes(), 1u32, value)
+            })
+            .collect();
+        let bulk = AugDict::from_items(CountSum, 32, items).expect("from_items");
+        assert_eq!(bulk.root_extra().expect("extra"), Some(4));
+        assert_eq!(
+            bulk.root().map(Cell::repr_hash),
+            counted(&[1, 2, 3, 100]).root().map(Cell::repr_hash),
+        );
+    }
+
+    #[test]
+    fn a_carved_augmented_sub_dictionary_stays_consistent() {
+        // Carving relabels the top edge but leaves every subtree it keeps as it was, so the
+        // summaries still hold and the count over the kept keys is exact.
+        let mut dict = AugDict::new(CountSum, 16).expect("a dictionary");
+        let mut value = Builder::new();
+        value.store_uint(0, 8).expect("a byte fits");
+        for key in [0xab01u16, 0xab02, 0xabff, 0x1234] {
+            dict.set(&key.to_be_bytes(), &1, &value).expect("set");
+        }
+
+        let sub = dict.subdict(&[0xab], 8).expect("subdict");
+        assert_eq!(sub.key_bits(), 8);
+        assert_eq!(sub.count().expect("count"), 3);
+        assert_eq!(sub.root_extra().expect("extra"), Some(3));
+        sub.validate()
+            .expect("a carved augmented dictionary still sums");
     }
 }

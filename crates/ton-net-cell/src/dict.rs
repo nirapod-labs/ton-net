@@ -28,7 +28,7 @@ mod label;
 mod plain;
 mod typed;
 
-pub use aug::{AugDict, AugDictIter, AugEntry, Augmentation};
+pub use aug::{AugDict, AugDictIter, AugEntry, AugItem, Augmentation};
 pub use plain::{Dict, DictIter};
 
 /// A dictionary fork's key prefix and the summary it carries.

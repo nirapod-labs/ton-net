@@ -77,7 +77,7 @@ struct Currencies {
 /// Every collection in the fixture is grams only, so combining two that are not is refused
 /// rather than guessed at. Adding two currency dictionaries is the caller's business, and
 /// a wrong guess here would show up as a root hash that happened to match nothing.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct SumCurrencies;
 
 impl Augmentation for SumCurrencies {
@@ -321,6 +321,63 @@ fn the_leaves_add_up_to_what_the_block_says_they_do() {
     let real = AugDict::from_root(SumCurrencies, Some(account_blocks()), ACCOUNT_KEY_BITS).unwrap();
     let total: u128 = entries(&real).iter().map(|(_, extra, _)| extra.grams).sum();
     assert_eq!(total, TOTAL_GRAMS);
+}
+
+#[test]
+fn from_items_rebuilds_the_accounts_dictionary_to_the_validators_hash() {
+    // The bulk path has to land on the same canonical tree the one-at-a-time rebuild does,
+    // so it answers to the same hash the validators computed, in either order.
+    let real = AugDict::from_root(SumCurrencies, Some(account_blocks()), ACCOUNT_KEY_BITS).unwrap();
+    let entries = entries(&real);
+    for order in [false, true] {
+        let mut items = entries.clone();
+        if order {
+            items.reverse();
+        }
+        let bulk = AugDict::from_items(SumCurrencies, ACCOUNT_KEY_BITS, items).unwrap();
+        assert_eq!(
+            hex(bulk.root().unwrap().repr_hash()),
+            ACCOUNT_BLOCKS_ROOT,
+            "from_items in {} order",
+            if order { "descending" } else { "ascending" }
+        );
+    }
+}
+
+#[test]
+fn a_carved_accounts_sub_dictionary_stays_consistent_and_canonical() {
+    // Carving keeps every subtree it holds, so the summary rule still holds over the sub,
+    // and a fresh build over its entries reaches the same tree.
+    let real = AugDict::from_root(SumCurrencies, Some(account_blocks()), ACCOUNT_KEY_BITS).unwrap();
+    let all = entries(&real);
+    let lead = all[0].0[0];
+    let narrower = ACCOUNT_KEY_BITS - 8;
+
+    let sub = real.subdict(&[lead], 8).unwrap();
+    assert_eq!(sub.key_bits(), narrower);
+    sub.validate()
+        .expect("a carved augmented dictionary is still consistent");
+
+    let expected: Vec<(Vec<u8>, u128)> = all
+        .iter()
+        .filter(|(key, _, _)| key[0] == lead)
+        .map(|(key, extra, _)| (key[1..].to_vec(), extra.grams))
+        .collect();
+    let carved: Vec<(Vec<u8>, u128)> = entries(&sub)
+        .into_iter()
+        .map(|(key, extra, _)| (key, extra.grams))
+        .collect();
+    assert!(
+        !carved.is_empty(),
+        "the first entry's byte carves at least it"
+    );
+    assert_eq!(carved, expected);
+
+    let rebuilt = AugDict::from_items(SumCurrencies, narrower, entries(&sub)).unwrap();
+    assert_eq!(
+        rebuilt.root().map(Cell::repr_hash),
+        sub.root().map(Cell::repr_hash),
+    );
 }
 
 /// Each `AccountBlock`, as the transactions edge it carries and the summary above it.
