@@ -10,6 +10,10 @@ use sha2::{Digest, Sha256};
 use crate::cell::{Cell, CellType, MAX_BITS, MAX_REFS};
 use crate::error::CellError;
 
+mod view;
+
+pub use view::BocView;
+
 /// The four bytes every bag of cells begins with.
 const MAGIC: [u8; 4] = [0xb5, 0xee, 0x9c, 0x72];
 
@@ -235,6 +239,39 @@ fn classify(
 /// ```
 pub fn parse_boc(bytes: &[u8]) -> Result<Vec<Cell>, CellError> {
     let mut reader = Reader { bytes, at: 0 };
+    let header = read_header(&mut reader, bytes)?;
+    read_and_build(&mut reader, &header)
+}
+
+/// A bag's header: the counts and flags read before the cells, and where the cells begin.
+///
+/// [`read_header`] fills one and leaves the reader at the first cell, so the cells can be
+/// read against counts already held to the bytes, or left unread while the header alone is
+/// inspected through a [`BocView`].
+struct Header {
+    /// The total number of cells the bag carries.
+    count: usize,
+    /// The number of bytes a reference index takes.
+    ref_size: usize,
+    /// The positions of the root cells among the count.
+    root_list: Vec<usize>,
+    /// Whether the bag carries a per-cell offset index.
+    has_index: bool,
+    /// Whether the bag ends in a CRC-32C checksum.
+    has_checksum: bool,
+    /// The number of bytes the cells themselves take.
+    cell_area: usize,
+    /// Where the cells begin, past the header, the roots and the index.
+    body_offset: usize,
+}
+
+/// Reads and checks a bag's header, leaving `reader` at the first cell.
+///
+/// Everything a bag states about itself is checked here before a cell is read: the magic,
+/// the field sizes, the checksum over the whole bag, that the counts are in range, and that
+/// the stated cell-area size accounts for exactly the bytes that remain. A header that
+/// passes describes a bag whose cells can be read without another check on the shape.
+fn read_header(reader: &mut Reader<'_>, bytes: &[u8]) -> Result<Header, CellError> {
     if reader.take(4)? != MAGIC {
         return Err(CellError::NotABagOfCells);
     }
@@ -281,7 +318,7 @@ pub fn parse_boc(bytes: &[u8]) -> Result<Vec<Cell>, CellError> {
     // bytes, so it can name a bag larger than a 32-bit target can address. Refusing is
     // what keeps the check below meaningful: a size narrowed to fit would let a bag claim
     // one length, carry another, and still pass.
-    let Ok(total_size) = usize::try_from(reader.uint(offset_size)?) else {
+    let Ok(cell_area) = usize::try_from(reader.uint(offset_size)?) else {
         return Err(CellError::Header("cell area size"));
     };
 
@@ -324,7 +361,7 @@ pub fn parse_boc(bytes: &[u8]) -> Result<Vec<Cell>, CellError> {
     // not carry rather than reading whatever happens to follow.
     let stated_end = reader
         .consumed()
-        .checked_add(total_size)
+        .checked_add(cell_area)
         .ok_or(CellError::Header("cell area size"))?;
     let body_end = if has_checksum {
         bytes.len().saturating_sub(4)
@@ -334,6 +371,27 @@ pub fn parse_boc(bytes: &[u8]) -> Result<Vec<Cell>, CellError> {
     if stated_end != body_end {
         return Err(CellError::Header("cell area size"));
     }
+
+    Ok(Header {
+        count,
+        ref_size,
+        root_list,
+        has_index,
+        has_checksum,
+        cell_area,
+        body_offset: reader.consumed(),
+    })
+}
+
+/// Reads the cells of a bag whose header has been read, and returns its roots.
+///
+/// `reader` sits at the first cell and `header` carries the counts the reads below trust,
+/// which [`read_header`] has already held to the bytes. Cells are built in the one order a
+/// bag stores them, every child before its parent, so each is finished before anything
+/// references it.
+fn read_and_build(reader: &mut Reader<'_>, header: &Header) -> Result<Vec<Cell>, CellError> {
+    let count = header.count;
+    let ref_size = header.ref_size;
 
     let mut raw = Vec::with_capacity(count);
     for index in 0..count {
@@ -429,9 +487,10 @@ pub fn parse_boc(bytes: &[u8]) -> Result<Vec<Cell>, CellError> {
         built.push(cell);
     }
 
-    root_list
-        .into_iter()
-        .map(|index| {
+    header
+        .root_list
+        .iter()
+        .map(|&index| {
             built
                 .get(count - 1 - index)
                 .cloned()
