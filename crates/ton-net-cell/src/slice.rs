@@ -4,6 +4,7 @@
 //! A reading cursor over a cell's bits and references.
 
 use crate::cell::Cell;
+use crate::dict::Dict;
 use crate::error::CellError;
 
 mod address;
@@ -318,6 +319,23 @@ impl<'a> Slice<'a> {
         }
     }
 
+    /// Reads a `HashmapE`: one bit, then a reference to the dictionary root when it is set.
+    ///
+    /// This is the read mirror of [`Builder::store_dict`](crate::Builder::store_dict): an
+    /// unset bit is the empty dictionary, and a set bit takes the root from the next
+    /// reference. `key_bits` is the fixed key width the dictionary's type carries and the
+    /// wire form does not, so the caller supplies it.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CellError::NotEnoughBits`] if the slice has no bits left,
+    /// [`CellError::NotEnoughRefs`] if the bit is set and no reference is left, and otherwise
+    /// as [`Dict::from_root`](crate::Dict::from_root) for the root it reads.
+    pub fn load_dict(&mut self, key_bits: u16) -> Result<Dict, CellError> {
+        let root = self.load_maybe_ref()?.cloned();
+        Dict::from_root(root, key_bits)
+    }
+
     /// Reads `n` bits as a two's-complement signed integer.
     ///
     /// # Errors
@@ -512,7 +530,7 @@ impl<'a> Slice<'a> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{parse_boc, CellError};
+    use crate::{parse_boc, Builder, Cell, CellError, Dict};
 
     // One cell of eight bits holding 0xab.
     const ONE_CELL: [u8; 14] = [
@@ -760,5 +778,43 @@ mod tests {
         // Asking for a reference this cell does not have fails and moves nothing.
         assert!(slice.skip_bits_and_refs(8, 1).is_err());
         assert_eq!(slice.load_u8().unwrap(), 0x89, "the byte cursor stayed put");
+    }
+
+    #[test]
+    fn load_dict_reads_back_a_stored_dictionary() {
+        // Store a dictionary and a byte after it, then read both back through a slice: the
+        // read mirror of store_dict, with the cursor left past the maybe bit and the ref.
+        let mut dict = Dict::new(8).expect("a key width");
+        let mut value = Builder::new();
+        value.store_uint(0x42, 8).expect("a byte fits");
+        dict.set(&[0x05], &value).expect("sets a key");
+
+        let mut builder = Builder::new();
+        builder.store_dict(&dict).expect("stores the dict");
+        builder.store_uint(0xab, 8).expect("a trailing byte fits");
+        let cell = builder.build().expect("builds");
+
+        let mut slice = cell.parse();
+        let loaded = slice.load_dict(8).expect("reads the dict");
+        assert_eq!(
+            loaded.root().map(Cell::repr_hash),
+            dict.root().map(Cell::repr_hash),
+            "the loaded dict is the one stored"
+        );
+        assert_eq!(
+            slice.load_uint(8).expect("the trailing byte"),
+            0xab,
+            "the cursor moved past the maybe bit and the reference"
+        );
+    }
+
+    #[test]
+    fn load_dict_reads_an_empty_dictionary() {
+        let empty = Dict::new(8).expect("a key width");
+        let mut builder = Builder::new();
+        builder.store_dict(&empty).expect("stores the empty dict");
+        let cell = builder.build().expect("builds");
+        let loaded = cell.parse().load_dict(8).expect("reads the empty dict");
+        assert!(loaded.is_empty(), "an empty dict loads empty");
     }
 }
