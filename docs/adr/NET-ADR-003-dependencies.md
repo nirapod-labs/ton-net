@@ -5,7 +5,7 @@ status: accepted
 date: 2026-07-20
 supersedes: none
 superseded-by: none
-amended-by: NET-ADR-007
+amended-by: NET-ADR-007, NET-ADR-012
 ---
 
 # NET-ADR-003: Depend on tl-proto and keep one copy of each crypto crate
