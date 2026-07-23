@@ -56,6 +56,14 @@ getrandom = "0.4"
 thiserror = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# Pure-Rust LZ4 for optional bag-of-cells compression, read on the untrusted boundary
+# through its bounds-checked safe-decode path, no C and wasm-clean. It pulls no crypto
+# machinery, so it keeps the single-copy tree NET-ADR-003 fixes (admitted by NET-ADR-012).
+lz4_flex = { version = "0.11", default-features = false, features = [
+  "safe-decode",
+  "safe-encode",
+  "std",
+] }
 # Benchmarks only. Default features off drops the plotting stack, which is a
 # large dependency tree for output the terminal already gives.
 criterion = { version = "0.8", default-features = false, features = [

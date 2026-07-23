@@ -12,6 +12,9 @@ use crate::error::CellError;
 
 mod view;
 
+#[cfg(feature = "compress")]
+pub mod compress;
+
 pub use view::BocView;
 
 /// The four bytes every bag of cells begins with.
