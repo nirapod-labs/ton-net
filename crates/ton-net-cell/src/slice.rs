@@ -51,6 +51,11 @@ pub struct Slice<'a> {
     cell: &'a Cell,
     bit: usize,
     next_ref: usize,
+    // One past the last bit and reference this cursor may read. A cursor over a whole cell
+    // holds the cell's own extents here; a bounded sub-slice holds a narrower window, so the
+    // same reads stop early without a separate kind of cursor.
+    end_bit: usize,
+    end_ref: usize,
 }
 
 impl<'a> Slice<'a> {
@@ -60,6 +65,8 @@ impl<'a> Slice<'a> {
             cell,
             bit: 0,
             next_ref: 0,
+            end_bit: usize::from(cell.bit_len()),
+            end_ref: cell.refs().len(),
         }
     }
 
@@ -72,13 +79,13 @@ impl<'a> Slice<'a> {
     /// The number of data bits not yet read.
     #[must_use]
     pub fn remaining_bits(&self) -> usize {
-        usize::from(self.cell.bit_len()) - self.bit
+        self.end_bit - self.bit
     }
 
     /// The number of references not yet taken.
     #[must_use]
     pub fn remaining_refs(&self) -> usize {
-        self.cell.refs().len() - self.next_ref
+        self.end_ref - self.next_ref
     }
 
     /// Whether every bit and reference has been read.
@@ -285,6 +292,9 @@ impl<'a> Slice<'a> {
     ///
     /// Returns [`CellError::NotEnoughRefs`] if the slice has no reference left.
     pub fn load_ref(&mut self) -> Result<&'a Cell, CellError> {
+        if self.next_ref >= self.end_ref {
+            return Err(CellError::NotEnoughRefs);
+        }
         let cell = self
             .cell
             .refs()
@@ -371,6 +381,9 @@ impl<'a> Slice<'a> {
     ///
     /// Returns [`CellError::NotEnoughRefs`] if the slice has no reference left.
     pub fn peek_ref(&self) -> Result<&'a Cell, CellError> {
+        if self.next_ref >= self.end_ref {
+            return Err(CellError::NotEnoughRefs);
+        }
         self.cell
             .refs()
             .get(self.next_ref)
@@ -388,6 +401,92 @@ impl<'a> Slice<'a> {
         }
         self.next_ref += n;
         Ok(())
+    }
+
+    /// Skips `bits` bits and `refs` references together.
+    ///
+    /// Both counts are checked before either cursor moves, so a run that cannot fit leaves
+    /// the slice exactly where it was.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CellError::NotEnoughBits`] or [`CellError::NotEnoughRefs`] if the slice
+    /// holds fewer of either than asked.
+    pub fn skip_bits_and_refs(&mut self, bits: usize, refs: usize) -> Result<(), CellError> {
+        if bits > self.remaining_bits() {
+            return Err(CellError::NotEnoughBits {
+                requested: bits,
+                available: self.remaining_bits(),
+            });
+        }
+        if refs > self.remaining_refs() {
+            return Err(CellError::NotEnoughRefs);
+        }
+        self.bit += bits;
+        self.next_ref += refs;
+        Ok(())
+    }
+
+    /// A cursor over a window inside what is left, without advancing this one.
+    ///
+    /// The window starts `skip_bits` bits and `skip_refs` references past the current
+    /// position and spans `bits` bits and `refs` references. The returned cursor reads only
+    /// that window and reports it empty at its end, so an embedded slice field is read
+    /// without the reader seeing past it.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CellError::NotEnoughBits`] or [`CellError::NotEnoughRefs`] if the window
+    /// reaches past what the slice has left.
+    pub fn subslice(
+        &self,
+        skip_bits: usize,
+        bits: usize,
+        skip_refs: usize,
+        refs: usize,
+    ) -> Result<Self, CellError> {
+        let bit_span = skip_bits
+            .checked_add(bits)
+            .ok_or(CellError::NotEnoughBits {
+                requested: usize::MAX,
+                available: self.remaining_bits(),
+            })?;
+        if bit_span > self.remaining_bits() {
+            return Err(CellError::NotEnoughBits {
+                requested: bit_span,
+                available: self.remaining_bits(),
+            });
+        }
+        let ref_span = skip_refs
+            .checked_add(refs)
+            .ok_or(CellError::NotEnoughRefs)?;
+        if ref_span > self.remaining_refs() {
+            return Err(CellError::NotEnoughRefs);
+        }
+        // Every sum below is bounded by the checks above, so none can overflow: the start
+        // plus its span is at most this slice's own end.
+        Ok(Slice {
+            cell: self.cell,
+            bit: self.bit + skip_bits,
+            next_ref: self.next_ref + skip_refs,
+            end_bit: self.bit + skip_bits + bits,
+            end_ref: self.next_ref + skip_refs + refs,
+        })
+    }
+
+    /// Reads the next `bits` bits and `refs` references as their own cursor.
+    ///
+    /// This advances past the window and returns a cursor bounded to it, the reading form of
+    /// [`subslice`](Slice::subslice) taken from the front. Nothing is consumed on failure.
+    ///
+    /// # Errors
+    ///
+    /// As [`subslice`](Slice::subslice).
+    pub fn load_slice(&mut self, bits: usize, refs: usize) -> Result<Self, CellError> {
+        let window = self.subslice(0, bits, 0, refs)?;
+        self.bit += bits;
+        self.next_ref += refs;
+        Ok(window)
     }
 
     /// Copies everything left into a builder.
@@ -590,5 +689,76 @@ mod tests {
                 available: 8,
             })
         );
+    }
+
+    #[test]
+    fn a_loaded_window_reads_its_own_bits_and_no_more() {
+        let roots = parse_boc(&FOUR_BYTES).unwrap();
+        let mut slice = roots[0].parse();
+        let mut window = slice.load_slice(16, 0).unwrap();
+        assert_eq!(window.load_u16().unwrap(), 0x89ab);
+        assert!(window.is_empty(), "the window ends at its own bound");
+        assert!(window.load_bit().is_err());
+        // The parent advanced past the window and reads on from there.
+        assert_eq!(slice.load_u16().unwrap(), 0xcdef);
+        assert!(slice.is_empty());
+    }
+
+    #[test]
+    fn a_window_that_overruns_is_refused_and_consumes_nothing() {
+        let roots = parse_boc(&ONE_CELL).unwrap();
+        let mut slice = roots[0].parse();
+        assert!(slice.load_slice(9, 0).is_err());
+        // The failed read left the cursor put, so the whole byte is still there.
+        assert_eq!(slice.load_uint(8).unwrap(), 0xab);
+    }
+
+    #[test]
+    fn a_subslice_is_a_window_that_does_not_advance() {
+        let roots = parse_boc(&FOUR_BYTES).unwrap();
+        let slice = roots[0].parse();
+        // Bits 8..16 are the second byte, 0xab.
+        let mut middle = slice.subslice(8, 8, 0, 0).unwrap();
+        assert_eq!(middle.load_u8().unwrap(), 0xab);
+        // The parent never moved, so it still starts at the first byte.
+        assert_eq!(slice.clone().load_u8().unwrap(), 0x89);
+    }
+
+    #[test]
+    fn a_window_carries_a_reference() {
+        let roots = parse_boc(&TWO_CELLS).unwrap();
+        let mut slice = roots[0].parse();
+        let mut window = slice.load_slice(0, 1).unwrap();
+        assert_eq!(window.load_ref().unwrap().parse().load_u8().unwrap(), 0xcd);
+        assert!(window.load_ref().is_err(), "the window holds one reference");
+        assert_eq!(
+            slice.remaining_refs(),
+            0,
+            "the parent gave the reference up"
+        );
+    }
+
+    #[test]
+    fn a_materialized_window_is_a_cell_of_just_its_bits() {
+        let roots = parse_boc(&FOUR_BYTES).unwrap();
+        let mut slice = roots[0].parse();
+        let cell = slice.load_slice(16, 0).unwrap().to_cell().unwrap();
+        assert_eq!(cell.bit_len(), 16);
+        assert_eq!(cell.parse().load_u16().unwrap(), 0x89ab);
+    }
+
+    #[test]
+    fn skipping_bits_and_refs_moves_both_or_neither() {
+        let roots = parse_boc(&TWO_CELLS).unwrap();
+        let mut slice = roots[0].parse();
+        // No bits, one reference: the slice empties.
+        slice.skip_bits_and_refs(0, 1).unwrap();
+        assert!(slice.is_empty());
+
+        let roots = parse_boc(&FOUR_BYTES).unwrap();
+        let mut slice = roots[0].parse();
+        // Asking for a reference this cell does not have fails and moves nothing.
+        assert!(slice.skip_bits_and_refs(8, 1).is_err());
+        assert_eq!(slice.load_u8().unwrap(), 0x89, "the byte cursor stayed put");
     }
 }
