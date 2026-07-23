@@ -139,6 +139,93 @@ pub fn may_apply(base: &Cell, update: &Cell) -> Result<Option<Cell>, CellError> 
     Ok(Some(rebuilt))
 }
 
+/// Combines two chained Merkle updates into one that carries the whole change.
+///
+/// Given an update from tree A to tree B and one from that same B to C, this builds the
+/// update from A to C. The two must chain: the first update's new tree is the second's old
+/// tree. The result stands for A by its old hash and C by its new, and applying it to a base
+/// that holds A rebuilds C, the same as applying the two in turn would.
+///
+/// Each side of the result is one update's side with the branches the other update reveals
+/// spliced back in. A subtree the first update left unchanged but the second update changed
+/// has to be revealed on the combined new side, or applying against A, which never held that
+/// subtree's new form, would have nothing to graft; the reverse holds for the old side.
+///
+/// # Errors
+///
+/// Returns [`CellError::Malformed`] if either input is not a Merkle update, is missing a
+/// side, does not stand consistently for its own content, or if the two do not chain.
+pub fn combine_updates(first: &Cell, second: &Cell) -> Result<Cell, CellError> {
+    validate_update(first)?;
+    validate_update(second)?;
+
+    let missing = || CellError::Malformed("merkle update is missing a side");
+    let first_old = first.reference(0).ok_or_else(missing)?;
+    let first_new = first.reference(1).ok_or_else(missing)?;
+    let second_old = second.reference(0).ok_or_else(missing)?;
+    let second_new = second.reference(1).ok_or_else(missing)?;
+
+    // The first update's new tree has to be the second update's old tree, or there is no B
+    // in the middle for the two to meet at.
+    if first_new.hash() != second_old.hash() {
+        return Err(CellError::Malformed(
+            "merkle updates do not chain: the first's new tree is not the second's old",
+        ));
+    }
+
+    let mut first_new_revealed = HashMap::new();
+    revealed_cells(first_new, &mut first_new_revealed);
+    let mut second_old_revealed = HashMap::new();
+    revealed_cells(second_old, &mut second_old_revealed);
+
+    // The new side is C pruned to the second update's changes, with the branches the first
+    // update revealed (changed A to B, unchanged B to C) spliced back so they are present
+    // rather than grafted from A. The old side is the mirror.
+    let old_side = splice_revealed(first_old, &second_old_revealed)?;
+    let new_side = splice_revealed(second_new, &first_new_revealed)?;
+    create_update(&old_side, &new_side)
+}
+
+/// Indexes every ordinary cell in `tree` by its level-zero hash, stopping at pruned
+/// branches, which reveal nothing to splice.
+fn revealed_cells(tree: &Cell, into: &mut HashMap<[u8; 32], Cell>) {
+    if tree.cell_type() != CellType::Ordinary {
+        return;
+    }
+    if into.insert(*tree.hash(), tree.clone()).is_some() {
+        return;
+    }
+    for child in tree.refs() {
+        revealed_cells(child, into);
+    }
+}
+
+/// Rebuilds `node`, replacing each pruned branch that `revealed` shows with the revealed
+/// subtree, so a branch the other update changed is present rather than left as a
+/// placeholder.
+fn splice_revealed(node: &Cell, revealed: &HashMap<[u8; 32], Cell>) -> Result<Cell, CellError> {
+    match node.cell_type() {
+        CellType::PrunedBranch => Ok(revealed
+            .get(node.hash())
+            .cloned()
+            .unwrap_or_else(|| node.clone())),
+        CellType::Ordinary => {
+            let mut builder = Builder::new();
+            let mut bits = node.parse();
+            for _ in 0..node.bit_len() {
+                builder.store_bit(bits.load_bit()?)?;
+            }
+            for child in node.refs() {
+                builder.store_ref(splice_revealed(child, revealed)?)?;
+            }
+            builder.build()
+        }
+        _ => Err(CellError::Malformed(
+            "combining a merkle update over an unexpected exotic cell",
+        )),
+    }
+}
+
 /// Indexes every cell in `tree` by its level-zero hash.
 fn index_by_hash(tree: &Cell, into: &mut HashMap<[u8; 32], Cell>) {
     if into.contains_key(tree.hash()) {
@@ -240,5 +327,42 @@ mod tests {
         assert!(may_apply(&leaf(0x99), &update)
             .expect("a mismatch is not an error")
             .is_none());
+    }
+
+    #[test]
+    fn combining_two_updates_rebuilds_the_far_tree() {
+        let shared = leaf(0x55); // unchanged through both steps
+        let a1 = leaf(0xa1);
+        let b1 = leaf(0xb1); // a1 becomes b1 from A to B, then holds through C
+        let a2 = leaf(0xa2); // holds from A to B, then becomes c2 from B to C
+        let c2 = leaf(0xc2);
+
+        let a = node(0x01, &[&shared, &a1, &a2]);
+        let b = node(0x02, &[&shared, &b1, &a2]);
+        let c = node(0x03, &[&shared, &b1, &c2]);
+
+        // Each update reveals what changed at its step and prunes the rest.
+        let u1 = create_update(&prune_to(&a, &[&a1]), &prune_to(&b, &[&b1])).expect("u1 builds");
+        let u2 = create_update(&prune_to(&b, &[&a2]), &prune_to(&c, &[&c2])).expect("u2 builds");
+
+        let combined = combine_updates(&u1, &u2).expect("the updates combine");
+        validate_update(&combined).expect("the combined update is consistent");
+
+        // The combined update rebuilds C from A in one step, the same as the two in turn.
+        let one_step = apply_update(&a, &combined).expect("the combined update applies");
+        assert_eq!(one_step.hash(), c.hash());
+        let two_steps = apply_update(&apply_update(&a, &u1).unwrap(), &u2).expect("u2 applies");
+        assert_eq!(two_steps.hash(), c.hash(), "the two applied in turn agree");
+    }
+
+    #[test]
+    fn updates_that_do_not_chain_are_refused() {
+        let u1 = create_update(&leaf(0x11), &leaf(0x22)).expect("u1 builds");
+        let u2 = create_update(&leaf(0x33), &leaf(0x44)).expect("u2 builds");
+        // The first update's new tree, 0x22, is not the second's old tree, 0x33.
+        assert!(matches!(
+            combine_updates(&u1, &u2),
+            Err(CellError::Malformed(_))
+        ));
     }
 }

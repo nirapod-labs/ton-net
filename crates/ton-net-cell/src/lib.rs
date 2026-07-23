@@ -98,7 +98,8 @@ pub use dict::{
 };
 pub use error::CellError;
 pub use merkle::{
-    apply_update, create_proof, create_update, may_apply, validate_update, virtualize,
+    apply_update, combine_updates, create_proof, create_update, may_apply, validate_update,
+    virtualize,
 };
 pub use slice::{MsgAddress, Slice};
 pub use usage::UsageTree;

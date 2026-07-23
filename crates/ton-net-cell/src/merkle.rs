@@ -26,7 +26,7 @@ mod update;
 mod virtualize;
 
 pub use proof::create_proof;
-pub use update::{apply_update, create_update, may_apply, validate_update};
+pub use update::{apply_update, combine_updates, create_update, may_apply, validate_update};
 pub use virtualize::virtualize;
 
 use crate::builder::Builder;
