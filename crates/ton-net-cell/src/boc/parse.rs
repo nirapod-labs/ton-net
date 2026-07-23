@@ -235,6 +235,80 @@ pub(super) fn verify_roots(
     Ok(roots.iter().map(Summary::repr_hash).collect())
 }
 
+/// Builds one cell of the bag, and only the cells it reaches, leaving the rest unbuilt.
+///
+/// `index` is a position among the bag's cells in stored order, the roots first. References
+/// point forward, so a cell's subtree is a set of cells at higher indices; this reads every
+/// cell to know the structure and to check it, but builds only the ones the requested cell
+/// reaches, so a single cell of a large bag costs its own subtree rather than the whole graph.
+///
+/// # Errors
+///
+/// [`CellError::BadReference`] if `index` is past the bag's cell count, and otherwise as
+/// [`read_and_build`], for the cells it reads and builds.
+pub(super) fn build_cell(
+    reader: &mut Reader<'_>,
+    header: &Header,
+    index: usize,
+) -> Result<Cell, CellError> {
+    let count = header.count;
+    if index >= count {
+        return Err(CellError::BadReference);
+    }
+    let raw = read_raw(reader, header)?;
+    check_depths(&raw, count)?;
+
+    // Mark the cells the requested one reaches, following references forward.
+    let mut needed = vec![false; count];
+    let mut stack = vec![index];
+    while let Some(position) = stack.pop() {
+        match needed.get_mut(position) {
+            Some(slot) if !*slot => *slot = true,
+            _ => continue,
+        }
+        for &target in &raw.get(position).ok_or(CellError::BadReference)?.refs {
+            stack.push(target);
+        }
+    }
+
+    // Build the marked cells in descending order, so a child is built before its parent.
+    let mut built: Vec<Option<Cell>> = (0..count).map(|_| None).collect();
+    for position in (0..count).rev() {
+        if needed.get(position) != Some(&true) {
+            continue;
+        }
+        let raw_cell = raw.get(position).ok_or(CellError::BadReference)?;
+        let mut refs = Vec::with_capacity(raw_cell.refs.len());
+        for &target in &raw_cell.refs {
+            let child = built
+                .get(target)
+                .and_then(Option::as_ref)
+                .ok_or(CellError::BadReference)?;
+            refs.push(child.clone());
+        }
+        let cell = Cell::from_parts(
+            raw_cell.data.clone(),
+            raw_cell.bits,
+            refs,
+            raw_cell.cell_type,
+            raw_cell.level_mask,
+        )?;
+        if let Some(stored) = &raw_cell.stored {
+            let (hashes, depths) = cell.stored();
+            check_stored(hashes, depths, stored)?;
+        }
+        if let Some(slot) = built.get_mut(position) {
+            *slot = Some(cell);
+        }
+    }
+
+    built
+        .into_iter()
+        .nth(index)
+        .flatten()
+        .ok_or(CellError::BadReference)
+}
+
 /// Determines a cell's kind, and holds an exotic cell to the shape that kind must have.
 ///
 /// Every exotic kind has a fixed reference count, and a pruned branch a fixed body length

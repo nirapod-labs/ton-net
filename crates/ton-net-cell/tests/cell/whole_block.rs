@@ -151,6 +151,23 @@ fn a_view_verifies_a_whole_block_to_the_hash_a_full_parse_gives() {
 }
 
 #[test]
+fn a_view_builds_a_block_root_from_its_stored_position() {
+    // Random access builds cell zero, the block root, and only its subtree, and it hashes to
+    // the id the block was served under, without the whole bag being materialized.
+    for (what, text, expected) in [
+        ("masterchain", MASTERCHAIN, MASTERCHAIN_ROOT),
+        ("basechain", BASECHAIN, BASECHAIN_ROOT),
+    ] {
+        let bag = unhex(text);
+        let root = BocView::open(&bag)
+            .expect("the header reads")
+            .cell(0)
+            .expect("the root builds");
+        assert_eq!(hex(root.repr_hash()), expected, "{what}");
+    }
+}
+
+#[test]
 fn a_whole_block_renders_as_a_tree_with_its_tag_legible() {
     // Rendering a real block exercises the dump over a deep tree with exotic cells in it.
     // The block tag is a fact from the schema, so the hex form writes it at the front: it

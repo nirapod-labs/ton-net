@@ -13,7 +13,7 @@
 //! returns only the roots' hashes, keeping a summary per cell rather than a cell, so a bag
 //! too large to hold as a graph can still be verified and its identity read.
 
-use super::{read_and_build, read_header, verify_roots, Header, Reader};
+use super::{build_cell, read_and_build, read_header, verify_roots, Header, Reader};
 use crate::cell::Cell;
 use crate::error::CellError;
 
@@ -116,6 +116,25 @@ impl<'a> BocView<'a> {
         };
         verify_roots(&mut reader, &self.header)
     }
+
+    /// Builds one cell of the bag, and only the cells it reaches.
+    ///
+    /// Where [`materialize`](BocView::materialize) builds the whole graph, this builds the
+    /// cell at `index` and its subtree, so a single cell of a large bag is read without
+    /// building the rest. `index` is a position among the bag's cells in the order the bag
+    /// stores them, the roots first, up to [`cell_count`](BocView::cell_count).
+    ///
+    /// # Errors
+    ///
+    /// [`CellError::BadReference`] if `index` is past the bag's cell count, and otherwise as
+    /// [`materialize`](BocView::materialize) for the cells it reads and builds.
+    pub fn cell(&self, index: usize) -> Result<Cell, CellError> {
+        let mut reader = Reader {
+            bytes: self.bytes,
+            at: self.header.body_offset,
+        };
+        build_cell(&mut reader, &self.header, index)
+    }
 }
 
 #[cfg(test)]
@@ -202,6 +221,33 @@ mod tests {
             .expect("verify reads it");
         assert_eq!(verified.len(), roots.len());
         assert_eq!(&verified[0], roots[0].repr_hash());
+    }
+
+    #[test]
+    fn cell_builds_a_single_cell_and_its_subtree() {
+        let bag = two_cell_bag();
+        let view = BocView::open(&bag).expect("the header reads");
+        let root = parse_boc(&bag).expect("parses").remove(0);
+
+        // Cell zero is the root and its reference; cell one is the leaf it points to.
+        let built_root = view.cell(0).expect("the root builds");
+        assert_eq!(built_root.repr_hash(), root.repr_hash());
+        assert_eq!(built_root.refs().len(), 1);
+
+        let leaf = view.cell(1).expect("the leaf builds");
+        assert_eq!(leaf.data(), &[0xcd]);
+        assert!(leaf.refs().is_empty());
+        assert_eq!(
+            leaf.repr_hash(),
+            root.reference(0).expect("the root's child").repr_hash()
+        );
+    }
+
+    #[test]
+    fn cell_refuses_an_index_past_the_count() {
+        let bag = bag_of(0xab, false);
+        let view = BocView::open(&bag).unwrap();
+        assert_eq!(view.cell(1).err(), Some(CellError::BadReference));
     }
 
     #[test]
