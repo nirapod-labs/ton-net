@@ -6,6 +6,10 @@
 use crate::cell::Cell;
 use crate::error::CellError;
 
+mod address;
+
+pub use address::MsgAddress;
+
 /// Reads the bit at `index` of `data`, most significant bit first.
 ///
 /// Every caller has already held `index` under the cell's bit length, which is what puts

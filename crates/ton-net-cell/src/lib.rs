@@ -98,7 +98,7 @@ pub use error::CellError;
 pub use merkle::{
     apply_update, create_proof, create_update, may_apply, validate_update, virtualize,
 };
-pub use slice::Slice;
+pub use slice::{MsgAddress, Slice};
 pub use usage::UsageTree;
 
 // The README ships to crates.io and cannot be replaced once a version is published,

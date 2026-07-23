@@ -16,6 +16,8 @@ use crate::cell::{Cell, CellType, MAX_BITS, MAX_REFS};
 use crate::error::CellError;
 use crate::slice::Slice;
 
+mod address;
+
 /// Accumulates the bits and references of a cell under construction.
 ///
 /// The limits are the cell model's own: [`MAX_BITS`] bits and [`MAX_REFS`] references. A
