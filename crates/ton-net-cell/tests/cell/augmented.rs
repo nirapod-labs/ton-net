@@ -23,7 +23,8 @@
 //! does not own; that one is held to the summary rule directly instead.
 
 use ton_net_cell::{
-    parse_boc, AugDict, Augmentation, Builder, Cell, CellError, CellType, Lookup, Slice, MAX_BITS,
+    parse_boc, AugDict, AugNode, Augmentation, Builder, Cell, CellError, CellType, Lookup, Slice,
+    Traverse, MAX_BITS,
 };
 
 const BASECHAIN: &str = include_str!("../fixtures/block-basechain.hex");
@@ -342,6 +343,61 @@ fn from_items_rebuilds_the_accounts_dictionary_to_the_validators_hash() {
             if order { "descending" } else { "ascending" }
         );
     }
+}
+
+#[test]
+fn a_fork_summary_stands_in_for_the_leaves_a_walk_skips() {
+    let real = AugDict::from_root(SumCurrencies, Some(account_blocks()), ACCOUNT_KEY_BITS).unwrap();
+
+    // A full walk sees every node in the block's own tree and totals the leaves. Eleven
+    // leaves over ten forks is the shape the block carries.
+    let mut leaves = 0u32;
+    let mut forks = 0u32;
+    let mut walked = 0u128;
+    real.traverse_extra(|node| {
+        match node {
+            AugNode::Leaf { extra, .. } => {
+                leaves += 1;
+                walked += extra.grams;
+            }
+            AugNode::Fork { .. } => forks += 1,
+        }
+        Traverse::Continue
+    })
+    .unwrap();
+    assert_eq!((leaves, forks), (11, 10), "eleven leaves over ten forks");
+    assert_eq!(walked, TOTAL_GRAMS);
+
+    // A second walk skips one interior subtree and takes its fork summary in place of the
+    // leaves below it. The two totals agree only because that summary is exactly the leaves
+    // it stands for, which is the property that lets a walk prune by it. Both come to what
+    // the block says its entries total.
+    let mut forks_seen = 0u32;
+    let mut skipped = false;
+    let mut total = 0u128;
+    real.traverse_extra(|node| match node {
+        AugNode::Fork { extra, .. } => {
+            forks_seen += 1;
+            // The first fork is the root over everything; the second is a proper subtree.
+            if forks_seen == 2 {
+                skipped = true;
+                total += extra.grams;
+                Traverse::Skip
+            } else {
+                Traverse::Continue
+            }
+        }
+        AugNode::Leaf { extra, .. } => {
+            total += extra.grams;
+            Traverse::Continue
+        }
+    })
+    .unwrap();
+    assert!(skipped, "the tree has an interior fork to skip");
+    assert_eq!(
+        total, TOTAL_GRAMS,
+        "a skipped subtree's summary stands in for its leaves"
+    );
 }
 
 #[test]

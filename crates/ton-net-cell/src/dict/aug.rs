@@ -9,7 +9,8 @@ use core::borrow::Borrow;
 use super::label::read_label;
 use super::{
     check_key_bits, collapse, collect_fork_extras, descend, key_of, leaf, lookup, rebuild, reroot,
-    rest, split, validate_tree, walk_step, DictEntry, Entry, ForkExtra, Lookup, Pending, Shape,
+    rest, split, traverse, validate_tree, walk_step, AugNode, DictEntry, Entry, ForkExtra, Lookup,
+    Pending, Shape, Traverse,
 };
 use crate::builder::Builder;
 use crate::cell::Cell;
@@ -590,6 +591,38 @@ impl<A: Augmentation> AugDict<A> {
         *self = merged;
         Ok(())
     }
+
+    /// Walks the dictionary in ascending key order, offering each fork's summary before its
+    /// subtree so a caller can steer the walk by it.
+    ///
+    /// A fork is visited before either of its children, carrying the summary over everything
+    /// beneath it; `visit` answers [`Traverse::Continue`] to descend, [`Traverse::Skip`] to
+    /// leave that subtree unvisited, or [`Traverse::Stop`] to end the walk. A leaf is visited
+    /// with its key, its summary and its value. Because a fork's summary stands for its whole
+    /// subtree, a walk that only wants the subtrees meeting some bound on the summary can skip
+    /// the rest without reading a single one of their leaves.
+    ///
+    /// The summaries are read as the tree stores them, not recomputed, so a tree this crate
+    /// did not build wants a [`validate`](AugDict::validate) first. Like [`iter`](AugDict::iter)
+    /// the walk stops at a pruned branch rather than walking past one: descending into a
+    /// partly pruned subtree ends in [`CellError::Pruned`], while a visitor that skips that
+    /// subtree by its summary never reaches the placeholder.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CellError::Pruned`] if the walk descends into a pruned branch, or a
+    /// [`CellError`] if the tree does not read as an augmented dictionary.
+    pub fn traverse_extra(
+        &self,
+        mut visit: impl FnMut(AugNode<'_, A::Extra>) -> Traverse,
+    ) -> Result<(), CellError> {
+        traverse(
+            &Aug(&self.aug),
+            self.root.as_ref(),
+            self.key_bits,
+            &mut visit,
+        )
+    }
 }
 
 impl<'a, A: Augmentation> IntoIterator for &'a AugDict<A> {
@@ -822,5 +855,114 @@ mod tests {
         dict.combine_with(&AugDict::new(CountSum, 32).expect("empty"))
             .expect("an empty side combines");
         assert_eq!(dict.root().expect("not empty").repr_hash(), &before);
+    }
+
+    fn key_of(bytes: &[u8]) -> u32 {
+        u32::from_be_bytes(bytes.try_into().expect("a four-byte key"))
+    }
+
+    #[test]
+    fn traverse_extra_offers_each_fork_before_the_leaves_below_it() {
+        /// One node a walk saw: a fork with its summary, or a leaf with its key and summary.
+        #[derive(Debug, PartialEq)]
+        enum Seen {
+            Fork(u32),
+            Leaf(u32, u32),
+        }
+
+        // Keys 1, 2 and 3 share thirty zero bits, so the root forks on the next: 1 to the
+        // left, 2 and 3 to a sub-fork on the right. Pre-order visits a fork before its
+        // subtree, so the summaries lead the leaves they cover.
+        let dict = counted(&[1, 2, 3]);
+        let mut seen = Vec::new();
+        dict.traverse_extra(|node| {
+            match node {
+                AugNode::Fork { extra, .. } => seen.push(Seen::Fork(*extra)),
+                AugNode::Leaf { key, extra, .. } => seen.push(Seen::Leaf(key_of(key), *extra)),
+            }
+            Traverse::Continue
+        })
+        .expect("walks");
+
+        assert_eq!(
+            seen,
+            vec![
+                Seen::Fork(3),
+                Seen::Leaf(1, 1),
+                Seen::Fork(2),
+                Seen::Leaf(2, 1),
+                Seen::Leaf(3, 1),
+            ]
+        );
+    }
+
+    #[test]
+    fn traverse_extra_skips_a_subtree_when_the_visitor_asks() {
+        // The top bit splits 1, 2 and 3 from the high key, so the left subtree is a fork of
+        // three under the root. Skipping that fork by its summary must leave its three leaves
+        // unread while the leaf on the other side is still visited.
+        let dict = counted(&[1, 2, 3, 0x8000_0000]);
+        let mut leaves = Vec::new();
+        let mut skipped = false;
+        dict.traverse_extra(|node| match node {
+            AugNode::Fork { extra, .. } if *extra == 3 => {
+                skipped = true;
+                Traverse::Skip
+            }
+            AugNode::Fork { .. } => Traverse::Continue,
+            AugNode::Leaf { key, .. } => {
+                leaves.push(key_of(key));
+                Traverse::Continue
+            }
+        })
+        .expect("walks");
+
+        assert!(skipped, "the subtree fork was offered before its leaves");
+        assert_eq!(
+            leaves,
+            vec![0x8000_0000],
+            "the skipped subtree's leaves were not read"
+        );
+    }
+
+    #[test]
+    fn traverse_extra_stops_the_walk_when_the_visitor_asks() {
+        // Stop at the first leaf. Ascending order makes that the smallest key, and nothing
+        // after it is visited.
+        let dict = counted(&[5, 1, 9, 3]);
+        let mut visited = Vec::new();
+        dict.traverse_extra(|node| {
+            if let AugNode::Leaf { key, .. } = node {
+                visited.push(key_of(key));
+                return Traverse::Stop;
+            }
+            Traverse::Continue
+        })
+        .expect("walks");
+
+        assert_eq!(visited, vec![1], "stop halts at the first, smallest, leaf");
+    }
+
+    #[test]
+    fn a_subtree_total_reads_from_the_one_summary_the_fork_carries() {
+        // The root fork's summary is the whole dictionary's, so skipping the root still learns
+        // the total from the single summary that one visit saw, reading no leaf at all.
+        let dict = counted(&[1, 2, 3, 100, 1000]);
+        let mut total = None;
+        let mut leaves = 0u32;
+        dict.traverse_extra(|node| match node {
+            AugNode::Fork { extra, .. } => {
+                total = Some(*extra);
+                Traverse::Skip
+            }
+            AugNode::Leaf { .. } => {
+                leaves += 1;
+                Traverse::Continue
+            }
+        })
+        .expect("walks");
+
+        assert_eq!(total, Some(5), "the root summary already counts every leaf");
+        assert_eq!(leaves, 0, "skipping the root read no leaf");
     }
 }

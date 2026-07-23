@@ -104,6 +104,47 @@ impl DictEntry {
     }
 }
 
+/// What a [`traverse_extra`](crate::AugDict::traverse_extra) visitor asks for at each node.
+///
+/// At a fork the three answers differ: descend into its subtree, leave that subtree
+/// unvisited, or end the walk. At a leaf there is nothing below to skip, so
+/// [`Skip`](Traverse::Skip) means the same as [`Continue`](Traverse::Continue).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Traverse {
+    /// Descend into a fork's subtree, or move on past a leaf.
+    Continue,
+    /// Leave a fork's subtree unvisited; the same as [`Continue`](Traverse::Continue) at a
+    /// leaf.
+    Skip,
+    /// End the walk now, visiting nothing further.
+    Stop,
+}
+
+/// A node a directed augmented walk visits: an interior fork, or a leaf.
+///
+/// A fork is offered before either of its children, carrying the summary over the whole
+/// subtree beneath it, so a visitor can decide from that summary alone whether the subtree
+/// is worth descending into. A leaf carries its own key, summary and value.
+#[derive(Debug)]
+pub enum AugNode<'a, E> {
+    /// An interior fork, offered before its subtree.
+    Fork {
+        /// The key bits every entry below this fork shares.
+        prefix: &'a [bool],
+        /// The fork's stored summary over that whole subtree.
+        extra: &'a E,
+    },
+    /// A leaf holding one entry.
+    Leaf {
+        /// The full key, packed most-significant-bit first.
+        key: &'a [u8],
+        /// The summary the leaf carries for its own value.
+        extra: &'a E,
+        /// Where the value sits, read with [`DictEntry::slice`].
+        entry: &'a DictEntry,
+    },
+}
+
 /// What a fork missing a branch reports. A fork always has two.
 const NO_BRANCH: CellError = CellError::Malformed("dictionary fork without both branches");
 
@@ -684,6 +725,98 @@ fn validate_node<S: Shape>(shape: &S, node: &Cell, remaining: u16) -> Result<(),
 
     validate_node(shape, left, below)?;
     validate_node(shape, right, below)
+}
+
+/// Walks the tree in ascending key order, offering each node to `visit` and letting its
+/// answer steer where the walk goes next.
+///
+/// A fork is offered before either of its children, carrying the summary the caller can
+/// prune by; a leaf is offered with its value. Like [`walk_step`] it refuses to walk past a
+/// pruned branch, so a walk that descends into a partly pruned subtree ends in
+/// [`CellError::Pruned`]; a visitor that skips such a subtree by its summary never reaches
+/// the placeholder.
+fn traverse<S, F>(
+    shape: &S,
+    root: Option<&Cell>,
+    key_bits: u16,
+    visit: &mut F,
+) -> Result<(), CellError>
+where
+    S: Shape,
+    F: FnMut(AugNode<'_, S::Extra>) -> Traverse,
+{
+    if let Some(root) = root {
+        traverse_node(shape, root, key_bits, Vec::new(), visit)?;
+    }
+    Ok(())
+}
+
+/// Descends `node`, offering it and everything visited below it. `prefix` is the key bits
+/// spelled out above it. Returns whether the walk was asked to stop, so a [`Traverse::Stop`]
+/// unwinds the whole descent rather than only the branch it came up in.
+fn traverse_node<S, F>(
+    shape: &S,
+    node: &Cell,
+    remaining: u16,
+    prefix: Vec<bool>,
+    visit: &mut F,
+) -> Result<bool, CellError>
+where
+    S: Shape,
+    F: FnMut(AugNode<'_, S::Extra>) -> Traverse,
+{
+    if node.is_exotic() {
+        return Err(CellError::Pruned);
+    }
+    let mut slice = node.parse();
+    let label = read_label(&mut slice, remaining)?;
+    let len = label.len();
+    let mut here = prefix;
+    here.extend_from_slice(&label);
+
+    if len == usize::from(remaining) {
+        let extra = shape.read_extra(&mut slice)?;
+        let bit_offset = usize::from(node.bit_len()) - slice.remaining_bits();
+        let entry = DictEntry {
+            cell: node.clone(),
+            bit_offset,
+        };
+        let key = pack(&here);
+        return Ok(visit(AugNode::Leaf {
+            key: &key,
+            extra: &extra,
+            entry: &entry,
+        }) == Traverse::Stop);
+    }
+
+    // A fork carries its summary between its label and its two branches. It is offered
+    // before either child, so a visitor sees the summary over a subtree before deciding
+    // whether to walk it.
+    let extra = shape.read_extra(&mut slice)?;
+    match visit(AugNode::Fork {
+        prefix: &here,
+        extra: &extra,
+    }) {
+        Traverse::Stop => return Ok(true),
+        Traverse::Skip => return Ok(false),
+        Traverse::Continue => {}
+    }
+
+    #[allow(
+        clippy::cast_possible_truncation,
+        reason = "read_label bounds len to at most remaining, and this branch runs only when len < remaining, so len fits a u16"
+    )]
+    let below = remaining - len as u16 - 1;
+    let left = node.reference(0).ok_or(NO_BRANCH)?;
+    let right = node.reference(1).ok_or(NO_BRANCH)?;
+
+    let mut left_prefix = here.clone();
+    left_prefix.push(false);
+    if traverse_node(shape, left, below, left_prefix, &mut *visit)? {
+        return Ok(true);
+    }
+    here.push(true);
+    traverse_node(shape, right, below, here, visit)
 }
 
 #[cfg(test)]

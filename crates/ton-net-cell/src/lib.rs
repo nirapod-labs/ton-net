@@ -101,8 +101,8 @@ pub use builder::Builder;
 pub use cell::json;
 pub use cell::{Cell, CellType, Metadata, RefMetadata, MAX_BITS, MAX_REFS};
 pub use dict::{
-    AugDict, AugDictIter, AugEntry, AugItem, Augmentation, Dict, DictEntry, DictIter, ForkExtra,
-    Lookup,
+    AugDict, AugDictIter, AugEntry, AugItem, AugNode, Augmentation, Dict, DictEntry, DictIter,
+    ForkExtra, Lookup, Traverse,
 };
 pub use error::CellError;
 pub use merkle::{
