@@ -216,6 +216,106 @@ impl Dict {
             done: false,
         }
     }
+
+    /// The number of entries.
+    ///
+    /// This walks the whole dictionary; a dictionary that keeps its own size is not a shape
+    /// TON stores, so the count is computed rather than read.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CellError`] if the tree does not read as a dictionary, or if a walk over a
+    /// proof reaches a pruned branch.
+    pub fn count(&self) -> Result<usize, CellError> {
+        self.iter()
+            .try_fold(0usize, |n, entry| entry.map(|_| n + 1))
+    }
+
+    /// The entry with the smallest key, or nothing when the dictionary is empty.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CellError`] as [`iter`](Dict::iter) does.
+    pub fn min(&self) -> Result<Option<(Vec<u8>, DictEntry)>, CellError> {
+        self.iter().next().transpose()
+    }
+
+    /// The entry with the largest key, or nothing when the dictionary is empty.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CellError`] as [`iter`](Dict::iter) does.
+    pub fn max(&self) -> Result<Option<(Vec<u8>, DictEntry)>, CellError> {
+        self.iter().last().transpose()
+    }
+
+    /// Removes the entry with the smallest key and returns it, or nothing when empty.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CellError`] as [`min`](Dict::min) and [`remove`](Dict::remove) do.
+    pub fn take_min(&mut self) -> Result<Option<(Vec<u8>, DictEntry)>, CellError> {
+        let Some((key, entry)) = self.min()? else {
+            return Ok(None);
+        };
+        self.remove(&key)?;
+        Ok(Some((key, entry)))
+    }
+
+    /// Removes the entry with the largest key and returns it, or nothing when empty.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CellError`] as [`max`](Dict::max) and [`remove`](Dict::remove) do.
+    pub fn take_max(&mut self) -> Result<Option<(Vec<u8>, DictEntry)>, CellError> {
+        let Some((key, entry)) = self.max()? else {
+            return Ok(None);
+        };
+        self.remove(&key)?;
+        Ok(Some((key, entry)))
+    }
+
+    /// The entry at `key`, or the next one after it in ascending key order.
+    ///
+    /// `key` is compared as bytes against the keys the dictionary holds, so it reads best
+    /// given a key of the dictionary's own width.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CellError`] as [`iter`](Dict::iter) does.
+    pub fn entry_at_or_after(&self, key: &[u8]) -> Result<Option<(Vec<u8>, DictEntry)>, CellError> {
+        for item in self {
+            let (found, entry) = item?;
+            if found.as_slice() >= key {
+                return Ok(Some((found, entry)));
+            }
+        }
+        Ok(None)
+    }
+
+    /// Keeps only the entries `keep` returns true for.
+    ///
+    /// Every entry is shown to `keep` once, and the dictionary is left holding those it kept.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CellError`] as [`iter`](Dict::iter) and [`remove`](Dict::remove) do.
+    pub fn retain(
+        &mut self,
+        mut keep: impl FnMut(&[u8], &DictEntry) -> bool,
+    ) -> Result<(), CellError> {
+        let mut to_remove = Vec::new();
+        for item in &*self {
+            let (key, entry) = item?;
+            if !keep(&key, &entry) {
+                to_remove.push(key);
+            }
+        }
+        for key in &to_remove {
+            self.remove(key)?;
+        }
+        Ok(())
+    }
 }
 
 impl IntoIterator for &Dict {
@@ -254,5 +354,95 @@ impl Iterator for DictIter {
                 Some(Err(error))
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A one-byte value holding `byte`.
+    fn value(byte: u64) -> Builder {
+        let mut builder = Builder::new();
+        builder.store_uint(byte, 8).expect("a byte fits");
+        builder
+    }
+
+    /// A 32-bit-keyed dictionary holding each key with itself as the value.
+    fn dict_of(keys: &[u32]) -> Dict {
+        let mut dict = Dict::new(32).expect("a dictionary");
+        for &key in keys {
+            dict.set(&key.to_be_bytes(), &value(u64::from(key)))
+                .expect("the set");
+        }
+        dict
+    }
+
+    #[test]
+    fn count_walks_every_entry() {
+        assert_eq!(dict_of(&[1, 2, 3]).count().expect("count"), 3);
+        assert_eq!(
+            Dict::new(32).expect("a dictionary").count().expect("count"),
+            0
+        );
+    }
+
+    #[test]
+    fn min_and_max_are_the_ends() {
+        let dict = dict_of(&[5, 1, 9, 3]);
+        let (min_key, _) = dict.min().expect("min").expect("nonempty");
+        let (max_key, _) = dict.max().expect("max").expect("nonempty");
+        assert_eq!(min_key, 1u32.to_be_bytes());
+        assert_eq!(max_key, 9u32.to_be_bytes());
+    }
+
+    #[test]
+    fn taking_the_min_removes_it() {
+        let mut dict = dict_of(&[5, 1, 9]);
+        let (key, _) = dict.take_min().expect("take").expect("nonempty");
+        assert_eq!(key, 1u32.to_be_bytes());
+        assert_eq!(dict.count().expect("count"), 2);
+        let (next, _) = dict.min().expect("min").expect("nonempty");
+        assert_eq!(next, 5u32.to_be_bytes());
+    }
+
+    #[test]
+    fn an_entry_at_or_after_a_key_is_the_ceiling() {
+        let dict = dict_of(&[10, 20, 30]);
+        let (key, _) = dict
+            .entry_at_or_after(&15u32.to_be_bytes())
+            .expect("query")
+            .expect("a ceiling");
+        assert_eq!(key, 20u32.to_be_bytes());
+        // Exactly on a key returns that key.
+        let (key, _) = dict
+            .entry_at_or_after(&20u32.to_be_bytes())
+            .expect("query")
+            .expect("a ceiling");
+        assert_eq!(key, 20u32.to_be_bytes());
+        // Past the last key returns nothing.
+        assert!(dict
+            .entry_at_or_after(&99u32.to_be_bytes())
+            .expect("query")
+            .is_none());
+    }
+
+    #[test]
+    fn retain_keeps_only_matching_entries() {
+        let mut dict = dict_of(&[1, 2, 3, 4]);
+        dict.retain(|key, _| {
+            let bytes: [u8; 4] = key.try_into().expect("a four-byte key");
+            u32::from_be_bytes(bytes) % 2 == 0
+        })
+        .expect("retain");
+        assert_eq!(dict.count().expect("count"), 2);
+        assert!(matches!(
+            dict.get(&2u32.to_be_bytes()).expect("get"),
+            Lookup::Found(_)
+        ));
+        assert!(matches!(
+            dict.get(&1u32.to_be_bytes()).expect("get"),
+            Lookup::Absent
+        ));
     }
 }
