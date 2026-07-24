@@ -366,3 +366,120 @@ proptest! {
         }
     }
 }
+
+/// A summary that adds up, which is the shape of the augmentations TON itself uses.
+struct Total;
+
+impl crate::Augmentation for Total {
+    type Extra = u64;
+
+    fn read(&self, slice: &mut crate::Slice<'_>) -> Result<u64, crate::CellError> {
+        slice.load_uint(64)
+    }
+
+    fn combine(&self, left: &u64, right: &u64) -> Result<u64, crate::CellError> {
+        Ok(left + right)
+    }
+
+    fn write(&self, extra: &u64, into: &mut crate::Builder) -> Result<(), crate::CellError> {
+        into.store_uint(*extra, 64)?;
+        Ok(())
+    }
+}
+
+/// A summary that notices which of a fork's two children is which.
+///
+/// A sum is blind to that, so it holds just as well over a tree that combined every fork
+/// backwards. This one does not.
+struct Ordered;
+
+impl crate::Augmentation for Ordered {
+    type Extra = u64;
+
+    fn read(&self, slice: &mut crate::Slice<'_>) -> Result<u64, crate::CellError> {
+        slice.load_uint(64)
+    }
+
+    fn combine(&self, left: &u64, right: &u64) -> Result<u64, crate::CellError> {
+        Ok(left.wrapping_mul(31).wrapping_add(*right))
+    }
+
+    fn write(&self, extra: &u64, into: &mut crate::Builder) -> Result<(), crate::CellError> {
+        into.store_uint(*extra, 64)?;
+        Ok(())
+    }
+}
+
+/// What one key contributes to every summary above it.
+fn leaf_extra(key: &[u8]) -> u64 {
+    key.iter()
+        .take(4)
+        .fold(0u64, |total, byte| total * 256 + u64::from(*byte))
+}
+
+/// The augmented dictionary those keys build, each summarised by its own leading bytes.
+fn aug_dict_of<A: crate::Augmentation<Extra = u64>>(
+    aug: A,
+    key_bits: u16,
+    keys: &[Vec<u8>],
+) -> crate::AugDict<A> {
+    let mut dict = crate::AugDict::new(aug, key_bits).unwrap();
+    for key in keys {
+        let mut value = crate::Builder::new();
+        value.store_bytes(key).unwrap();
+        dict.set(key, &leaf_extra(key), &value).unwrap();
+    }
+    dict
+}
+
+proptest! {
+    /// The summary over the whole tree is what its leaves add up to.
+    ///
+    /// Adding is associative and commutative, so the answer does not depend on the shape
+    /// the keys happened to build, which is what lets the expected value be computed from
+    /// the key list alone rather than by walking the tree the code just wrote. A fork that
+    /// summarised wrongly is carried up by every fork above it, so this reaches a mistake
+    /// anywhere in the tree from the root.
+    #[test]
+    fn a_summary_over_the_whole_tree_is_what_its_leaves_add_up_to((key_bits, keys) in keys()) {
+        let dict = aug_dict_of(Total, key_bits, &keys);
+        let expected: u64 = keys.iter().map(|key| leaf_extra(key)).sum();
+        prop_assert_eq!(dict.root_extra().unwrap(), Some(expected));
+    }
+
+    /// An augmented dictionary is the same tree whatever order its keys arrived in.
+    ///
+    /// Every summary is rebuilt as the tree is, so this says the summaries follow from the
+    /// key set too, and not from the path the writes took to get there.
+    #[test]
+    fn an_augmented_dictionary_ignores_the_order_its_keys_arrive_in((key_bits, keys) in keys()) {
+        let forwards = aug_dict_of(Ordered, key_bits, &keys);
+        let reversed: Vec<Vec<u8>> = keys.iter().rev().cloned().collect();
+        let backwards = aug_dict_of(Ordered, key_bits, &reversed);
+        prop_assert_eq!(
+            forwards.root().map(Cell::repr_hash),
+            backwards.root().map(Cell::repr_hash)
+        );
+    }
+
+    /// Taking a key out leaves the tree the remaining keys would have built, summaries
+    /// included.
+    ///
+    /// A removal merges two edges into one and has to resummarise every fork above the
+    /// merge. Comparing against a dictionary that never held the key is what says it did.
+    #[test]
+    fn removing_a_key_leaves_the_augmented_dictionary_that_never_held_it(
+        (key_bits, keys) in keys(),
+    ) {
+        for dropped in &keys {
+            let mut edited = aug_dict_of(Ordered, key_bits, &keys);
+            prop_assert!(edited.remove(dropped).unwrap());
+            let rest: Vec<Vec<u8>> = keys.iter().filter(|k| *k != dropped).cloned().collect();
+            let never = aug_dict_of(Ordered, key_bits, &rest);
+            prop_assert_eq!(
+                edited.root().map(Cell::repr_hash),
+                never.root().map(Cell::repr_hash)
+            );
+        }
+    }
+}

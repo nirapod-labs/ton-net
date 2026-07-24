@@ -25,7 +25,7 @@ ton-net-cell.workspace = true
 # signature covers.
 ton-net-tl.workspace = true
 # Signature verification is built on the curve crate already in the tree rather than on
-# an ed25519 crate, which would duplicate it (NET-ADR-007).
+# an ed25519 crate, which would duplicate it (NET-ADR-006).
 curve25519-dalek.workspace = true
 # A validator's short id is the sha256 of its key in TL form, which is how a signature
 # names its signer.

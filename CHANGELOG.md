@@ -15,6 +15,13 @@ never published.
 
 ### Added
 
+- `AugDict`, TON's `HashmapAug n X Y`, with get, set, remove and iteration. Every
+  node carries a summary of the subtree below it, and a fork's is the combination
+  of its two children's. What a summary means comes from the caller, through the
+  new `Augmentation` trait, alongside `AugEntry` and `AugDictIter`. A summary is
+  recomputed from the two children on every write rather than carried forward,
+  and a write that would have to summarise a pruned branch is refused instead of
+  guessed at.
 - `Slice::load_u8`, `load_u16`, `load_u32` and `load_i32` read a fixed-width
   field into the type that field has, instead of returning a `u64` for the
   caller to narrow.

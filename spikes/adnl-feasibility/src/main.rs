@@ -12,7 +12,7 @@
 // the request query id and carries a decodable liteServer.masterchainInfo. The
 // wire layout is documented in docs/protocol/wire-format.md; the constructor tags
 // derive from the ton_api.tl and lite_api.tl schemas. The crate lines match
-// NET-ADR-003.
+// NET-ADR-004.
 
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpStream};

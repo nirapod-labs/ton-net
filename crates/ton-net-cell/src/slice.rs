@@ -4,7 +4,14 @@
 //! A reading cursor over a cell's bits and references.
 
 use crate::cell::Cell;
+use crate::dict::Dict;
 use crate::error::CellError;
+
+mod address;
+mod compare;
+mod snake;
+
+pub use address::MsgAddress;
 
 /// Reads the bit at `index` of `data`, most significant bit first.
 ///
@@ -45,6 +52,11 @@ pub struct Slice<'a> {
     cell: &'a Cell,
     bit: usize,
     next_ref: usize,
+    // One past the last bit and reference this cursor may read. A cursor over a whole cell
+    // holds the cell's own extents here; a bounded sub-slice holds a narrower window, so the
+    // same reads stop early without a separate kind of cursor.
+    end_bit: usize,
+    end_ref: usize,
 }
 
 impl<'a> Slice<'a> {
@@ -54,6 +66,8 @@ impl<'a> Slice<'a> {
             cell,
             bit: 0,
             next_ref: 0,
+            end_bit: usize::from(cell.bit_len()),
+            end_ref: cell.refs().len(),
         }
     }
 
@@ -66,13 +80,13 @@ impl<'a> Slice<'a> {
     /// The number of data bits not yet read.
     #[must_use]
     pub fn remaining_bits(&self) -> usize {
-        usize::from(self.cell.bit_len()) - self.bit
+        self.end_bit - self.bit
     }
 
     /// The number of references not yet taken.
     #[must_use]
     pub fn remaining_refs(&self) -> usize {
-        self.cell.refs().len() - self.next_ref
+        self.end_ref - self.next_ref
     }
 
     /// Whether every bit and reference has been read.
@@ -279,6 +293,9 @@ impl<'a> Slice<'a> {
     ///
     /// Returns [`CellError::NotEnoughRefs`] if the slice has no reference left.
     pub fn load_ref(&mut self) -> Result<&'a Cell, CellError> {
+        if self.next_ref >= self.end_ref {
+            return Err(CellError::NotEnoughRefs);
+        }
         let cell = self
             .cell
             .refs()
@@ -300,6 +317,23 @@ impl<'a> Slice<'a> {
         } else {
             Ok(None)
         }
+    }
+
+    /// Reads a `HashmapE`: one bit, then a reference to the dictionary root when it is set.
+    ///
+    /// This is the read mirror of [`Builder::store_dict`](crate::Builder::store_dict): an
+    /// unset bit is the empty dictionary, and a set bit takes the root from the next
+    /// reference. `key_bits` is the fixed key width the dictionary's type carries and the
+    /// wire form does not, so the caller supplies it.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CellError::NotEnoughBits`] if the slice has no bits left,
+    /// [`CellError::NotEnoughRefs`] if the bit is set and no reference is left, and otherwise
+    /// as [`Dict::from_root`](crate::Dict::from_root) for the root it reads.
+    pub fn load_dict(&mut self, key_bits: u16) -> Result<Dict, CellError> {
+        let root = self.load_maybe_ref()?.cloned();
+        Dict::from_root(root, key_bits)
     }
 
     /// Reads `n` bits as a two's-complement signed integer.
@@ -365,6 +399,9 @@ impl<'a> Slice<'a> {
     ///
     /// Returns [`CellError::NotEnoughRefs`] if the slice has no reference left.
     pub fn peek_ref(&self) -> Result<&'a Cell, CellError> {
+        if self.next_ref >= self.end_ref {
+            return Err(CellError::NotEnoughRefs);
+        }
         self.cell
             .refs()
             .get(self.next_ref)
@@ -382,6 +419,92 @@ impl<'a> Slice<'a> {
         }
         self.next_ref += n;
         Ok(())
+    }
+
+    /// Skips `bits` bits and `refs` references together.
+    ///
+    /// Both counts are checked before either cursor moves, so a run that cannot fit leaves
+    /// the slice exactly where it was.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CellError::NotEnoughBits`] or [`CellError::NotEnoughRefs`] if the slice
+    /// holds fewer of either than asked.
+    pub fn skip_bits_and_refs(&mut self, bits: usize, refs: usize) -> Result<(), CellError> {
+        if bits > self.remaining_bits() {
+            return Err(CellError::NotEnoughBits {
+                requested: bits,
+                available: self.remaining_bits(),
+            });
+        }
+        if refs > self.remaining_refs() {
+            return Err(CellError::NotEnoughRefs);
+        }
+        self.bit += bits;
+        self.next_ref += refs;
+        Ok(())
+    }
+
+    /// A cursor over a window inside what is left, without advancing this one.
+    ///
+    /// The window starts `skip_bits` bits and `skip_refs` references past the current
+    /// position and spans `bits` bits and `refs` references. The returned cursor reads only
+    /// that window and reports it empty at its end, so an embedded slice field is read
+    /// without the reader seeing past it.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CellError::NotEnoughBits`] or [`CellError::NotEnoughRefs`] if the window
+    /// reaches past what the slice has left.
+    pub fn subslice(
+        &self,
+        skip_bits: usize,
+        bits: usize,
+        skip_refs: usize,
+        refs: usize,
+    ) -> Result<Self, CellError> {
+        let bit_span = skip_bits
+            .checked_add(bits)
+            .ok_or(CellError::NotEnoughBits {
+                requested: usize::MAX,
+                available: self.remaining_bits(),
+            })?;
+        if bit_span > self.remaining_bits() {
+            return Err(CellError::NotEnoughBits {
+                requested: bit_span,
+                available: self.remaining_bits(),
+            });
+        }
+        let ref_span = skip_refs
+            .checked_add(refs)
+            .ok_or(CellError::NotEnoughRefs)?;
+        if ref_span > self.remaining_refs() {
+            return Err(CellError::NotEnoughRefs);
+        }
+        // Every sum below is bounded by the checks above, so none can overflow: the start
+        // plus its span is at most this slice's own end.
+        Ok(Slice {
+            cell: self.cell,
+            bit: self.bit + skip_bits,
+            next_ref: self.next_ref + skip_refs,
+            end_bit: self.bit + skip_bits + bits,
+            end_ref: self.next_ref + skip_refs + refs,
+        })
+    }
+
+    /// Reads the next `bits` bits and `refs` references as their own cursor.
+    ///
+    /// This advances past the window and returns a cursor bounded to it, the reading form of
+    /// [`subslice`](Slice::subslice) taken from the front. Nothing is consumed on failure.
+    ///
+    /// # Errors
+    ///
+    /// As [`subslice`](Slice::subslice).
+    pub fn load_slice(&mut self, bits: usize, refs: usize) -> Result<Self, CellError> {
+        let window = self.subslice(0, bits, 0, refs)?;
+        self.bit += bits;
+        self.next_ref += refs;
+        Ok(window)
     }
 
     /// Copies everything left into a builder.
@@ -407,7 +530,7 @@ impl<'a> Slice<'a> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{parse_boc, CellError};
+    use crate::{parse_boc, Builder, Cell, CellError, Dict};
 
     // One cell of eight bits holding 0xab.
     const ONE_CELL: [u8; 14] = [
@@ -584,5 +707,114 @@ mod tests {
                 available: 8,
             })
         );
+    }
+
+    #[test]
+    fn a_loaded_window_reads_its_own_bits_and_no_more() {
+        let roots = parse_boc(&FOUR_BYTES).unwrap();
+        let mut slice = roots[0].parse();
+        let mut window = slice.load_slice(16, 0).unwrap();
+        assert_eq!(window.load_u16().unwrap(), 0x89ab);
+        assert!(window.is_empty(), "the window ends at its own bound");
+        assert!(window.load_bit().is_err());
+        // The parent advanced past the window and reads on from there.
+        assert_eq!(slice.load_u16().unwrap(), 0xcdef);
+        assert!(slice.is_empty());
+    }
+
+    #[test]
+    fn a_window_that_overruns_is_refused_and_consumes_nothing() {
+        let roots = parse_boc(&ONE_CELL).unwrap();
+        let mut slice = roots[0].parse();
+        assert!(slice.load_slice(9, 0).is_err());
+        // The failed read left the cursor put, so the whole byte is still there.
+        assert_eq!(slice.load_uint(8).unwrap(), 0xab);
+    }
+
+    #[test]
+    fn a_subslice_is_a_window_that_does_not_advance() {
+        let roots = parse_boc(&FOUR_BYTES).unwrap();
+        let slice = roots[0].parse();
+        // Bits 8..16 are the second byte, 0xab.
+        let mut middle = slice.subslice(8, 8, 0, 0).unwrap();
+        assert_eq!(middle.load_u8().unwrap(), 0xab);
+        // The parent never moved, so it still starts at the first byte.
+        assert_eq!(slice.clone().load_u8().unwrap(), 0x89);
+    }
+
+    #[test]
+    fn a_window_carries_a_reference() {
+        let roots = parse_boc(&TWO_CELLS).unwrap();
+        let mut slice = roots[0].parse();
+        let mut window = slice.load_slice(0, 1).unwrap();
+        assert_eq!(window.load_ref().unwrap().parse().load_u8().unwrap(), 0xcd);
+        assert!(window.load_ref().is_err(), "the window holds one reference");
+        assert_eq!(
+            slice.remaining_refs(),
+            0,
+            "the parent gave the reference up"
+        );
+    }
+
+    #[test]
+    fn a_materialized_window_is_a_cell_of_just_its_bits() {
+        let roots = parse_boc(&FOUR_BYTES).unwrap();
+        let mut slice = roots[0].parse();
+        let cell = slice.load_slice(16, 0).unwrap().to_cell().unwrap();
+        assert_eq!(cell.bit_len(), 16);
+        assert_eq!(cell.parse().load_u16().unwrap(), 0x89ab);
+    }
+
+    #[test]
+    fn skipping_bits_and_refs_moves_both_or_neither() {
+        let roots = parse_boc(&TWO_CELLS).unwrap();
+        let mut slice = roots[0].parse();
+        // No bits, one reference: the slice empties.
+        slice.skip_bits_and_refs(0, 1).unwrap();
+        assert!(slice.is_empty());
+
+        let roots = parse_boc(&FOUR_BYTES).unwrap();
+        let mut slice = roots[0].parse();
+        // Asking for a reference this cell does not have fails and moves nothing.
+        assert!(slice.skip_bits_and_refs(8, 1).is_err());
+        assert_eq!(slice.load_u8().unwrap(), 0x89, "the byte cursor stayed put");
+    }
+
+    #[test]
+    fn load_dict_reads_back_a_stored_dictionary() {
+        // Store a dictionary and a byte after it, then read both back through a slice: the
+        // read mirror of store_dict, with the cursor left past the maybe bit and the ref.
+        let mut dict = Dict::new(8).expect("a key width");
+        let mut value = Builder::new();
+        value.store_uint(0x42, 8).expect("a byte fits");
+        dict.set(&[0x05], &value).expect("sets a key");
+
+        let mut builder = Builder::new();
+        builder.store_dict(&dict).expect("stores the dict");
+        builder.store_uint(0xab, 8).expect("a trailing byte fits");
+        let cell = builder.build().expect("builds");
+
+        let mut slice = cell.parse();
+        let loaded = slice.load_dict(8).expect("reads the dict");
+        assert_eq!(
+            loaded.root().map(Cell::repr_hash),
+            dict.root().map(Cell::repr_hash),
+            "the loaded dict is the one stored"
+        );
+        assert_eq!(
+            slice.load_uint(8).expect("the trailing byte"),
+            0xab,
+            "the cursor moved past the maybe bit and the reference"
+        );
+    }
+
+    #[test]
+    fn load_dict_reads_an_empty_dictionary() {
+        let empty = Dict::new(8).expect("a key width");
+        let mut builder = Builder::new();
+        builder.store_dict(&empty).expect("stores the empty dict");
+        let cell = builder.build().expect("builds");
+        let loaded = cell.parse().load_dict(8).expect("reads the empty dict");
+        assert!(loaded.is_empty(), "an empty dict loads empty");
     }
 }

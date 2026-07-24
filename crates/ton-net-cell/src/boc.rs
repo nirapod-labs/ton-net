@@ -2,11 +2,35 @@
 // SPDX-FileCopyrightText: 2026 Nirapod Labs
 
 //! The bag of cells: the serialized form of a cell graph.
+//!
+//! The read path and the write path each take a child module: [`parse`] reads a bag's
+//! cells once [`header`] has checked its header, and [`serialize`] writes one. The parts
+//! they share, the magic, the bounds, the checksum, the byte reader, and the header those
+//! reads fill, stay here where both paths and the [`view`] over a bag reach them.
 
-use std::collections::{HashMap, HashSet};
-
-use crate::cell::{Cell, CellType, MAX_BITS, MAX_REFS};
 use crate::error::CellError;
+
+mod header;
+mod large;
+mod lazy;
+mod parse;
+mod random;
+mod serialize;
+mod view;
+
+#[cfg(feature = "compress")]
+pub mod compress;
+
+pub use large::{serialize_boc_chunks, serialize_boc_chunks_with, BocChunks};
+pub use lazy::LazyBoc;
+pub use parse::parse_boc;
+pub use serialize::{file_hash, serialize_boc, serialize_boc_with, BocOptions};
+pub use view::BocView;
+
+// The read path is spread across the header and parse children and the view over it, so the
+// entry points those children share are named here for them to reach through the parent.
+use header::read_header;
+use parse::{build_cell, read_and_build, verify_roots};
 
 /// The four bytes every bag of cells begins with.
 const MAGIC: [u8; 4] = [0xb5, 0xee, 0x9c, 0x72];
@@ -29,20 +53,13 @@ pub const MAX_CELLS: usize = 1 << 17;
 /// later walked or dropped.
 pub const MAX_DEPTH: usize = 1024;
 
-/// A cell as read from the bag, with its references still as indices.
-struct RawCell {
-    data: Vec<u8>,
-    bits: u16,
-    refs: Vec<usize>,
-    cell_type: CellType,
-    level_mask: u8,
-    /// The hashes and depths the cell carried ahead of its data, when it carried them.
-    stored: Option<Vec<u8>>,
-}
-
 /// The CRC-32C (Castagnoli) checksum a bag of cells may carry, reflected form.
-fn crc32c(bytes: &[u8]) -> u32 {
-    let mut crc = 0xFFFF_FFFFu32;
+/// The CRC-32C state before any bytes, so a running checksum can be built one chunk at a
+/// time by the streaming serializer rather than over one contiguous buffer.
+const CRC32C_INIT: u32 = 0xFFFF_FFFF;
+
+/// Folds `bytes` into a running CRC-32C state.
+fn crc32c_update(mut crc: u32, bytes: &[u8]) -> u32 {
     for &byte in bytes {
         crc ^= u32::from(byte);
         for _ in 0..8 {
@@ -53,22 +70,12 @@ fn crc32c(bytes: &[u8]) -> u32 {
             };
         }
     }
-    !crc
+    crc
 }
 
-/// The number of bytes needed to hold `value`, at least one.
-fn byte_width(value: u64) -> usize {
-    let bits = u64::BITS - value.leading_zeros();
-    (bits.div_ceil(8)).max(1) as usize
-}
-
-/// Appends the low `width` bytes of `value`, big-endian.
-///
-/// A width past the eight bytes a `u64` holds asks for a number wider than the value,
-/// which no caller here does; writing all eight is what keeps this total.
-fn push_be(out: &mut Vec<u8>, value: u64, width: usize) {
-    let bytes = value.to_be_bytes();
-    out.extend(bytes.into_iter().skip(bytes.len().saturating_sub(width)));
+/// The CRC-32C of `bytes`, the checksum a bag of cells trails itself with.
+fn crc32c(bytes: &[u8]) -> u32 {
+    !crc32c_update(CRC32C_INIT, bytes)
 }
 
 /// A reader that returns an error rather than reading past the end.
@@ -136,482 +143,33 @@ pub fn bit_len(d2: u8, data: &[u8]) -> Result<u16, CellError> {
     Ok(full * 8 + (7 - low_zeros))
 }
 
-/// Determines a cell's kind, and holds an exotic cell to the shape that kind must have.
+/// A bag's header: the counts and flags read before the cells, and where the cells begin.
 ///
-/// Every exotic kind has a fixed reference count, and a pruned branch a fixed body length
-/// as well. The checks belong here, at the parse boundary, because a cell that reaches
-/// [`Cell::from_parts`] is hashed, and a hash computed over a shape the cell model does
-/// not define is a value no other implementation agrees with.
-fn classify(
-    exotic: bool,
-    data: &[u8],
-    level_mask: u8,
-    ref_count: usize,
-) -> Result<CellType, CellError> {
-    if !exotic {
-        return Ok(CellType::Ordinary);
-    }
-    let tag = *data
-        .first()
-        .ok_or(CellError::Malformed("exotic cell has no type byte"))?;
-    let cell_type =
-        CellType::from_tag(tag).ok_or(CellError::Malformed("unknown exotic cell type"))?;
-
-    let expected_refs = match cell_type {
-        CellType::Ordinary => return Ok(cell_type),
-        CellType::PrunedBranch | CellType::LibraryReference => 0,
-        CellType::MerkleProof => 1,
-        CellType::MerkleUpdate => 2,
-    };
-    if ref_count != expected_refs {
-        // A pruned branch is the one that matters. Its hash is computed from the hash it
-        // stands in for and never from its children, so a pruned branch allowed to carry
-        // children would hash the same whatever hangs beneath it: an attacker-chosen
-        // collision on the value this crate calls a cell's identity.
-        return Err(CellError::Malformed(
-            "exotic cell has the wrong number of references",
-        ));
-    }
-
-    if cell_type == CellType::PrunedBranch {
-        // A pruned branch carries its level mask twice, in the descriptor and in the
-        // cell body, and only the descriptor copy is hashed. Two copies that disagree
-        // would leave a cell whose body says one thing and whose identity says another,
-        // so the disagreement is refused rather than resolved.
-        let stored = *data
-            .get(1)
-            .ok_or(CellError::Malformed("pruned branch has no mask byte"))?;
-        if stored != level_mask {
-            return Err(CellError::Malformed(
-                "pruned branch mask disagrees with its descriptor",
-            ));
-        }
-        // A pruned branch stands in for a subtree at some level, so it has to have one.
-        // At level zero it stores no hash at all and answers with its own, which is a
-        // shape that stands in for nothing.
-        if stored == 0 {
-            return Err(CellError::Malformed("pruned branch has no level"));
-        }
-        // One hash and one depth per marked level, after the type and mask bytes, and
-        // nothing else: an exact length leaves no trailing bytes to carry a second
-        // meaning past the ones the reads below index.
-        let levels = stored.count_ones() as usize;
-        if data.len() != 2 + levels * 34 {
-            return Err(CellError::Malformed(
-                "pruned branch length disagrees with its level mask",
-            ));
-        }
-    }
-    Ok(cell_type)
-}
-
-/// Parses a bag of cells and returns its root cells.
-///
-/// A bag holds a whole cell graph plus the indices of the roots it is read from. Most
-/// bags have one root; a liteserver's account proof has two.
-///
-/// # Errors
-///
-/// Returns [`CellError::NotABagOfCells`] if the magic does not match,
-/// [`CellError::Truncated`] if the bytes end early, [`CellError::Header`] if a header
-/// field is out of range, [`CellError::BadReference`] if a reference is out of range or
-/// does not point forward, [`CellError::Malformed`] if a cell's descriptors and data
-/// disagree, [`CellError::TooManyCells`] past [`MAX_CELLS`], or [`CellError::TooDeep`]
-/// past [`MAX_DEPTH`].
-///
-/// # Examples
-///
-/// ```
-/// use ton_net_cell::parse_boc;
-///
-/// let bytes = [0xb5, 0xee, 0x9c, 0x72, 0x01, 0x01, 0x01, 0x01, 0x00, 0x03, 0x00,
-///              0x00, 0x02, 0xab];
-/// let roots = parse_boc(&bytes)?;
-/// assert_eq!(roots.len(), 1);
-/// assert_eq!(roots[0].data(), &[0xab]);
-/// # Ok::<(), ton_net_cell::CellError>(())
-/// ```
-pub fn parse_boc(bytes: &[u8]) -> Result<Vec<Cell>, CellError> {
-    let mut reader = Reader { bytes, at: 0 };
-    if reader.take(4)? != MAGIC {
-        return Err(CellError::NotABagOfCells);
-    }
-
-    let flags = reader.byte()?;
-    let has_index = flags & 0x80 != 0;
-    let has_checksum = flags & 0x40 != 0;
-    let ref_size = usize::from(flags & 0x07);
-    let offset_size = usize::from(reader.byte()?);
-    if !(1..=4).contains(&ref_size) {
-        return Err(CellError::Header("reference size"));
-    }
-    if !(1..=8).contains(&offset_size) {
-        return Err(CellError::Header("offset size"));
-    }
-
-    // A checksum, when present, trails the whole bag and covers everything before it.
-    // Checking it first means corrupt bytes are rejected before anything is built.
-    if has_checksum {
-        let split = bytes.len().checked_sub(4).ok_or(CellError::Truncated)?;
-        let (body, tail) = bytes.split_at(split);
-        let stored = u32::from_le_bytes(tail.try_into().map_err(|_| CellError::Truncated)?);
-        if crc32c(body) != stored {
-            return Err(CellError::Checksum);
-        }
-    }
-
-    #[allow(
-        clippy::cast_possible_truncation,
-        reason = "ref_size is at most 4, so this is under 2^32"
-    )]
-    let count = reader.uint(ref_size)? as usize;
-    #[allow(
-        clippy::cast_possible_truncation,
-        reason = "ref_size is at most 4, so this is under 2^32"
-    )]
-    let roots = reader.uint(ref_size)? as usize;
-    #[allow(
-        clippy::cast_possible_truncation,
-        reason = "ref_size is at most 4, so this is under 2^32"
-    )]
-    let absent = reader.uint(ref_size)? as usize;
-    // Unlike the reads above, this one is as wide as offset_size allows, which is eight
-    // bytes, so it can name a bag larger than a 32-bit target can address. Refusing is
-    // what keeps the check below meaningful: a size narrowed to fit would let a bag claim
-    // one length, carry another, and still pass.
-    let Ok(total_size) = usize::try_from(reader.uint(offset_size)?) else {
-        return Err(CellError::Header("cell area size"));
-    };
-
-    // An absent cell is a reference to a cell the bag does not carry, which only the
-    // format's incremental-update use has. A bag holding one cannot be read whole.
-    if absent != 0 {
-        return Err(CellError::Header("absent cells"));
-    }
-    if count > MAX_CELLS {
-        return Err(CellError::TooManyCells { limit: MAX_CELLS });
-    }
-    if roots == 0 || roots > count {
-        return Err(CellError::Header("root count"));
-    }
-    // Every cell costs at least its two descriptor bytes, so a count the remaining bytes
-    // could not hold is truncation. Checked before allocating for the count.
-    if count.saturating_mul(2) > reader.remaining() {
-        return Err(CellError::Truncated);
-    }
-
-    let mut root_list = Vec::with_capacity(roots);
-    for _ in 0..roots {
-        #[allow(
-            clippy::cast_possible_truncation,
-            reason = "ref_size is at most 4, so this is under 2^32"
-        )]
-        let index = reader.uint(ref_size)? as usize;
-        if index >= count {
-            return Err(CellError::BadReference);
-        }
-        root_list.push(index);
-    }
-    if has_index {
-        // The index only repeats where each cell starts, which this reader already knows.
-        reader.take(count.saturating_mul(offset_size))?;
-    }
-
-    // The header states how many bytes the cells take. Holding a bag to its own statement
-    // leaves no unread tail to hide bytes in, and rejects a bag that claims a size it does
-    // not carry rather than reading whatever happens to follow.
-    let stated_end = reader
-        .consumed()
-        .checked_add(total_size)
-        .ok_or(CellError::Header("cell area size"))?;
-    let body_end = if has_checksum {
-        bytes.len().saturating_sub(4)
-    } else {
-        bytes.len()
-    };
-    if stated_end != body_end {
-        return Err(CellError::Header("cell area size"));
-    }
-
-    let mut raw = Vec::with_capacity(count);
-    for index in 0..count {
-        let d1 = reader.byte()?;
-        let d2 = reader.byte()?;
-        // The field is three bits wide and the cell model allows four references, so the
-        // top three values describe a cell no TON implementation will build.
-        let ref_count = usize::from(d1 & 7);
-        if ref_count > MAX_REFS {
-            return Err(CellError::Malformed("cell has more than four references"));
-        }
-        let exotic = d1 & 8 != 0;
-        let level_mask = d1 >> 5;
-
-        // A cell may carry its own hashes and depths ahead of its data, one of each per
-        // level its mask marks and one more besides. A whole block arrives this way; a
-        // Merkle proof does not, which is why the read path never met it. None of it is
-        // taken on trust: it is checked below against what the cell's own contents give,
-        // so a bag that describes itself wrongly is refused rather than believed.
-        let stored = if d1 & 16 != 0 {
-            let per_level = level_mask.count_ones() as usize + 1;
-            Some(reader.take(per_level * (32 + 2))?.to_vec())
-        } else {
-            None
-        };
-
-        let data = reader.take(usize::from((d2 >> 1) + (d2 & 1)))?.to_vec();
-        let bits = bit_len(d2, &data)?;
-        if bits > MAX_BITS {
-            return Err(CellError::Malformed("cell holds more than 1023 bits"));
-        }
-        let cell_type = classify(exotic, &data, level_mask, ref_count)?;
-
-        let mut refs = Vec::with_capacity(ref_count);
-        for _ in 0..ref_count {
-            #[allow(
-                clippy::cast_possible_truncation,
-                reason = "ref_size is at most 4, so this is under 2^32"
-            )]
-            let target = reader.uint(ref_size)? as usize;
-            // References point strictly forward, which is what keeps the graph acyclic.
-            if target >= count || target <= index {
-                return Err(CellError::BadReference);
-            }
-            refs.push(target);
-        }
-
-        raw.push(RawCell {
-            data,
-            bits,
-            refs,
-            cell_type,
-            level_mask,
-            stored,
-        });
-    }
-
-    // References point forward, so a descending pass meets every child before its parent.
-    // Depths accumulate in that same descending order, so position k holds cell
-    // `count-1-k`, which is the convention the build below reads its children by.
-    let mut depth: Vec<usize> = Vec::with_capacity(count);
-    for raw_cell in raw.iter().rev() {
-        let mut deepest = 0usize;
-        for &target in &raw_cell.refs {
-            deepest = deepest.max(depth.get(count - 1 - target).copied().unwrap_or(0) + 1);
-        }
-        if deepest > MAX_DEPTH {
-            return Err(CellError::TooDeep { limit: MAX_DEPTH });
-        }
-        depth.push(deepest);
-    }
-
-    // Built in the same descending order. Position k in `built` holds cell `count-1-k`.
-    let mut built: Vec<Cell> = Vec::with_capacity(count);
-    for raw_cell in raw.iter().rev() {
-        let mut refs = Vec::with_capacity(raw_cell.refs.len());
-        for &target in &raw_cell.refs {
-            let child = built
-                .get(count - 1 - target)
-                .ok_or(CellError::BadReference)?;
-            refs.push(child.clone());
-        }
-        let cell = Cell::from_parts(
-            raw_cell.data.clone(),
-            raw_cell.bits,
-            refs,
-            raw_cell.cell_type,
-            raw_cell.level_mask,
-        )?;
-        if let Some(stored) = &raw_cell.stored {
-            check_stored(&cell, stored)?;
-        }
-        built.push(cell);
-    }
-
-    root_list
-        .into_iter()
-        .map(|index| {
-            built
-                .get(count - 1 - index)
-                .cloned()
-                .ok_or(CellError::BadReference)
-        })
-        .collect()
-}
-
-/// Holds a cell to the hashes and depths it carried.
-///
-/// The stored copies are never used: the cell's identity comes from its own contents
-/// either way. What they are good for is disagreement, which means the sender computed
-/// something this crate did not, and there is no reading of that worth continuing from.
-fn check_stored(cell: &Cell, stored: &[u8]) -> Result<(), CellError> {
-    let (hashes, depths) = cell.stored();
-    if stored.len() != hashes.len() * 32 + depths.len() * 2 {
-        return Err(CellError::Malformed(
-            "cell stores a different number of hashes than its level mask allows",
-        ));
-    }
-    for (index, hash) in hashes.iter().enumerate() {
-        if stored.get(index * 32..index * 32 + 32) != Some(&hash[..]) {
-            return Err(CellError::Malformed(
-                "cell stores a hash its contents do not give",
-            ));
-        }
-    }
-    let base = hashes.len() * 32;
-    for (index, depth) in depths.iter().enumerate() {
-        let at = base + index * 2;
-        if stored.get(at..at + 2) != Some(&depth.to_be_bytes()[..]) {
-            return Err(CellError::Malformed(
-                "cell stores a depth its contents do not give",
-            ));
-        }
-    }
-    Ok(())
-}
-
-/// Orders every cell reachable from `roots` so each comes before the cells it
-/// references, which is the order a bag of cells stores them in.
-///
-/// Cells are shared by representation hash, so a subtree reached by two parents is
-/// stored once. Reverse post-order depth-first search gives the ordering, and the walk
-/// is iterative so a deep graph cannot overflow the stack.
-fn topological(roots: &[Cell]) -> Result<(Vec<Cell>, Vec<Vec<usize>>), CellError> {
-    enum Step {
-        Visit(Cell),
-        Emit(Cell),
-    }
-
-    let mut seen: HashSet<[u8; 32]> = HashSet::new();
-    let mut order: Vec<Cell> = Vec::new();
-    let mut stack: Vec<Step> = roots.iter().rev().map(|c| Step::Visit(c.clone())).collect();
-
-    while let Some(step) = stack.pop() {
-        match step {
-            Step::Visit(cell) => {
-                if !seen.insert(*cell.repr_hash()) {
-                    continue;
-                }
-                stack.push(Step::Emit(cell.clone()));
-                for child in cell.refs().iter().rev() {
-                    stack.push(Step::Visit(child.clone()));
-                }
-            }
-            Step::Emit(cell) => order.push(cell),
-        }
-    }
-    order.reverse();
-
-    let index_of = index_of(&order);
-    let mut children = Vec::with_capacity(order.len());
-    for cell in &order {
-        let mut indices = Vec::with_capacity(cell.refs().len());
-        for child in cell.refs() {
-            indices.push(
-                index_of
-                    .get(child.repr_hash())
-                    .copied()
-                    .ok_or(CellError::Malformed("a reference was not reachable"))?,
-            );
-        }
-        children.push(indices);
-    }
-    Ok((order, children))
-}
-
-/// Maps each cell's identity to its position.
-fn index_of(order: &[Cell]) -> HashMap<[u8; 32], usize> {
-    order
-        .iter()
-        .enumerate()
-        .map(|(index, cell)| (*cell.repr_hash(), index))
-        .collect()
-}
-
-/// Serializes a cell graph as a bag of cells, with a checksum.
-///
-/// A cell shared by more than one parent is stored once, keyed by its representation
-/// hash, so the output is as compact as the format allows.
-///
-/// The result is a valid bag of cells but not a canonical one: the format admits several
-/// encodings of the same graph, so a round trip is measured by the cell hashes it
-/// reproduces, not by byte equality with the input.
-///
-/// # Errors
-///
-/// Returns [`CellError::Header`] if `roots` is empty, or [`CellError::TooManyCells`] if
-/// the graph is larger than [`MAX_CELLS`].
-///
-/// # Examples
-///
-/// ```
-/// use ton_net_cell::{parse_boc, serialize_boc};
-///
-/// let bytes = [0xb5, 0xee, 0x9c, 0x72, 0x01, 0x01, 0x01, 0x01, 0x00, 0x03, 0x00,
-///              0x00, 0x02, 0xab];
-/// let roots = parse_boc(&bytes)?;
-/// let again = parse_boc(&serialize_boc(&roots)?)?;
-/// assert_eq!(roots[0].hash(), again[0].hash());
-/// # Ok::<(), ton_net_cell::CellError>(())
-/// ```
-pub fn serialize_boc(roots: &[Cell]) -> Result<Vec<u8>, CellError> {
-    if roots.is_empty() {
-        return Err(CellError::Header("root count"));
-    }
-    let (order, children) = topological(roots)?;
-    let count = order.len();
-    if count > MAX_CELLS {
-        return Err(CellError::TooManyCells { limit: MAX_CELLS });
-    }
-    let positions = index_of(&order);
-    let ref_size = byte_width(count as u64);
-
-    let mut body = Vec::new();
-    for (cell, refs) in order.iter().zip(&children) {
-        let (d1, d2) = cell.stored_descriptors();
-        body.push(d1);
-        body.push(d2);
-        body.extend_from_slice(cell.data());
-        for &index in refs {
-            push_be(&mut body, index as u64, ref_size);
-        }
-    }
-    let offset_size = byte_width(body.len() as u64);
-
-    let mut out = Vec::with_capacity(body.len() + 32);
-    out.extend_from_slice(&MAGIC);
-    // No index, a checksum, and the reference size in the low three bits. byte_width
-    // always returns a byte count from 1 to 8, which fits u8 in both pushes below.
-    #[allow(
-        clippy::cast_possible_truncation,
-        reason = "byte_width returns 1 to 8, which fits u8"
-    )]
-    out.push(0x40 | ref_size as u8);
-    #[allow(
-        clippy::cast_possible_truncation,
-        reason = "byte_width returns 1 to 8, which fits u8"
-    )]
-    out.push(offset_size as u8);
-    push_be(&mut out, count as u64, ref_size);
-    push_be(&mut out, roots.len() as u64, ref_size);
-    push_be(&mut out, 0, ref_size); // no absent cells
-    push_be(&mut out, body.len() as u64, offset_size);
-    for root in roots {
-        let index = positions
-            .get(root.repr_hash())
-            .copied()
-            .ok_or(CellError::Malformed("a root was not reachable"))?;
-        push_be(&mut out, index as u64, ref_size);
-    }
-    out.extend_from_slice(&body);
-
-    let checksum = crc32c(&out);
-    out.extend_from_slice(&checksum.to_le_bytes());
-    Ok(out)
+/// [`read_header`] fills one and leaves the reader at the first cell, so the cells can be
+/// read against counts already held to the bytes, or left unread while the header alone is
+/// inspected through a [`BocView`].
+struct Header {
+    /// The total number of cells the bag carries.
+    count: usize,
+    /// The number of bytes a reference index takes.
+    ref_size: usize,
+    /// The positions of the root cells among the count.
+    root_list: Vec<usize>,
+    /// Whether the bag carries a per-cell offset index.
+    has_index: bool,
+    /// Whether the bag ends in a CRC-32C checksum.
+    has_checksum: bool,
+    /// The number of bytes the cells themselves take.
+    cell_area: usize,
+    /// Where the cells begin, past the header, the roots and the index.
+    body_offset: usize,
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::cell::CellType;
+    use sha2::{Digest, Sha256};
 
     // One cell of eight bits holding 0xab.
     const ONE_CELL: [u8; 14] = [
@@ -919,5 +477,87 @@ mod tests {
         let mut overcount = EXACT;
         overcount[6] = 0x03;
         assert_eq!(parse_boc(&overcount), Err(CellError::Truncated));
+    }
+
+    #[test]
+    fn every_option_combination_round_trips() {
+        let roots = parse_boc(&TWO_CELLS).unwrap();
+        let expected = *roots[0].repr_hash();
+        for index in [false, true] {
+            for crc32c in [false, true] {
+                let bag = serialize_boc_with(&roots, &BocOptions { index, crc32c }).unwrap();
+                let back = parse_boc(&bag).expect("the bag reads back");
+                assert_eq!(
+                    *back[0].repr_hash(),
+                    expected,
+                    "index={index} crc32c={crc32c}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn the_default_serialization_is_the_plain_one() {
+        // serialize_boc is serialize_boc_with under the default options, byte for byte.
+        let roots = parse_boc(&TWO_CELLS).unwrap();
+        assert_eq!(
+            serialize_boc(&roots).unwrap(),
+            serialize_boc_with(&roots, &BocOptions::default()).unwrap(),
+        );
+    }
+
+    #[test]
+    fn an_indexed_bag_states_where_each_cell_begins() {
+        // The index adds count offsets between the roots and the cells, so the bag is longer
+        // by exactly that, and still reads back to the same cells.
+        let roots = parse_boc(&TWO_CELLS).unwrap();
+        let plain = serialize_boc_with(
+            &roots,
+            &BocOptions {
+                index: false,
+                crc32c: true,
+            },
+        )
+        .unwrap();
+        let indexed = serialize_boc_with(
+            &roots,
+            &BocOptions {
+                index: true,
+                crc32c: true,
+            },
+        )
+        .unwrap();
+        assert!(indexed.len() > plain.len(), "the index takes room");
+        assert_eq!(
+            parse_boc(&indexed).unwrap()[0].repr_hash(),
+            roots[0].repr_hash(),
+        );
+    }
+
+    #[test]
+    fn the_file_hash_is_the_sha256_of_the_bag() {
+        let roots = parse_boc(&TWO_CELLS).unwrap();
+        let bag = serialize_boc(&roots).unwrap();
+        let expected: [u8; 32] = Sha256::digest(&bag).into();
+        assert_eq!(
+            file_hash(&bag),
+            expected,
+            "the file hash is the bag's sha256"
+        );
+
+        // A different bag names itself differently.
+        let other = serialize_boc(&parse_boc(&ONE_CELL).unwrap()).unwrap();
+        assert_ne!(file_hash(&bag), file_hash(&other));
+    }
+
+    #[test]
+    fn a_bag_of_two_roots_reads_back_both() {
+        let one = parse_boc(&ONE_CELL).unwrap().remove(0);
+        let two = parse_boc(&TWO_CELLS).unwrap().remove(0);
+        let bag = serialize_boc(&[one.clone(), two.clone()]).expect("two roots serialize");
+        let back = parse_boc(&bag).expect("the two-root bag reads back");
+        assert_eq!(back.len(), 2, "both roots come back");
+        assert_eq!(back[0].repr_hash(), one.repr_hash());
+        assert_eq!(back[1].repr_hash(), two.repr_hash());
     }
 }

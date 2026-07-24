@@ -3,7 +3,7 @@
 
 //! Ed25519 verification and the weight rule, on the crates already in the tree.
 //!
-//! NET-ADR-003 keeps one copy of each crypto crate and rejects `ed25519-dalek` as a
+//! NET-ADR-004 keeps one copy of each crypto crate and rejects `ed25519-dalek` as a
 //! dependency. Both current versions would break that rule, one by duplicating the
 //! curve and one by duplicating the whole digest generation, so this builds the
 //! verification equation on `curve25519-dalek` and `sha2`, which are already here.

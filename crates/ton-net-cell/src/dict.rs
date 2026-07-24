@@ -8,27 +8,41 @@
 //! whatever the dictionary stores; which one it is follows from how much of the key is
 //! left rather than from anything in the cell.
 //!
-//! # Canonical form
+//! # The two shapes
 //!
-//! A label has three encodings and all three parse. TON's rule is that the shortest one
-//! is the only correct one, with a tie going to the earliest constructor, so a dictionary
-//! has exactly one representation and therefore exactly one hash. Choosing a longer
-//! encoding builds a tree that reads back with the same entries and hashes differently,
-//! which nothing downstream would report: a hash here is an identity, not a checksum.
-//! [`store_label`] is where that choice is made.
-//!
-//! # What this type models
-//!
-//! This is the plain `HashmapE n X`. A fork in a plain dictionary is its label and two
-//! references and nothing else, which is what [`Dict::set`] and [`Dict::remove`] check
-//! before they rebuild one. An augmented dictionary carries a summary of its subtree in
-//! every fork, and rebuilding one means recomputing those summaries rather than copying
-//! them forward.
+//! The plain `HashmapE n X` is [`Dict`] and the augmented `HashmapAug n X Y` is
+//! [`AugDict`]. A plain fork is its label and two references and nothing else; an
+//! augmented one also carries a summary of its subtree, and rebuilding it recomputes those
+//! summaries rather than copying them forward. The two differ only in what a node carries
+//! between its label and its value, so the descent, the split and the rebuild are written
+//! once over a private `Shape` seam and shared. The label codec that gives a dictionary
+//! its one canonical hash lives in the `label` submodule.
 
 use crate::builder::Builder;
 use crate::cell::{Cell, MAX_BITS};
 use crate::error::CellError;
 use crate::slice::Slice;
+
+mod aug;
+mod floor;
+mod label;
+mod plain;
+mod prefix;
+mod typed;
+
+pub use aug::{AugDict, AugDictIter, AugEntry, AugItem, Augmentation};
+pub use plain::{Dict, DictIter};
+pub use prefix::{PfxDict, PfxDictIter, PfxMatch};
+
+/// A dictionary fork's key prefix and the summary it carries.
+///
+/// The prefix is the key bits everything below the fork shares; the summary is what the
+/// fork stores over that subtree. [`AugDict::fork_extras`] yields one per interior fork.
+pub type ForkExtra<E> = (Vec<bool>, E);
+
+#[cfg(test)]
+use label::bounded_width;
+use label::{read_label, store_label};
 
 /// How a lookup ended.
 ///
@@ -93,6 +107,47 @@ impl DictEntry {
     }
 }
 
+/// What a [`traverse_extra`](crate::AugDict::traverse_extra) visitor asks for at each node.
+///
+/// At a fork the three answers differ: descend into its subtree, leave that subtree
+/// unvisited, or end the walk. At a leaf there is nothing below to skip, so
+/// [`Skip`](Traverse::Skip) means the same as [`Continue`](Traverse::Continue).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Traverse {
+    /// Descend into a fork's subtree, or move on past a leaf.
+    Continue,
+    /// Leave a fork's subtree unvisited; the same as [`Continue`](Traverse::Continue) at a
+    /// leaf.
+    Skip,
+    /// End the walk now, visiting nothing further.
+    Stop,
+}
+
+/// A node a directed augmented walk visits: an interior fork, or a leaf.
+///
+/// A fork is offered before either of its children, carrying the summary over the whole
+/// subtree beneath it, so a visitor can decide from that summary alone whether the subtree
+/// is worth descending into. A leaf carries its own key, summary and value.
+#[derive(Debug)]
+pub enum AugNode<'a, E> {
+    /// An interior fork, offered before its subtree.
+    Fork {
+        /// The key bits every entry below this fork shares.
+        prefix: &'a [bool],
+        /// The fork's stored summary over that whole subtree.
+        extra: &'a E,
+    },
+    /// A leaf holding one entry.
+    Leaf {
+        /// The full key, packed most-significant-bit first.
+        key: &'a [u8],
+        /// The summary the leaf carries for its own value.
+        extra: &'a E,
+        /// Where the value sits, read with [`DictEntry::slice`].
+        entry: &'a DictEntry,
+    },
+}
+
 /// What a fork missing a branch reports. A fork always has two.
 const NO_BRANCH: CellError = CellError::Malformed("dictionary fork without both branches");
 
@@ -102,11 +157,6 @@ fn key_bit(key: &[u8], index: usize) -> bool {
         Some(byte) => (byte >> (7 - (index % 8))) & 1 == 1,
         None => false,
     }
-}
-
-/// The width of a `#<= max` field: enough bits to hold every value up to `max`.
-fn bounded_width(max: u16) -> u32 {
-    u16::BITS - max.leading_zeros()
 }
 
 /// The bits of `key` from `at` onward. Every caller has already held `at` inside the key.
@@ -127,98 +177,55 @@ fn pack(bits: &[bool]) -> Vec<u8> {
     out
 }
 
-/// Reads an edge label, returning the key bits it covers.
+/// What a dictionary node carries between its label and its value.
 ///
-/// The three encodings are a unary-counted run, an explicit length, and a repeated bit.
-fn read_label(slice: &mut Slice<'_>, max: u16) -> Result<Vec<bool>, CellError> {
-    if !slice.load_bit()? {
-        // hml_short: a unary length, then that many bits.
-        let mut len = 0u16;
-        while slice.load_bit()? {
-            len += 1;
-            if len > max {
-                return Err(CellError::LabelTooLong);
-            }
-        }
-        let mut bits = Vec::with_capacity(usize::from(len));
-        for _ in 0..len {
-            bits.push(slice.load_bit()?);
-        }
-        return Ok(bits);
-    }
+/// A plain node carries nothing there; an augmented one carries a summary of everything
+/// below it. That is the only difference between the two, so the descent, the split and
+/// the rebuild below are written once over this rather than twice.
+trait Shape {
+    /// The summary a node carries, or `()` where it carries none.
+    type Extra;
 
-    if !slice.load_bit()? {
-        // hml_long: an explicit length, then that many bits.
-        #[allow(
-            clippy::cast_possible_truncation,
-            reason = "bounded_width(max) is at most 16 because max is itself a u16, so this reads at most 16 bits and the result always fits u16"
-        )]
-        let len = slice.load_uint(bounded_width(max))? as u16;
-        if len > max {
-            return Err(CellError::LabelTooLong);
-        }
-        let mut bits = Vec::with_capacity(usize::from(len));
-        for _ in 0..len {
-            bits.push(slice.load_bit()?);
-        }
-        return Ok(bits);
-    }
+    /// Reads the summary, leaving the cursor on the value.
+    ///
+    /// A leaf holds `extra` then `value`, and a fork holds `extra` and two references, so
+    /// in both the summary is whatever follows the label. That is what lets a node be
+    /// summarised without first working out which of the two it is.
+    fn read_extra(&self, slice: &mut Slice<'_>) -> Result<Self::Extra, CellError>;
 
-    // hml_same: one bit repeated a given number of times.
-    let value = slice.load_bit()?;
-    #[allow(
-        clippy::cast_possible_truncation,
-        reason = "bounded_width(max) is at most 16 because max is itself a u16, so this reads at most 16 bits and the result always fits u16"
-    )]
-    let len = slice.load_uint(bounded_width(max))? as u16;
-    if len > max {
-        return Err(CellError::LabelTooLong);
-    }
-    Ok(vec![value; usize::from(len)])
+    /// Writes the summary, after the label and before the value.
+    fn write_extra(&self, extra: &Self::Extra, into: &mut Builder) -> Result<(), CellError>;
+
+    /// Refuses a fork carrying anything this shape has no reading for.
+    ///
+    /// The cursor sits just past the label. Data neither shape accounts for would be
+    /// dropped by a rebuild, so it is refused before one starts.
+    fn check_fork(&self, slice: &mut Slice<'_>) -> Result<(), CellError>;
+
+    /// The summary a fork over these two children carries.
+    ///
+    /// Both are read back off the cells rather than carried down from the walk, because a
+    /// summary from before the change describes the subtree that used to be there.
+    fn fork_extra(&self, left: &Cell, right: &Cell, below: u16) -> Result<Self::Extra, CellError>;
 }
 
-/// Writes an edge label in the only encoding TON accepts for it.
-///
-/// All three forms read back as the same label, so the choice is invisible to a reader
-/// and decides the cell's hash. The shortest wins; a tie goes to the earliest
-/// constructor.
-fn store_label(into: &mut Builder, label: &[bool], max: u16) -> Result<(), CellError> {
-    let len = u16::try_from(label.len()).unwrap_or(u16::MAX);
-    if len > max {
-        return Err(CellError::LabelTooLong);
-    }
-    let width = bounded_width(max);
-    let bits = u32::from(len);
-
-    let short = 2 * bits + 2;
-    let long = 2 + width + bits;
-    let repeated = match label.first() {
-        Some(first) if label.iter().all(|bit| bit == first) => 3 + width,
-        _ => u32::MAX,
-    };
-
-    if short <= long && short <= repeated {
-        into.store_bit(false)?;
-        into.store_same_bit(true, len)?;
-        into.store_bit(false)?;
-        into.store_bits(label)?;
-    } else if long <= repeated {
-        into.store_uint(0b10, 2)?;
-        into.store_uint(u64::from(len), width)?;
-        into.store_bits(label)?;
-    } else {
-        into.store_uint(0b11, 2)?;
-        into.store_bit(label.first().copied().unwrap_or(false))?;
-        into.store_uint(u64::from(len), width)?;
-    }
-    Ok(())
+/// What a leaf holds, in the order it holds it.
+struct Entry<'a, S: Shape> {
+    extra: &'a S::Extra,
+    value: &'a Builder,
 }
 
-/// Builds a leaf: the whole remaining key as a label, then the value.
-fn leaf(key: &[bool], value: &Builder, max: u16) -> Result<Cell, CellError> {
+/// Builds a leaf: the whole remaining key as a label, then what the leaf holds.
+fn leaf<S: Shape>(
+    shape: &S,
+    key: &[bool],
+    entry: &Entry<'_, S>,
+    max: u16,
+) -> Result<Cell, CellError> {
     let mut cell = Builder::new();
     store_label(&mut cell, key, max)?;
-    cell.store_builder(value)?;
+    shape.write_extra(entry.extra, &mut cell)?;
+    cell.store_builder(entry.value)?;
     cell.build()
 }
 
@@ -231,253 +238,112 @@ struct Step {
 }
 
 impl Step {
+    /// The key bits still to spend at either of this fork's children.
+    fn below(&self) -> u16 {
+        #[allow(
+            clippy::cast_possible_truncation,
+            reason = "read_label bounds label.len() to at most remaining, and a fork is only recorded where the label is shorter still, so this fits a u16"
+        )]
+        let spent = self.label.len() as u16;
+        self.remaining - spent - 1
+    }
+
     /// Rebuilds this fork with `child` in place of the branch the walk took.
-    fn rebuild(&self, child: &Cell) -> Result<Cell, CellError> {
+    fn rebuild<S: Shape>(&self, shape: &S, child: &Cell) -> Result<Cell, CellError> {
+        let sibling = self.node.reference(1 - self.branch).ok_or(NO_BRANCH)?;
+        let (left, right) = if self.branch == 0 {
+            (child, sibling)
+        } else {
+            (sibling, child)
+        };
+
         let mut fork = Builder::new();
         store_label(&mut fork, &self.label, self.remaining)?;
-        for branch in 0..2 {
-            let cell = if branch == self.branch {
-                child.clone()
-            } else {
-                self.node.reference(branch).ok_or(NO_BRANCH)?.clone()
-            };
-            fork.store_ref(cell)?;
-        }
+        let extra = shape.fork_extra(left, right, self.below())?;
+        shape.write_extra(&extra, &mut fork)?;
+        fork.store_ref(left.clone())?;
+        fork.store_ref(right.clone())?;
         fork.build()
     }
 }
 
-/// A dictionary: TON's `HashmapE n X` over `n`-bit keys.
-///
-/// Keys are given as bytes, most significant bit of the first byte first, and must be at
-/// least `key_bits` long. Iteration yields them back in that same order, so a dictionary
-/// walks in ascending unsigned big-endian key order.
-///
-/// # Examples
-///
-/// ```
-/// use ton_net_cell::{Builder, Dict, Lookup};
-///
-/// let mut dict = Dict::new(32)?;
-/// let mut value = Builder::new();
-/// value.store_uint(7, 8)?;
-/// dict.set(&1u32.to_be_bytes(), &value)?;
-///
-/// let Lookup::Found(entry) = dict.get(&1u32.to_be_bytes())? else {
-///     unreachable!("the key was just stored")
-/// };
-/// assert_eq!(entry.slice()?.load_uint(8)?, 7);
-/// # Ok::<(), ton_net_cell::CellError>(())
-/// ```
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Dict {
-    root: Option<Cell>,
-    key_bits: u16,
+/// Refuses a key width no cell could carry as a label.
+fn check_key_bits(key_bits: u16) -> Result<(), CellError> {
+    if key_bits > MAX_BITS {
+        return Err(CellError::Malformed("dictionary key wider than a cell"));
+    }
+    Ok(())
 }
 
-impl Dict {
-    /// An empty dictionary over `key_bits`-bit keys.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`CellError::Malformed`] if a key that wide could not label a cell.
-    pub fn new(key_bits: u16) -> Result<Self, CellError> {
-        Self::from_root(None, key_bits)
+/// The key as a bit run, refusing one too short to be a key of a `key_bits` dictionary.
+fn key_of(key: &[u8], key_bits: u16) -> Result<Vec<bool>, CellError> {
+    let needed = usize::from(key_bits).div_ceil(8);
+    if key.len() < needed {
+        return Err(CellError::KeyLength {
+            given: key.len() * 8,
+            expected: usize::from(key_bits),
+        });
     }
+    Ok((0..usize::from(key_bits))
+        .map(|index| key_bit(key, index))
+        .collect())
+}
 
-    /// A dictionary rooted at the cell a `HashmapE` points at, or empty when it points at
-    /// nothing.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`CellError::Malformed`] if a key that wide could not label a cell.
-    pub fn from_root(root: Option<Cell>, key_bits: u16) -> Result<Self, CellError> {
-        if key_bits > MAX_BITS {
-            return Err(CellError::Malformed("dictionary key wider than a cell"));
+/// Walks down to `bits`' leaf, reporting how the walk ended and what the leaf carries.
+fn lookup<S: Shape>(
+    shape: &S,
+    root: Option<&Cell>,
+    key_bits: u16,
+    bits: &[bool],
+) -> Result<Lookup<(S::Extra, DictEntry)>, CellError> {
+    let Some(root) = root else {
+        return Ok(Lookup::Absent);
+    };
+
+    let mut node = root.clone();
+    let mut remaining = key_bits;
+    let mut consumed = 0usize;
+
+    loop {
+        // A proof replaces the branches it does not cover with pruned placeholders, which
+        // hold a hash rather than a dictionary node. Nothing can be read from one.
+        if node.is_exotic() {
+            return Ok(Lookup::Pruned);
         }
-        Ok(Self { root, key_bits })
-    }
 
-    /// The root cell, or nothing when the dictionary is empty.
-    #[must_use]
-    pub fn root(&self) -> Option<&Cell> {
-        self.root.as_ref()
-    }
-
-    /// The key width this dictionary was built over.
-    #[must_use]
-    pub fn key_bits(&self) -> u16 {
-        self.key_bits
-    }
-
-    /// Whether the dictionary holds nothing.
-    #[must_use]
-    pub fn is_empty(&self) -> bool {
-        self.root.is_none()
-    }
-
-    /// The key as a bit run, refusing one too short to be a key of this dictionary.
-    fn key_of(&self, key: &[u8]) -> Result<Vec<bool>, CellError> {
-        let needed = usize::from(self.key_bits).div_ceil(8);
-        if key.len() < needed {
-            return Err(CellError::KeyLength {
-                given: key.len() * 8,
-                expected: usize::from(self.key_bits),
-            });
-        }
-        Ok((0..usize::from(self.key_bits))
-            .map(|index| key_bit(key, index))
-            .collect())
-    }
-
-    /// Looks `key` up.
-    ///
-    /// The three outcomes are described on [`Lookup`]. Over a Merkle proof, a caller that
-    /// needs an answer rather than a maybe has to treat [`Lookup::Pruned`] as a failure of
-    /// the server to answer.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`CellError::KeyLength`] if `key` is too short, or
-    /// [`CellError::Malformed`], [`CellError::LabelTooLong`] or [`CellError::NotEnoughBits`]
-    /// if the tree does not read as a dictionary.
-    pub fn get(&self, key: &[u8]) -> Result<Lookup<DictEntry>, CellError> {
-        let bits = self.key_of(key)?;
-        let Some(root) = self.root.clone() else {
+        let mut slice = node.parse();
+        let label = read_label(&mut slice, remaining)?;
+        // The label is the run of bits every key below this edge shares. A key that
+        // disagrees with it has no entry below, and because the label is part of what the
+        // root hash covers, that is evidence rather than an absence of evidence.
+        if diverges(&label, rest(bits, consumed)).is_some() {
             return Ok(Lookup::Absent);
-        };
+        }
+        consumed += label.len();
+        #[allow(
+            clippy::cast_possible_truncation,
+            reason = "read_label bounds label.len() to at most its `max` argument (here `remaining`), and remaining is a u16, so this fits"
+        )]
+        let spent = label.len() as u16;
+        remaining -= spent;
 
-        let mut node = root;
-        let mut remaining = self.key_bits;
-        let mut consumed = 0usize;
-
-        loop {
-            // A proof replaces the branches it does not cover with pruned placeholders,
-            // which hold a hash rather than a dictionary node. Nothing can be read from one.
-            if node.is_exotic() {
-                return Ok(Lookup::Pruned);
-            }
-
-            let mut slice = node.parse();
-            let label = read_label(&mut slice, remaining)?;
-            // The label is the run of bits every key below this edge shares. A key that
-            // disagrees with it has no entry below, and because the label is part of what
-            // the root hash covers, that is evidence rather than an absence of evidence.
-            if diverges(&label, rest(&bits, consumed)).is_some() {
-                return Ok(Lookup::Absent);
-            }
-            consumed += label.len();
-            #[allow(
-                clippy::cast_possible_truncation,
-                reason = "read_label bounds label.len() to at most its `max` argument (here `remaining`), and remaining is a u16, so this fits"
-            )]
-            let spent = label.len() as u16;
-            remaining -= spent;
-
-            if remaining == 0 {
-                let bit_offset = usize::from(node.bit_len()) - slice.remaining_bits();
-                return Ok(Lookup::Found(DictEntry {
+        if remaining == 0 {
+            let extra = shape.read_extra(&mut slice)?;
+            let bit_offset = usize::from(node.bit_len()) - slice.remaining_bits();
+            return Ok(Lookup::Found((
+                extra,
+                DictEntry {
                     cell: node,
                     bit_offset,
-                }));
-            }
-
-            // A fork: the next key bit chooses the branch.
-            let branch = usize::from(bits.get(consumed).copied().unwrap_or(false));
-            consumed += 1;
-            remaining -= 1;
-            node = node.reference(branch).ok_or(NO_BRANCH)?.clone();
-        }
-    }
-
-    /// Stores `value` under `key`, replacing whatever was there.
-    ///
-    /// The dictionary is left untouched if the store fails, so a value too large for a
-    /// leaf does not leave a half-written tree behind.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`CellError::KeyLength`] if `key` is too short, [`CellError::Pruned`] if
-    /// the change would fall in a branch a proof has pruned away,
-    /// [`CellError::Malformed`] if the tree is not a plain dictionary, or
-    /// [`CellError::NoRoomForBits`] if the label and the value do not fit one cell.
-    pub fn set(&mut self, key: &[u8], value: &Builder) -> Result<(), CellError> {
-        let bits = self.key_of(key)?;
-        let Some(root) = self.root.clone() else {
-            self.root = Some(leaf(&bits, value, self.key_bits)?);
-            return Ok(());
-        };
-
-        let walk = descend(root, self.key_bits, &bits)?;
-        let tail = rest(&bits, walk.consumed);
-        let bottom = match walk.diverged {
-            // The key leaves this edge partway along it, so the edge becomes a fork over
-            // the run they share, with the old subtree on one side and the new leaf on
-            // the other.
-            Some(at) => split(&walk.node, &walk.label, at, walk.remaining, tail, value)?,
-            // The key is spent, so this is its leaf and the value replaces what was there.
-            None => leaf(tail, value, walk.remaining)?,
-        };
-
-        // Nothing is assigned until the whole path is rebuilt, so a value too large for a
-        // leaf leaves the dictionary as it was rather than half written.
-        self.root = Some(rebuild(walk.path, bottom)?);
-        Ok(())
-    }
-
-    /// Removes `key`, reporting whether it was there.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`CellError::KeyLength`] if `key` is too short, [`CellError::Pruned`] if
-    /// the removal would fall in a branch a proof has pruned away, or
-    /// [`CellError::Malformed`] if the tree is not a plain dictionary.
-    pub fn remove(&mut self, key: &[u8]) -> Result<bool, CellError> {
-        let bits = self.key_of(key)?;
-        let Some(root) = self.root.clone() else {
-            return Ok(false);
-        };
-
-        let mut walk = descend(root, self.key_bits, &bits)?;
-        if walk.diverged.is_some() {
-            return Ok(false);
+                },
+            )));
         }
 
-        // The leaf is gone. A fork with one branch is not a shape the format has, so its
-        // parent collapses into the surviving sibling, which takes the whole run of bits
-        // the two edges used to spell out between them.
-        let Some(parent) = walk.path.pop() else {
-            self.root = None;
-            return Ok(true);
-        };
-        self.root = Some(rebuild(walk.path, collapse(&parent)?)?);
-        Ok(true)
-    }
-
-    /// Every entry, in ascending key order.
-    ///
-    /// The iterator stops at a pruned branch with [`CellError::Pruned`] rather than
-    /// walking past it: a proof shows one path and hides the rest, and an iteration that
-    /// skipped what was hidden would report a subset as if it were the whole dictionary.
-    #[must_use]
-    pub fn iter(&self) -> DictIter {
-        DictIter {
-            stack: self
-                .root
-                .clone()
-                .map(|root| vec![(root, Vec::new(), self.key_bits)])
-                .unwrap_or_default(),
-            done: false,
-        }
-    }
-}
-
-impl IntoIterator for &Dict {
-    type Item = Result<(Vec<u8>, DictEntry), CellError>;
-    type IntoIter = DictIter;
-
-    fn into_iter(self) -> Self::IntoIter {
-        self.iter()
+        // A fork: the next key bit chooses the branch.
+        let branch = usize::from(bits.get(consumed).copied().unwrap_or(false));
+        consumed += 1;
+        remaining -= 1;
+        node = node.reference(branch).ok_or(NO_BRANCH)?.clone();
     }
 }
 
@@ -504,7 +370,12 @@ struct Walk {
 /// read under the key bits still to spend, so it can never claim more than are left, and
 /// a fork is only descended when its label is shorter than that, which is what leaves
 /// room for the bit that picks the branch.
-fn descend(root: Cell, key_bits: u16, bits: &[bool]) -> Result<Walk, CellError> {
+fn descend<S: Shape>(
+    shape: &S,
+    root: Cell,
+    key_bits: u16,
+    bits: &[bool],
+) -> Result<Walk, CellError> {
     let mut path: Vec<Step> = Vec::new();
     let mut node = root;
     let mut remaining = key_bits;
@@ -533,7 +404,7 @@ fn descend(root: Cell, key_bits: u16, bits: &[bool]) -> Result<Walk, CellError> 
             });
         }
 
-        require_plain_fork(&slice)?;
+        shape.check_fork(&mut slice)?;
         let branch = usize::from(bits.get(consumed + len).copied().unwrap_or(false));
         let child = node.reference(branch).ok_or(NO_BRANCH)?.clone();
         path.push(Step {
@@ -561,32 +432,19 @@ fn diverges(label: &[bool], key: &[bool]) -> Option<usize> {
         .position(|(left, right)| left != right)
 }
 
-/// Refuses a fork carrying anything past its label.
-///
-/// A plain fork is a label and two references. Data after the label is the summary an
-/// augmented dictionary keeps, and copying one forward over a changed subtree would
-/// describe the old subtree.
-fn require_plain_fork(slice: &Slice<'_>) -> Result<(), CellError> {
-    if slice.remaining_bits() == 0 {
-        return Ok(());
-    }
-    Err(CellError::Malformed(
-        "a dictionary fork carrying data past its label",
-    ))
-}
-
 /// Splits `node` at `at`, where its label and the key part company.
 ///
 /// The old node keeps everything below the divergence and is relabelled with what is left
 /// of its label; the new leaf takes the other branch; a fresh fork over their common
 /// prefix stands where the old node stood.
-fn split(
+fn split<S: Shape>(
+    shape: &S,
     node: &Cell,
     label: &[bool],
     at: usize,
     remaining: u16,
     key: &[bool],
-    value: &Builder,
+    entry: &Entry<'_, S>,
 ) -> Result<Cell, CellError> {
     #[allow(
         clippy::cast_possible_truncation,
@@ -601,15 +459,20 @@ fn split(
     kept.store_slice(slice)?;
     let kept = kept.build()?;
 
-    let fresh = leaf(rest(key, at + 1), value, below)?;
+    let fresh = leaf(shape, rest(key, at + 1), entry, below)?;
 
-    let mut fork = Builder::new();
-    store_label(&mut fork, label.get(..at).unwrap_or(&[]), remaining)?;
+    // The old node's label decides which side it lands on: the bit they disagree on is
+    // its bit, so the new leaf takes the other branch.
     let (left, right) = if label.get(at).copied().unwrap_or(false) {
         (fresh, kept)
     } else {
         (kept, fresh)
     };
+
+    let mut fork = Builder::new();
+    store_label(&mut fork, label.get(..at).unwrap_or(&[]), remaining)?;
+    let extra = shape.fork_extra(&left, &right, below)?;
+    shape.write_extra(&extra, &mut fork)?;
     fork.store_ref(left)?;
     fork.store_ref(right)?;
     fork.build()
@@ -624,13 +487,8 @@ fn collapse(parent: &Step) -> Result<Cell, CellError> {
 
     let mut label = parent.label.clone();
     label.push(parent.branch == 0);
-    #[allow(
-        clippy::cast_possible_truncation,
-        reason = "parent.label was read by read_label under parent.remaining as its max, so parent.label.len() <= parent.remaining, which is a u16, so this fits"
-    )]
-    let below = parent.remaining - parent.label.len() as u16 - 1;
     let mut slice = sibling.parse();
-    label.extend_from_slice(&read_label(&mut slice, below)?);
+    label.extend_from_slice(&read_label(&mut slice, parent.below())?);
 
     let mut merged = Builder::new();
     store_label(&mut merged, &label, parent.remaining)?;
@@ -639,84 +497,329 @@ fn collapse(parent: &Step) -> Result<Cell, CellError> {
 }
 
 /// Rebuilds every fork on the path, from the deepest up to the root.
-fn rebuild(mut path: Vec<Step>, mut child: Cell) -> Result<Cell, CellError> {
+fn rebuild<S: Shape>(shape: &S, mut path: Vec<Step>, mut child: Cell) -> Result<Cell, CellError> {
     while let Some(step) = path.pop() {
-        child = step.rebuild(&child)?;
+        child = step.rebuild(shape, &child)?;
     }
     Ok(child)
 }
 
-/// A walk over every entry of a dictionary, in ascending key order.
+/// Re-roots at the subtree every key beginning with `want` lives under.
 ///
-/// Built by [`Dict::iter`]. The cells are held by reference count, so the walk reads the
-/// dictionary as it stood when it started.
-pub struct DictIter {
-    stack: Vec<(Cell, Vec<bool>, u16)>,
-    done: bool,
-}
+/// Walks down spending `want` a bit at a time. Where it runs out exactly at a node's edge,
+/// that node already carries the right label under the right width and stands as the new
+/// root unchanged. Where it runs out partway along a label, the node is rewritten with what
+/// is left of that label under the narrower key the sub-dictionary spends; everything the
+/// node held below is carried over untouched, so an augmented fork's summary still describes
+/// the same subtree. A prefix that parts from the tree has no key under it, which is `None`.
+/// A prefix that runs into a pruned branch cannot be followed, which is an error.
+///
+/// It is written over the cells rather than over a [`Shape`] because it neither reads nor
+/// recomputes a summary: the subtree beneath the new root does not change, so whatever
+/// summary it carried is still the one it should.
+fn reroot(root: &Cell, key_bits: u16, want: &[bool]) -> Result<Option<Cell>, CellError> {
+    let mut node = root.clone();
+    let mut remaining = key_bits;
+    let mut matched = 0usize;
 
-impl DictIter {
-    /// Descends to the next leaf, or reports that the walk is over.
-    fn step(&mut self) -> Result<Option<(Vec<u8>, DictEntry)>, CellError> {
-        while let Some((node, prefix, remaining)) = self.stack.pop() {
-            if node.is_exotic() {
-                return Err(CellError::Pruned);
-            }
+    loop {
+        if node.is_exotic() {
+            return Err(CellError::Pruned);
+        }
+        let ahead = rest(want, matched);
+        if ahead.is_empty() {
+            // The prefix is spent at this node's edge, so the node is the new root as it
+            // stands: its label is already written under the key the sub-dictionary spends.
+            return Ok(Some(node));
+        }
 
-            let mut slice = node.parse();
-            let label = read_label(&mut slice, remaining)?;
-            let len = label.len();
-            let mut key = prefix;
-            key.extend_from_slice(&label);
+        let mut slice = node.parse();
+        let label = read_label(&mut slice, remaining)?;
+        let len = label.len();
+        if diverges(&label, ahead).is_some() {
+            return Ok(None);
+        }
 
-            if len == usize::from(remaining) {
-                let bit_offset = usize::from(node.bit_len()) - slice.remaining_bits();
-                return Ok(Some((
-                    pack(&key),
-                    DictEntry {
-                        cell: node,
-                        bit_offset,
-                    },
-                )));
-            }
-
-            // The right branch goes on first so the left one comes off first, which is
-            // what puts the keys in ascending order.
+        if ahead.len() <= len {
+            // The prefix ends inside this label. What is left of the label becomes the new
+            // root's, under the narrower key, and the node's contents come over as they are;
+            // store_slice takes both the bits and the references still ahead of the cursor.
             #[allow(
                 clippy::cast_possible_truncation,
-                reason = "read_label bounds len to at most remaining, and the check above returned unless len < remaining, so this fits a u16"
+                reason = "ahead.len() <= len and read_label bounds len to at most remaining, a u16, so ahead.len() fits a u16 and remaining - it does not underflow"
             )]
-            let below = remaining - len as u16 - 1;
-            for branch in [1usize, 0usize] {
-                let child = node.reference(branch).ok_or(NO_BRANCH)?.clone();
-                let mut key = key.clone();
-                key.push(branch == 1);
-                self.stack.push((child, key, below));
-            }
+            let new_max = remaining - ahead.len() as u16;
+            let mut fresh = Builder::new();
+            store_label(&mut fresh, rest(&label, ahead.len()), new_max)?;
+            fresh.store_slice(slice)?;
+            return Ok(Some(fresh.build()?));
         }
-        Ok(None)
+
+        // The prefix reaches past this label. A leaf holds nothing past it, so a prefix that
+        // long names no key; otherwise the next prefix bit picks the branch to follow.
+        if len == usize::from(remaining) {
+            return Ok(None);
+        }
+        matched += len;
+        let branch = usize::from(rest(want, matched).first().copied().unwrap_or(false));
+        matched += 1;
+        node = node.reference(branch).ok_or(NO_BRANCH)?.clone();
+        #[allow(
+            clippy::cast_possible_truncation,
+            reason = "the len == remaining case returned above, so len < remaining <= u16::MAX and len fits a u16 with room for the branch bit"
+        )]
+        let spent = len as u16;
+        remaining -= spent + 1;
     }
 }
 
-impl Iterator for DictIter {
-    type Item = Result<(Vec<u8>, DictEntry), CellError>;
+/// A node a walk has still to visit: the node, the key bits spelled out above it, and the
+/// bits still to spend at it.
+type Pending = (Cell, Vec<bool>, u16);
 
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.done {
-            return None;
+/// What a walk's next step found: the key, the summary its leaf carries, and the value.
+type Stepped<E> = Option<(Vec<u8>, E, DictEntry)>;
+
+/// Descends a stacked walk to its next leaf, or reports that the walk is over.
+fn walk_step<S: Shape>(
+    shape: &S,
+    stack: &mut Vec<Pending>,
+) -> Result<Stepped<S::Extra>, CellError> {
+    while let Some((node, prefix, remaining)) = stack.pop() {
+        if node.is_exotic() {
+            return Err(CellError::Pruned);
         }
-        match self.step() {
-            Ok(Some(entry)) => Some(Ok(entry)),
-            Ok(None) => {
-                self.done = true;
-                None
-            }
-            Err(error) => {
-                self.done = true;
-                Some(Err(error))
-            }
+
+        let mut slice = node.parse();
+        let label = read_label(&mut slice, remaining)?;
+        let len = label.len();
+        let mut key = prefix;
+        key.extend_from_slice(&label);
+
+        if len == usize::from(remaining) {
+            let extra = shape.read_extra(&mut slice)?;
+            let bit_offset = usize::from(node.bit_len()) - slice.remaining_bits();
+            return Ok(Some((
+                pack(&key),
+                extra,
+                DictEntry {
+                    cell: node,
+                    bit_offset,
+                },
+            )));
+        }
+
+        // The right branch goes on first so the left one comes off first, which is what
+        // puts the keys in ascending order.
+        #[allow(
+            clippy::cast_possible_truncation,
+            reason = "read_label bounds len to at most remaining, and the check above returned unless len < remaining, so this fits a u16"
+        )]
+        let below = remaining - len as u16 - 1;
+        for branch in [1usize, 0usize] {
+            let child = node.reference(branch).ok_or(NO_BRANCH)?.clone();
+            let mut key = key.clone();
+            key.push(branch == 1);
+            stack.push((child, key, below));
         }
     }
+    Ok(None)
+}
+
+/// Every fork's stored summary, with the key prefix that leads to it, in pre-order.
+///
+/// A leaf carries a summary too, but [`walk_step`] already reads those alongside their
+/// keys; this is the complement, the summaries the interior forks carry. A pruned branch
+/// is opaque, so the walk does not descend into one.
+fn collect_fork_extras<S: Shape>(
+    shape: &S,
+    root: Option<&Cell>,
+    key_bits: u16,
+) -> Result<Vec<ForkExtra<S::Extra>>, CellError> {
+    let mut out = Vec::new();
+    if let Some(root) = root {
+        collect_forks(shape, root, key_bits, Vec::new(), &mut out)?;
+    }
+    Ok(out)
+}
+
+/// Descends `node`, pushing each fork's summary onto `out`. `prefix` is the key bits above
+/// it.
+fn collect_forks<S: Shape>(
+    shape: &S,
+    node: &Cell,
+    remaining: u16,
+    prefix: Vec<bool>,
+    out: &mut Vec<(Vec<bool>, S::Extra)>,
+) -> Result<(), CellError> {
+    if node.is_exotic() {
+        return Ok(());
+    }
+    let mut slice = node.parse();
+    let label = read_label(&mut slice, remaining)?;
+    let len = label.len();
+    let mut here = prefix;
+    here.extend_from_slice(&label);
+    if len < usize::from(remaining) {
+        out.push((here.clone(), shape.read_extra(&mut slice)?));
+        #[allow(
+            clippy::cast_possible_truncation,
+            reason = "read_label bounds len to at most remaining, and this branch runs only when len < remaining, so len fits a u16"
+        )]
+        let below = remaining - len as u16 - 1;
+        let left = node.reference(0).ok_or(NO_BRANCH)?;
+        let right = node.reference(1).ok_or(NO_BRANCH)?;
+        let mut left_prefix = here.clone();
+        left_prefix.push(false);
+        collect_forks(shape, left, below, left_prefix, out)?;
+        here.push(true);
+        collect_forks(shape, right, below, here, out)?;
+    }
+    Ok(())
+}
+
+/// Checks every fork's stored summary is the one its children combine to.
+///
+/// This is the read-side complement of the combine a write performs: it rebuilds each fork
+/// in place, recomputing the summary from the children as stored, and requires the rebuilt
+/// node to hash to the one on the tree. A pruned child cannot be summarised, so a fork
+/// above one is left unchecked while the rest of the visible tree still is.
+fn validate_tree<S: Shape>(shape: &S, root: Option<&Cell>, key_bits: u16) -> Result<(), CellError> {
+    match root {
+        None => Ok(()),
+        Some(root) => validate_node(shape, root, key_bits),
+    }
+}
+
+/// Checks `node` and everything visible below it.
+fn validate_node<S: Shape>(shape: &S, node: &Cell, remaining: u16) -> Result<(), CellError> {
+    if node.is_exotic() {
+        return Ok(());
+    }
+    let mut slice = node.parse();
+    let label = read_label(&mut slice, remaining)?;
+    let len = label.len();
+    if len == usize::from(remaining) {
+        return Ok(());
+    }
+    #[allow(
+        clippy::cast_possible_truncation,
+        reason = "read_label bounds len to at most remaining, and this runs only when len < remaining, so len fits a u16"
+    )]
+    let below = remaining - len as u16 - 1;
+    let left = node.reference(0).ok_or(NO_BRANCH)?;
+    let right = node.reference(1).ok_or(NO_BRANCH)?;
+
+    // A fork whose child is pruned cannot have its summary recomputed, so its own check is
+    // skipped; the visible child is still walked.
+    if !left.is_exotic() && !right.is_exotic() {
+        let mut fork = Builder::new();
+        store_label(&mut fork, &label, remaining)?;
+        let extra = shape.fork_extra(left, right, below)?;
+        shape.write_extra(&extra, &mut fork)?;
+        fork.store_ref(left.clone())?;
+        fork.store_ref(right.clone())?;
+        if fork.build()?.repr_hash() != node.repr_hash() {
+            return Err(CellError::Malformed(
+                "augmented fork summary disagrees with its children",
+            ));
+        }
+    }
+
+    validate_node(shape, left, below)?;
+    validate_node(shape, right, below)
+}
+
+/// Walks the tree in ascending key order, offering each node to `visit` and letting its
+/// answer steer where the walk goes next.
+///
+/// A fork is offered before either of its children, carrying the summary the caller can
+/// prune by; a leaf is offered with its value. Like [`walk_step`] it refuses to walk past a
+/// pruned branch, so a walk that descends into a partly pruned subtree ends in
+/// [`CellError::Pruned`]; a visitor that skips such a subtree by its summary never reaches
+/// the placeholder.
+fn traverse<S, F>(
+    shape: &S,
+    root: Option<&Cell>,
+    key_bits: u16,
+    visit: &mut F,
+) -> Result<(), CellError>
+where
+    S: Shape,
+    F: FnMut(AugNode<'_, S::Extra>) -> Traverse,
+{
+    if let Some(root) = root {
+        traverse_node(shape, root, key_bits, Vec::new(), visit)?;
+    }
+    Ok(())
+}
+
+/// Descends `node`, offering it and everything visited below it. `prefix` is the key bits
+/// spelled out above it. Returns whether the walk was asked to stop, so a [`Traverse::Stop`]
+/// unwinds the whole descent rather than only the branch it came up in.
+fn traverse_node<S, F>(
+    shape: &S,
+    node: &Cell,
+    remaining: u16,
+    prefix: Vec<bool>,
+    visit: &mut F,
+) -> Result<bool, CellError>
+where
+    S: Shape,
+    F: FnMut(AugNode<'_, S::Extra>) -> Traverse,
+{
+    if node.is_exotic() {
+        return Err(CellError::Pruned);
+    }
+    let mut slice = node.parse();
+    let label = read_label(&mut slice, remaining)?;
+    let len = label.len();
+    let mut here = prefix;
+    here.extend_from_slice(&label);
+
+    if len == usize::from(remaining) {
+        let extra = shape.read_extra(&mut slice)?;
+        let bit_offset = usize::from(node.bit_len()) - slice.remaining_bits();
+        let entry = DictEntry {
+            cell: node.clone(),
+            bit_offset,
+        };
+        let key = pack(&here);
+        return Ok(visit(AugNode::Leaf {
+            key: &key,
+            extra: &extra,
+            entry: &entry,
+        }) == Traverse::Stop);
+    }
+
+    // A fork carries its summary between its label and its two branches. It is offered
+    // before either child, so a visitor sees the summary over a subtree before deciding
+    // whether to walk it.
+    let extra = shape.read_extra(&mut slice)?;
+    match visit(AugNode::Fork {
+        prefix: &here,
+        extra: &extra,
+    }) {
+        Traverse::Stop => return Ok(true),
+        Traverse::Skip => return Ok(false),
+        Traverse::Continue => {}
+    }
+
+    #[allow(
+        clippy::cast_possible_truncation,
+        reason = "read_label bounds len to at most remaining, and this branch runs only when len < remaining, so len fits a u16"
+    )]
+    let below = remaining - len as u16 - 1;
+    let left = node.reference(0).ok_or(NO_BRANCH)?;
+    let right = node.reference(1).ok_or(NO_BRANCH)?;
+
+    let mut left_prefix = here.clone();
+    left_prefix.push(false);
+    if traverse_node(shape, left, below, left_prefix, &mut *visit)? {
+        return Ok(true);
+    }
+    here.push(true);
+    traverse_node(shape, right, below, here, visit)
 }
 
 #[cfg(test)]

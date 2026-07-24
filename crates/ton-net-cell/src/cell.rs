@@ -2,123 +2,39 @@
 // SPDX-FileCopyrightText: 2026 Nirapod Labs
 
 //! The cell: TON's universal container of data and references, and its identity.
+//!
+//! The cell's kind is in [`exotic`], the level-mask arithmetic its identity is defined over
+//! is in [`level`], and the hashing that computes that identity is in [`hash`]. What stays
+//! here is the cell itself: the immutable value, its accessors, and the check that a cell's
+//! parts imply the level mask it claims.
 
 use std::fmt;
 use std::sync::Arc;
 
-use sha2::{Digest, Sha256};
-
 use crate::error::CellError;
 use crate::slice::Slice;
+
+mod dump;
+mod exotic;
+mod hash;
+mod level;
+mod metadata;
+
+#[cfg(feature = "json")]
+pub mod json;
+
+pub use exotic::CellType;
+pub use metadata::{Metadata, RefMetadata};
+
+use hash::compute;
+pub use hash::Summary;
+use level::{bits_descriptor, hash_index, level_of, refs_descriptor};
 
 /// The most data bits a cell may hold.
 pub const MAX_BITS: u16 = 1023;
 
 /// The most references a cell may hold.
 pub const MAX_REFS: usize = 4;
-
-/// The kind of a cell.
-///
-/// An ordinary cell is plain data and references. The four exotic kinds carry a meaning
-/// the cell model itself gives them, named by the first byte of the cell's data, and are
-/// what make Merkle proofs possible.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum CellType {
-    /// A plain cell of data and references.
-    Ordinary,
-    /// Stands in for a subtree left out of a proof, holding that subtree's hashes and
-    /// depths so the tree above it still hashes to the same root.
-    PrunedBranch,
-    /// Names contract code by hash instead of holding it.
-    LibraryReference,
-    /// Covers one tree by hash, so a pruned copy can be checked against a known root.
-    MerkleProof,
-    /// Covers a pair of trees, an old and a new, as a block's state update does.
-    MerkleUpdate,
-}
-
-impl CellType {
-    /// The leading data byte that names this kind, or `None` for an ordinary cell.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use ton_net_cell::CellType;
-    /// assert_eq!(CellType::MerkleProof.tag(), Some(0x03));
-    /// assert_eq!(CellType::Ordinary.tag(), None);
-    /// ```
-    #[must_use]
-    pub fn tag(self) -> Option<u8> {
-        match self {
-            Self::Ordinary => None,
-            Self::PrunedBranch => Some(0x01),
-            Self::LibraryReference => Some(0x02),
-            Self::MerkleProof => Some(0x03),
-            Self::MerkleUpdate => Some(0x04),
-        }
-    }
-
-    /// The kind an exotic cell's leading data byte names, or `None` if it names none.
-    #[must_use]
-    pub fn from_tag(tag: u8) -> Option<Self> {
-        match tag {
-            0x01 => Some(Self::PrunedBranch),
-            0x02 => Some(Self::LibraryReference),
-            0x03 => Some(Self::MerkleProof),
-            0x04 => Some(Self::MerkleUpdate),
-            _ => None,
-        }
-    }
-
-    /// Whether this kind covers another tree, so its content sits one level down.
-    fn is_merkle(self) -> bool {
-        matches!(self, Self::MerkleProof | Self::MerkleUpdate)
-    }
-}
-
-/// The highest level a mask marks, or zero for an empty mask.
-fn level_of(mask: u8) -> u8 {
-    #[allow(
-        clippy::cast_possible_truncation,
-        reason = "mask is a u8, so leading_zeros is at most 8, and u8::BITS - leading_zeros is at most 8, which fits u8"
-    )]
-    let level = (u8::BITS - mask.leading_zeros()) as u8;
-    level
-}
-
-/// The mask as it applies at `level`: only the levels below it remain.
-fn applied_mask(mask: u8, level: u8) -> u8 {
-    if level >= 3 {
-        mask
-    } else {
-        mask & ((1u8 << level) - 1)
-    }
-}
-
-/// Which of a cell's stored hashes answers for `level`.
-fn hash_index(mask: u8, level: u8) -> usize {
-    applied_mask(mask, level).count_ones() as usize
-}
-
-/// The bit descriptor for a bit count: `floor(b/8) + ceil(b/8)`.
-fn bits_descriptor(bits: u16) -> u8 {
-    #[allow(
-        clippy::cast_possible_truncation,
-        reason = "bits is at most MAX_BITS (1023), so floor(bits/8) + ceil(bits/8) is at most 127 + 128 = 255, which fits u8"
-    )]
-    let descriptor = ((bits / 8) + bits.div_ceil(8)) as u8;
-    descriptor
-}
-
-/// The refs-and-type descriptor at a level: `r + 8s + 32l`.
-fn refs_descriptor(refs: usize, exotic: bool, mask: u8, level: u8) -> u8 {
-    #[allow(
-        clippy::cast_possible_truncation,
-        reason = "refs is a cell's reference count, bounded to at most MAX_REFS (4) by every constructor, so this fits u8"
-    )]
-    let refs = refs as u8;
-    refs + if exotic { 8 } else { 0 } + 32 * applied_mask(mask, level)
-}
 
 /// A TON cell: up to 1023 bits of data and up to four references.
 ///
@@ -161,27 +77,6 @@ struct Inner {
     depths: Vec<u16>,
 }
 
-/// Reads a 32-byte hash out of `data` at `at`.
-fn read_hash(data: &[u8], at: usize) -> Result<[u8; 32], CellError> {
-    let slice = data.get(at..at + 32).ok_or(CellError::Malformed(
-        "exotic cell is too short for its hash",
-    ))?;
-    let mut out = [0u8; 32];
-    out.copy_from_slice(slice);
-    Ok(out)
-}
-
-/// Reads a big-endian depth out of `data` at `at`.
-fn read_depth(data: &[u8], at: usize) -> Result<u16, CellError> {
-    let bytes: [u8; 2] = data
-        .get(at..at + 2)
-        .and_then(|slice| slice.try_into().ok())
-        .ok_or(CellError::Malformed(
-            "exotic cell is too short for its depth",
-        ))?;
-    Ok(u16::from_be_bytes(bytes))
-}
-
 impl Cell {
     /// Builds a cell from validated parts, computing its hashes and depths.
     ///
@@ -197,12 +92,9 @@ impl Cell {
         cell_type: CellType,
         level_mask: u8,
     ) -> Result<Self, CellError> {
-        if level_mask != implied_mask(cell_type, &refs, level_mask) {
-            return Err(CellError::Malformed(
-                "cell level mask is not the one its children imply",
-            ));
-        }
-        let (hashes, depths) = compute(&data, bits, &refs, cell_type, level_mask)?;
+        let summaries: Vec<Summary> = refs.iter().map(Summary::of).collect();
+        let (hashes, depths) =
+            summarize(&data, bits, &summaries, cell_type, level_mask)?.into_parts();
         Ok(Self {
             inner: Arc::new(Inner {
                 data,
@@ -264,6 +156,17 @@ impl Cell {
     #[must_use]
     pub fn level_mask(&self) -> u8 {
         self.inner.level_mask
+    }
+
+    /// The cell's stored identity: its significant hashes and depths, its level mask, and
+    /// the same for each reference one level down.
+    ///
+    /// This reads back the values the cell computed when it was built, so it costs a copy
+    /// rather than a rehash. It is what a lazy or streaming bag reader consults to know a
+    /// subtree's identity before it has built the subtree.
+    #[must_use]
+    pub fn metadata(&self) -> Metadata {
+        metadata::of(self)
     }
 
     /// The hashes and depths this cell computed, in the order a bag of cells stores them.
@@ -343,6 +246,49 @@ impl Cell {
         Slice::new(self)
     }
 
+    /// Renders the cell and the tree below it as text, in the hex bitstring notation.
+    ///
+    /// Each cell is one line: its data as `x{...}`, whole nibbles in hex and a trailing
+    /// partial nibble completed with a set bit and zeros and marked `_`, so `x{}` is empty,
+    /// `x{A}` is `1010`, and `x{B_}` is `101`. Every reference is indented one step under
+    /// the cell that holds it, and an exotic cell is named by its kind. This is for reading
+    /// a tree, not a wire form; [`to_boc`](Cell::to_boc) is the way back to bytes.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use ton_net_cell::parse_boc;
+    /// let bytes = [0xb5, 0xee, 0x9c, 0x72, 0x01, 0x01, 0x01, 0x01, 0x00, 0x03, 0x00,
+    ///              0x00, 0x02, 0xab];
+    /// let roots = parse_boc(&bytes)?;
+    /// assert_eq!(roots[0].dump(), "x{AB}");
+    /// # Ok::<(), ton_net_cell::CellError>(())
+    /// ```
+    #[must_use]
+    pub fn dump(&self) -> String {
+        dump::hex(self)
+    }
+
+    /// Renders the cell and the tree below it as text, one character per data bit.
+    ///
+    /// This is [`dump`](Cell::dump) with each cell's data written as `b{...}` in binary, a
+    /// `0` or `1` for every bit, which needs no completion because it writes them all.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use ton_net_cell::parse_boc;
+    /// let bytes = [0xb5, 0xee, 0x9c, 0x72, 0x01, 0x01, 0x01, 0x01, 0x00, 0x03, 0x00,
+    ///              0x00, 0x02, 0xab];
+    /// let roots = parse_boc(&bytes)?;
+    /// assert_eq!(roots[0].dump_bits(), "b{10101011}");
+    /// # Ok::<(), ton_net_cell::CellError>(())
+    /// ```
+    #[must_use]
+    pub fn dump_bits(&self) -> String {
+        dump::binary(self)
+    }
+
     /// Serializes this cell, and everything it references, as a single-root bag of cells.
     ///
     /// # Errors
@@ -350,6 +296,18 @@ impl Cell {
     /// Returns [`CellError::TooManyCells`] if the graph is larger than the parse limit.
     pub fn to_boc(&self) -> Result<Vec<u8>, CellError> {
         crate::boc::serialize_boc(std::slice::from_ref(self))
+    }
+
+    /// Opens a builder holding a copy of this cell's bits and references.
+    ///
+    /// A cell is immutable, so this is the way to change one: read it into a builder, add to
+    /// it or rebuild from it, and [`build`](crate::Builder::build) a new cell.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CellError`] if the bits or references do not fit a builder.
+    pub fn to_builder(&self) -> Result<crate::Builder, CellError> {
+        self.parse().to_builder()
     }
 
     /// The two descriptor bytes as a bag of cells stores them.
@@ -369,7 +327,36 @@ impl Cell {
     }
 }
 
-/// The level mask a cell must carry, given its kind and its children.
+/// Computes a cell's identity from its parts and its children's summaries.
+///
+/// This is the hashing [`Cell::from_parts`] does, split out so a bag can be hash-verified
+/// without building its cells: a reader keeps a summary per cell and feeds each cell's
+/// children's summaries back through here. The level mask is checked against the children
+/// exactly as when a cell is built, so a summary is never computed over a mask the children
+/// do not justify.
+///
+/// # Errors
+///
+/// Returns [`CellError::Malformed`] if the level mask is not the one the cell's kind and
+/// children imply, or if an exotic cell is too short to hold the hashes its mask claims.
+pub fn summarize(
+    data: &[u8],
+    bits: u16,
+    refs: &[Summary],
+    cell_type: CellType,
+    mask: u8,
+) -> Result<Summary, CellError> {
+    let children_mask = refs.iter().fold(0u8, |acc, child| acc | child.level_mask());
+    if mask != implied_mask(cell_type, children_mask, mask) {
+        return Err(CellError::Malformed(
+            "cell level mask is not the one its children imply",
+        ));
+    }
+    let (hashes, depths) = compute(data, bits, refs, cell_type, mask)?;
+    Ok(Summary::from_parts(mask, hashes, depths))
+}
+
+/// The level mask a cell must carry, given its kind and the union of its children's masks.
 ///
 /// Only a pruned branch chooses its own mask; every other kind derives one. An ordinary
 /// cell stands as high as the highest thing below it, a Merkle cell resolves one level of
@@ -379,100 +366,13 @@ impl Cell {
 /// identity. A cell whose stored mask is higher than its children justify hashes the same
 /// at level zero but answers a different representation hash, so accepting one would let
 /// two cells that are equal disagree about what they are.
-fn implied_mask(cell_type: CellType, refs: &[Cell], stored: u8) -> u8 {
-    let children = refs
-        .iter()
-        .fold(0u8, |mask, child| mask | child.level_mask());
+fn implied_mask(cell_type: CellType, children_mask: u8, stored: u8) -> u8 {
     match cell_type {
         CellType::PrunedBranch => stored,
         CellType::LibraryReference => 0,
-        CellType::MerkleProof | CellType::MerkleUpdate => children >> 1,
-        CellType::Ordinary => children,
+        CellType::MerkleProof | CellType::MerkleUpdate => children_mask >> 1,
+        CellType::Ordinary => children_mask,
     }
-}
-
-/// Computes every representation hash and depth a cell has.
-///
-/// The rules follow the cell specification. The representation is
-/// `d1 || d2 || body || each reference's depth || each reference's hash`, hashed with
-/// SHA-256, where `d1` carries the level mask as it applies at the level being computed.
-/// Three cases shape the rest:
-///
-/// - A pruned branch below its own level answers with the hash and depth it stored for
-///   the subtree it replaced. That substitution is what lets a pruned tree hash to the
-///   root of the full tree, and so what makes a Merkle proof checkable.
-/// - A Merkle cell's content sits one level down, so its references answer one level up.
-/// - Above the lowest level, the body is the cell's own previous hash rather than its
-///   data.
-fn compute(
-    data: &[u8],
-    bits: u16,
-    refs: &[Cell],
-    cell_type: CellType,
-    mask: u8,
-) -> Result<(Vec<[u8; 32]>, Vec<u16>), CellError> {
-    let level = level_of(mask);
-    let exotic = cell_type != CellType::Ordinary;
-    let stored = mask.count_ones() as usize;
-
-    let mut hashes = Vec::with_capacity(stored + 1);
-    let mut depths = Vec::with_capacity(stored + 1);
-
-    if cell_type == CellType::PrunedBranch {
-        // Below its own level a pruned branch is the subtree it replaced.
-        for index in 0..stored {
-            hashes.push(read_hash(data, 2 + 32 * index)?);
-            depths.push(read_depth(data, 2 + 32 * stored + 2 * index)?);
-        }
-        // At its own level it is only a cell, hashed as it stands.
-        let (d1, d2) = (refs_descriptor(0, true, mask, level), bits_descriptor(bits));
-        let mut repr = Vec::with_capacity(2 + data.len());
-        repr.push(d1);
-        repr.push(d2);
-        repr.extend_from_slice(data);
-        hashes.push(Sha256::digest(&repr).into());
-        depths.push(0);
-        return Ok((hashes, depths));
-    }
-
-    let child_level_shift = u8::from(cell_type.is_merkle());
-    for this_level in 0..=level {
-        // Only a level that opens a new hash index produces a hash.
-        if hash_index(mask, this_level) != hashes.len() {
-            continue;
-        }
-        let child_level = this_level + child_level_shift;
-        let (d1, d2) = (
-            refs_descriptor(refs.len(), exotic, mask, this_level),
-            bits_descriptor(bits),
-        );
-
-        let mut repr = Vec::with_capacity(2 + data.len() + refs.len() * 34);
-        repr.push(d1);
-        repr.push(d2);
-        match hashes.last() {
-            // The lowest hash is taken over the cell's data.
-            None => repr.extend_from_slice(data),
-            // A higher hash is taken over the hash below it.
-            Some(previous) => repr.extend_from_slice(previous),
-        }
-
-        let mut depth = 0u16;
-        for child in refs {
-            depth = depth.max(child.depth_at(child_level).saturating_add(1));
-        }
-        for child in refs {
-            repr.extend_from_slice(&child.depth_at(child_level).to_be_bytes());
-        }
-        for child in refs {
-            repr.extend_from_slice(child.hash_at(child_level));
-        }
-
-        hashes.push(Sha256::digest(&repr).into());
-        depths.push(depth);
-    }
-
-    Ok((hashes, depths))
 }
 
 impl PartialEq for Cell {
@@ -486,6 +386,14 @@ impl PartialEq for Cell {
 }
 
 impl Eq for Cell {}
+
+impl std::hash::Hash for Cell {
+    /// A cell hashes by its [`repr_hash`](Cell::repr_hash), the identity
+    /// [`eq`](Cell::eq) compares, so equal cells share a bucket and a cell can key a map.
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.repr_hash().hash(state);
+    }
+}
 
 impl fmt::Debug for Cell {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -511,65 +419,54 @@ fn hex(bytes: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::Builder;
 
-    #[test]
-    fn tags_round_trip_for_every_exotic_kind() {
-        for kind in [
-            CellType::PrunedBranch,
-            CellType::LibraryReference,
-            CellType::MerkleProof,
-            CellType::MerkleUpdate,
-        ] {
-            let tag = kind.tag().expect("an exotic kind has a tag");
-            assert_eq!(CellType::from_tag(tag), Some(kind));
-        }
-        assert_eq!(CellType::Ordinary.tag(), None);
-        assert_eq!(CellType::from_tag(0x00), None);
-        assert_eq!(CellType::from_tag(0x05), None);
+    /// A one-byte ordinary cell holding `byte`.
+    fn cell_of(byte: u64) -> Cell {
+        let mut builder = Builder::new();
+        builder.store_uint(byte, 8).expect("a byte fits");
+        builder.build().expect("well formed")
     }
 
     #[test]
-    fn level_reads_the_highest_marked_level() {
-        assert_eq!(level_of(0b000), 0);
-        assert_eq!(level_of(0b001), 1);
-        assert_eq!(level_of(0b011), 2);
-        assert_eq!(level_of(0b111), 3);
-        assert_eq!(level_of(0b100), 3);
+    fn equal_cells_share_a_hash_key() {
+        use std::collections::HashSet;
+        let mut set = HashSet::new();
+        set.insert(cell_of(0xAB));
+        assert!(
+            set.contains(&cell_of(0xAB)),
+            "an equal cell is the same key"
+        );
+        assert!(!set.contains(&cell_of(0xCD)), "a different cell is not");
     }
 
     #[test]
-    fn a_mask_applies_only_the_levels_below() {
-        assert_eq!(applied_mask(0b101, 0), 0b000);
-        assert_eq!(applied_mask(0b101, 1), 0b001);
-        assert_eq!(applied_mask(0b101, 2), 0b001);
-        assert_eq!(applied_mask(0b101, 3), 0b101);
-        // A level past the top answers with the whole mask.
-        assert_eq!(applied_mask(0b101, 4), 0b101);
+    fn a_cell_returns_to_a_builder() {
+        let cell = cell_of(0xAB);
+        let rebuilt = cell
+            .to_builder()
+            .expect("to a builder")
+            .build()
+            .expect("well formed");
+        assert_eq!(rebuilt.repr_hash(), cell.repr_hash());
     }
 
     #[test]
-    fn hash_indices_step_once_per_marked_level() {
-        // A mask marking levels 1 and 3 has three hashes: 0, 1, 2.
-        assert_eq!(hash_index(0b101, 0), 0);
-        assert_eq!(hash_index(0b101, 1), 1);
-        assert_eq!(hash_index(0b101, 2), 1);
-        assert_eq!(hash_index(0b101, 3), 2);
-    }
+    fn metadata_reports_the_stored_identity() {
+        let child = cell_of(0xCD);
+        let mut builder = Builder::new();
+        builder.store_uint(0xAB, 8).expect("a byte fits");
+        builder.store_ref(child.clone()).expect("a ref fits");
+        let parent = builder.build().expect("well formed");
 
-    #[test]
-    fn descriptors_follow_the_specification() {
-        // d2 = floor(b/8) + ceil(b/8).
-        assert_eq!(bits_descriptor(0), 0);
-        assert_eq!(bits_descriptor(8), 2);
-        assert_eq!(bits_descriptor(12), 3);
-        assert_eq!(bits_descriptor(1023), 255);
-        // d1 = r + 8s + 32l.
-        assert_eq!(refs_descriptor(0, false, 0, 0), 0);
-        assert_eq!(refs_descriptor(4, false, 0, 0), 4);
-        assert_eq!(refs_descriptor(1, true, 0, 0), 9);
-        // A pruned branch at its own level: no refs, exotic, one marked level.
-        assert_eq!(refs_descriptor(0, true, 1, 1), 40);
-        // The same cell at level zero drops the mask.
-        assert_eq!(refs_descriptor(0, true, 1, 0), 8);
+        let meta = parent.metadata();
+        assert_eq!(meta.level_mask, parent.level_mask());
+        assert_eq!(meta.hashes.first(), Some(parent.hash()));
+        assert_eq!(meta.depths.first(), Some(&parent.depth()));
+
+        let reference = meta.refs.first().expect("one reference");
+        assert_eq!(reference.level_mask, child.level_mask());
+        assert_eq!(reference.hashes.first(), Some(child.hash()));
+        assert_eq!(reference.depths.first(), Some(&child.depth()));
     }
 }

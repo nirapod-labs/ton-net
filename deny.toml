@@ -7,7 +7,7 @@
 # published advisory, whether every license in it can be redistributed under this
 # project's own, and whether a crate arrived from somewhere other than crates.io.
 #
-# A fourth is particular to this workspace. NET-ADR-003 fixes the crypto and codec lines
+# A fourth is particular to this workspace. NET-ADR-004 fixes the crypto and codec lines
 # to one copy each, because two generations of the same primitive in one binary is both a
 # wider attack surface and a larger artifact for a library that ships prebuilt. That
 # decision decays silently as dependencies move, so a duplicate is refused here and the
@@ -53,7 +53,7 @@ skip = [
   # and it is not fixable from here. curve25519-dalek 5, which verifies the block
   # signatures, moved to the digest 0.11 line; tl-proto 0.5, which is the TL codec,
   # still reaches sha2 0.10 on the digest 0.10 line. Holding this workspace's own sha2
-  # at 0.10 keeps it to one extra copy rather than three, which is what NET-ADR-003
+  # at 0.10 keeps it to one extra copy rather than three, which is what NET-ADR-004
   # decided. It resolves when tl-proto crosses, and not before.
   { crate = "block-buffer" },
   { crate = "cpufeatures" },

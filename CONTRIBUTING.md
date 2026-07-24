@@ -47,7 +47,7 @@ one go; `cargo deny check` needs the advisory database and so needs the network.
 
 A new dependency has to clear `deny.toml`: a permissive license on the allow
 list, no published advisory, from crates.io, and no second version of a crate
-already in the tree. That last one is a decision recorded in NET-ADR-003, not a
+already in the tree. That last one is a decision recorded in NET-ADR-004, not a
 formality, and the exceptions in `deny.toml` each say why they are there.
 
 Tests that reach a live mainnet liteserver are marked `#[ignore]` so the default

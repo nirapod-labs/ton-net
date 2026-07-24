@@ -33,7 +33,9 @@
 //! [`Dict`] is TON's dictionary, a radix tree over fixed-width keys that carries almost
 //! everything a block holds. It sits here rather than above the block types because it
 //! belongs to the cell model: the virtual machine has opcodes for it, and a wallet needs
-//! one without needing to know what a block is.
+//! one without needing to know what a block is. [`AugDict`] is the same tree with a
+//! summary of every subtree kept in the node above it, which is the form a shard's
+//! accounts and a block's transactions take.
 //!
 //! # Identity and proofs
 //!
@@ -42,7 +44,9 @@
 //! their meaning: at level zero a pruned branch answers with the hash of the subtree it
 //! replaced, so a pruned copy of a tree hashes to the same value as the full tree. That
 //! substitution is what makes a Merkle proof checkable, and [`Cell::hash_at`] reaches
-//! the other levels.
+//! the other levels. [`virtualize`] reads the tree a Merkle proof stands for,
+//! [`create_proof`] builds one, and a [`UsageTree`] records the cells a read touches so
+//! [`UsageTree::prove`] builds a proof of just those.
 //!
 //! # Untrusted input
 //!
@@ -76,7 +80,9 @@ mod builder;
 mod cell;
 mod dict;
 mod error;
+mod merkle;
 mod slice;
+mod usage;
 
 // Building a cell goes through a crate-private constructor, deliberately: outside this
 // crate a cell can only come from parsing. So the properties over generated trees have
@@ -84,12 +90,27 @@ mod slice;
 #[cfg(test)]
 mod proptests;
 
-pub use boc::{parse_boc, serialize_boc, MAX_CELLS, MAX_DEPTH};
+#[cfg(feature = "compress")]
+pub use boc::compress;
+pub use boc::{
+    file_hash, parse_boc, serialize_boc, serialize_boc_chunks, serialize_boc_chunks_with,
+    serialize_boc_with, BocChunks, BocOptions, BocView, LazyBoc, MAX_CELLS, MAX_DEPTH,
+};
 pub use builder::Builder;
-pub use cell::{Cell, CellType, MAX_BITS, MAX_REFS};
-pub use dict::{Dict, DictEntry, DictIter, Lookup};
+#[cfg(feature = "json")]
+pub use cell::json;
+pub use cell::{Cell, CellType, Metadata, RefMetadata, MAX_BITS, MAX_REFS};
+pub use dict::{
+    AugDict, AugDictIter, AugEntry, AugItem, AugNode, Augmentation, Dict, DictEntry, DictIter,
+    ForkExtra, Lookup, PfxDict, PfxDictIter, PfxMatch, Traverse,
+};
 pub use error::CellError;
-pub use slice::Slice;
+pub use merkle::{
+    apply_update, combine_updates, create_proof, create_update, is_virtualized, may_apply,
+    rebuild_with_refs, validate_update, virtualize,
+};
+pub use slice::{MsgAddress, Slice};
+pub use usage::UsageTree;
 
 // The README ships to crates.io and cannot be replaced once a version is published,
 // so its examples are compiled here rather than trusted. Doc-only: this does not

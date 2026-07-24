@@ -13,8 +13,12 @@
 //! no way to reach the constructor that would let one disagree with its contents.
 
 use crate::cell::{Cell, CellType, MAX_BITS, MAX_REFS};
+use crate::dict::Dict;
 use crate::error::CellError;
 use crate::slice::Slice;
+
+mod address;
+mod snake;
 
 /// Accumulates the bits and references of a cell under construction.
 ///
@@ -369,6 +373,20 @@ impl Builder {
         Ok(self)
     }
 
+    /// Stores a `HashmapE`: the `Maybe` reference to a dictionary's root.
+    ///
+    /// An empty dictionary writes one clear bit; a non-empty one writes a set bit and a
+    /// reference to its root. This is [`store_maybe_ref`](Builder::store_maybe_ref) over
+    /// [`Dict::root`], named for a reader writing a dictionary field. An augmented
+    /// dictionary is stored the same way, through `store_maybe_ref` on its own root.
+    ///
+    /// # Errors
+    ///
+    /// As [`store_maybe_ref`](Builder::store_maybe_ref).
+    pub fn store_dict(&mut self, dict: &Dict) -> Result<&mut Self, CellError> {
+        self.store_maybe_ref(dict.root().cloned())
+    }
+
     /// Stores everything a slice has left: its remaining bits, then its remaining
     /// references.
     ///
@@ -476,6 +494,43 @@ mod tests {
         assert_eq!(s.load_uint(8).unwrap(), 0xab);
         assert!(s.load_bit().unwrap());
         assert_eq!(s.remaining_bits(), 0);
+    }
+
+    #[test]
+    fn a_stored_dictionary_reads_back_to_the_same_root() {
+        // A small dictionary over sixteen-bit keys.
+        let mut dict = Dict::new(16).expect("a sane key width");
+        let mut value = Builder::new();
+        value.store_uint(0xdead, 16).expect("fits");
+        dict.set_uint(1, &value).expect("sets key one");
+        dict.set_uint(2, &value).expect("sets key two");
+        let root_hash = dict.root().expect("not empty").repr_hash();
+
+        // Stored as a HashmapE, the Maybe reference reads back to that same root.
+        let mut b = Builder::new();
+        b.store_dict(&dict).expect("stores");
+        let cell = roundtrip(b);
+        let mut slice = cell.parse();
+        let stored_root = slice
+            .load_maybe_ref()
+            .expect("a bit and a reference")
+            .expect("present");
+        assert_eq!(stored_root.repr_hash(), root_hash, "the same root cell");
+        assert!(slice.is_empty(), "a HashmapE is only the Maybe reference");
+
+        // And it reconstructs into a dictionary that still answers.
+        let again = Dict::from_root(Some(stored_root.clone()), 16).expect("a valid root");
+        assert!(again.get_uint(1).expect("lookup").found().is_some());
+    }
+
+    #[test]
+    fn an_empty_dictionary_stores_a_single_clear_bit() {
+        let dict = Dict::new(16).expect("a sane key width");
+        let mut b = Builder::new();
+        b.store_dict(&dict).expect("stores");
+        let cell = roundtrip(b);
+        assert_eq!(cell.bit_len(), 1);
+        assert!(cell.parse().load_maybe_ref().expect("a bit").is_none());
     }
 
     #[test]

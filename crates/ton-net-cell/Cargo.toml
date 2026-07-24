@@ -19,10 +19,21 @@ rust-version.workspace = true
 # `cargo bench` would otherwise run the unit tests with criterion's flags.
 bench = false
 
+[features]
+# JSON rendering of an ordinary cell tree, opt-in so the default build stays free of
+# serde_json. The crate already sits in a tree that carries serde_json for config
+# parsing, so this admits no new dependency, only a new use of one (NET-ADR-004).
+json = ["dep:serde_json"]
+# LZ4 compression of a serialized bag of cells, opt-in so the default build stays free
+# of lz4_flex (admitted by NET-ADR-010).
+compress = ["dep:lz4_flex"]
+
 [dependencies]
-# The representation hash is SHA-256, on the single copy NET-ADR-003 fixes.
+# The representation hash is SHA-256, on the single copy NET-ADR-004 fixes.
 sha2.workspace = true
 thiserror.workspace = true
+serde_json = { workspace = true, optional = true }
+lz4_flex = { workspace = true, optional = true }
 
 [dev-dependencies]
 criterion.workspace = true
@@ -30,6 +41,10 @@ proptest.workspace = true
 
 [[bench]]
 name = "cells"
+harness = false
+
+[[bench]]
+name = "dict"
 harness = false
 
 [lints]

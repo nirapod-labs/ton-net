@@ -39,23 +39,31 @@ ton-net-adnl = { path = "crates/ton-net-adnl", version = "0.3.0" }
 ton-net-lite = { path = "crates/ton-net-lite", version = "0.3.0" }
 ton-net = { path = "crates/ton-net", version = "0.3.0" }
 
-# External crates on the lines fixed in NET-ADR-003. Each member crate opts in as
+# External crates on the lines fixed in NET-ADR-004. Each member crate opts in as
 # its layer is built through the v0.1.0 plan; unreferenced entries are inert.
 tl-proto = "0.5"
 # curve25519-dalek is at its current major (5): tl-proto does not pull it, so it
 # stays a single copy. sha2/aes/ctr are held at tl-proto's crypto-common 0.1
-# generation on purpose; bumping them duplicates the crypto machinery (NET-ADR-003).
+# generation on purpose; bumping them duplicates the crypto machinery (NET-ADR-004).
 curve25519-dalek = "5"
 sha2 = "0.10"
 aes = "0.8"
 ctr = "0.9"
 tokio = { version = "1", default-features = false }
 # getrandom draws the per-session ADNL randomness at the I/O edge. Nothing else pulls
-# it, so it is a single copy at its current major (NET-ADR-003).
+# it, so it is a single copy at its current major (NET-ADR-004).
 getrandom = "0.4"
 thiserror = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# Pure-Rust LZ4 for optional bag-of-cells compression, read on the untrusted boundary
+# through its bounds-checked safe-decode path, no C and wasm-clean. It pulls no crypto
+# machinery, so it keeps the single-copy tree NET-ADR-004 fixes (admitted by NET-ADR-010).
+lz4_flex = { version = "0.11", default-features = false, features = [
+  "safe-decode",
+  "safe-encode",
+  "std",
+] }
 # Benchmarks only. Default features off drops the plotting stack, which is a
 # large dependency tree for output the terminal already gives.
 criterion = { version = "0.8", default-features = false, features = [
