@@ -457,7 +457,11 @@ mod tests {
 
         let identity = parent.identity();
         assert_eq!(identity.level_mask(), parent.level_mask());
-        assert_eq!(identity.count(), 1, "a cell with an empty mask has one hash");
+        assert_eq!(
+            identity.count(),
+            1,
+            "a cell with an empty mask has one hash"
+        );
         assert_eq!(identity.hash(0), Some(parent.hash()));
         assert_eq!(identity.depth(0), Some(parent.depth()));
         assert_eq!(identity.hash(1), None, "and no more");
