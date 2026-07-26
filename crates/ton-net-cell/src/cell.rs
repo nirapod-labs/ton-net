@@ -240,6 +240,18 @@ impl Cell {
         self.inner.depths.get(index.min(last)).copied().unwrap_or(0)
     }
 
+    /// Whether this handle and `other` are the same cell in memory, not merely equal ones.
+    ///
+    /// Equality compares [`repr_hash`](Cell::repr_hash), so two cells built separately from
+    /// the same bytes are equal while costing two allocations. This asks the other question,
+    /// which is the one a reader that shares cells has to be held to: a lazy bag that built a
+    /// cell once and handed it out twice answers true here, and one that quietly rebuilt it
+    /// answers false while still answering equal.
+    #[must_use]
+    pub fn ptr_eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.inner, &other.inner)
+    }
+
     /// A cursor that reads typed values from the cell's bits and references.
     #[must_use]
     pub fn parse(&self) -> Slice<'_> {

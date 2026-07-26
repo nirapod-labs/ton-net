@@ -7,8 +7,9 @@
 //! that: [`verify`](BocView::verify) checks every cell but keeps a summary of each rather than
 //! the cell, and [`cell`](BocView::cell) builds one cell and only the subtree it reaches.
 //!
-//! What they save is the graph, not the bag. Both read every cell of the bag before either
-//! checks or builds anything, so what they need is still proportional to the bag's own size.
+//! What they save is the graph, not the bag. Both read and check every cell of the bag
+//! before any of them is hashed or built, so what they need is still proportional to the
+//! bag's own size.
 
 use super::{build_cell, verify_roots, BocView, Reader};
 use crate::cell::Cell;
@@ -21,7 +22,7 @@ impl BocView<'_> {
     /// This runs the same checks [`materialize`](BocView::materialize) runs, over the same
     /// cells, but keeps a summary of each cell, tens of bytes, rather than the cell, hundreds.
     /// The saving is the graph on top of the bag rather than the bag: every cell is read
-    /// before any is checked, so a bag still has to fit. The returned hashes are the roots'
+    /// before any is hashed, so a bag still has to fit. The returned hashes are the roots'
     /// representation hashes, the identities a [`materialize`](BocView::materialize) of the
     /// same bag reports through [`Cell::repr_hash`](crate::Cell::repr_hash).
     ///
@@ -43,9 +44,8 @@ impl BocView<'_> {
     /// building the rest. `index` is a position among the bag's cells in the order the bag
     /// stores them, the roots first, up to [`cell_count`](BocView::cell_count).
     ///
-    /// Each call reads the bag again, which is what a caller wanting one cell asks for. A
-    /// caller wanting several wants [`LazyBoc`](crate::LazyBoc), which reads once and keeps
-    /// what it builds.
+    /// Each call reads the bag again. A caller wanting several cells wants
+    /// [`LazyBoc`](crate::LazyBoc), which reads once and keeps what it builds.
     ///
     /// # Errors
     ///
