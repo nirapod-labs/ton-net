@@ -28,6 +28,11 @@
 //! whether the tree is four forks deep or ten. A walk is one call for each entry, the key vector
 //! it hands back, and a few besides for the stack it carries.
 //!
+//! A write is counted against the forks it rebuilds rather than the levels it reads. A set and a
+//! remove over ten forks ask thirty-seven times each, and ask exactly the same on a tree of that
+//! depth whose forks carry no label between them, which is the property held below: a write costs
+//! what its forks cost to rebuild, and the labels read on the way cost nothing.
+//!
 //! Counting them at all means installing a global allocator, and a global allocator means
 //! `unsafe`. That is why this is a test binary and not the library: the library forbids
 //! unsafe code and goes on forbidding it, and a test binary is a crate of its own.
@@ -287,6 +292,103 @@ fn a_dictionary_lookup_costs_one_allocation_however_deep_the_tree() {
             "a lookup that finds nothing down {forks} forks asked the allocator {asked} times"
         );
     }
+}
+
+/// A 256-bit key whose `forks` significant bits sit at the top, counting the value `index`
+/// out over them.
+///
+/// The counterpart to [`spread_key`] and the control for it. Consecutive significant bits leave
+/// every fork on the path sharing nothing with its sibling, so every interior label is empty and
+/// only the leaf carries one, where the spread shape gives every edge a label. A path down this
+/// tree passes the same number of forks as one down the spread tree of the same depth, which is
+/// what makes what the two cost comparable.
+fn dense_key(index: u32, forks: usize) -> [u8; 32] {
+    let mut key = [0u8; 32];
+    for bit in 0..forks {
+        if (index >> (forks - 1 - bit)) & 1 == 1 {
+            key[bit / 8] |= 1 << (7 - (bit % 8));
+        }
+    }
+    key
+}
+
+/// Every key of a dense tree `forks` deep, and the dictionary holding them.
+fn dense_dict(forks: usize) -> (Dict, Vec<[u8; 32]>) {
+    let keys: Vec<[u8; 32]> = (0..1u32 << forks).map(|i| dense_key(i, forks)).collect();
+    let mut value = Builder::new();
+    value.store_uint(0xdead_beef, 32).expect("a value fits");
+    let dict = Dict::from_items(256, keys.iter().map(|key| (*key, &value))).expect("builds");
+    (dict, keys)
+}
+
+/// A middle key of a tree, and a value to store under it.
+fn a_key_and_a_value(keys: &[[u8; 32]]) -> ([u8; 32], Builder) {
+    let mut value = Builder::new();
+    value.store_uint(0x0c0f_fee0, 32).expect("a value fits");
+    (
+        keys.get(keys.len() / 2)
+            .copied()
+            .expect("a key in the middle"),
+        value,
+    )
+}
+
+#[test]
+fn a_write_costs_its_forks_and_nothing_for_the_labels_along_the_way() {
+    // A set and a remove rebuild every fork they descended through, so what they cost is per
+    // fork, and a label they read on the way is not allowed to add to it. The two trees here
+    // are the same depth and differ in their labels: the spread tree carries one at every
+    // edge, the dense tree only at its leaves. A label read back onto the heap would cost a
+    // call at each edge the one has and the other does not, so the two counts would part by
+    // the depth rather than agreeing exactly.
+    const FORKS: usize = 10;
+    // The shallower tree the growth below is read against, and what a rebuilt fork is allowed
+    // to cost: a handful of calls, held to four, and nothing per label.
+    const SHALLOW: usize = 4;
+    const PER_FORK: usize = 4;
+
+    let (spread, spread_keys) = spread_dict(FORKS);
+    let (dense, dense_keys) = dense_dict(FORKS);
+
+    let cost = |dict: &Dict, keys: &[[u8; 32]]| -> (usize, usize) {
+        let (key, value) = a_key_and_a_value(keys);
+        let mut writing = dict.clone();
+        let ((), set) = calls_to_allocate(|| writing.set(&key, &value).expect("sets"));
+        let mut removing = dict.clone();
+        let (_, removed) = calls_to_allocate(|| removing.remove(&key).expect("removes"));
+        (set, removed)
+    };
+
+    let (spread_set, spread_remove) = cost(&spread, &spread_keys);
+    let (dense_set, dense_remove) = cost(&dense, &dense_keys);
+    assert_eq!(
+        spread_set, dense_set,
+        "a set over {FORKS} forks asked {spread_set} times where every edge carries a label \
+         and {dense_set} where only the leaf does"
+    );
+    assert_eq!(
+        spread_remove, dense_remove,
+        "a remove over {FORKS} forks asked {spread_remove} times where every edge carries a \
+         label and {dense_remove} where only the leaf does"
+    );
+
+    // The same read the other way round: what a write costs has to grow with the forks it
+    // rebuilds and with nothing else, so six more forks may cost at most twenty-four more. A
+    // vector taken at every level would add one for each of the six on top of that, whether
+    // or not the level carried a label, which the two counts above agreeing would not catch.
+    let (shallow, shallow_keys) = spread_dict(SHALLOW);
+    let (shallow_set, shallow_remove) = cost(&shallow, &shallow_keys);
+    let allowed = (FORKS - SHALLOW) * PER_FORK;
+    assert!(
+        spread_set - shallow_set <= allowed,
+        "a set cost {shallow_set} over {SHALLOW} forks and {spread_set} over {FORKS}, which is \
+         more than {PER_FORK} calls for each fork the deeper one rebuilds"
+    );
+    assert!(
+        spread_remove - shallow_remove <= allowed,
+        "a remove cost {shallow_remove} over {SHALLOW} forks and {spread_remove} over {FORKS}, \
+         which is more than {PER_FORK} calls for each fork the deeper one rebuilds"
+    );
 }
 
 #[test]
