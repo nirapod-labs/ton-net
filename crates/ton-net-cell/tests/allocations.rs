@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileCopyrightText: 2026 Nirapod Labs
 
-//! What reading a bag of cells costs the allocator.
+//! What reading a bag of cells, and walking a dictionary, cost the allocator.
 //!
 //! Wall-clock timing on the machine this was written on swings by tens of percent between
 //! runs of identical code, which is enough to hide a real regression and enough to invent
@@ -22,6 +22,12 @@
 //! at each Merkle cell above it, which is why 886 of the 1121. Nothing else in a read is per
 //! cell.
 //!
+//! A dictionary is measured the same way against a different quantity. A descent reads one edge
+//! label per level, so the question there is whether a lookup costs the allocator anything per
+//! level. It does not: a lookup is one call, the vector the caller's key bytes are spread into,
+//! whether the tree is four forks deep or ten. A walk is one call for each entry, the key vector
+//! it hands back, and a few besides for the stack it carries.
+//!
 //! Counting them at all means installing a global allocator, and a global allocator means
 //! `unsafe`. That is why this is a test binary and not the library: the library forbids
 //! unsafe code and goes on forbidding it, and a test binary is a crate of its own.
@@ -29,7 +35,7 @@
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::Cell;
 
-use ton_net_cell::{parse_boc, serialize_boc, BocView, Builder};
+use ton_net_cell::{parse_boc, serialize_boc, BocView, Builder, Dict, Lookup};
 
 thread_local! {
     /// Calls to the allocator on this thread since the count was last cleared.
@@ -79,11 +85,12 @@ fn calls_to_allocate<T>(body: impl FnOnce() -> T) -> (T, usize) {
     (value, counted)
 }
 
-/// Headroom over what a read costs beyond its cells, which is a buffer for the bag and a few
-/// vectors sized once.
+/// Headroom over what a workload costs beyond the thing its cost is counted against.
 ///
-/// Measured at six. The bounds below are stated with room over that rather than against it, so
-/// that a vector growing one step differently is not a failing test, while anything per cell
+/// For a bag read that is a buffer for the bag and a few vectors sized once, measured at six.
+/// For a dictionary walk it is the stack the walk carries as it descends, measured at four. The
+/// bounds below are stated with room over both rather than against either, so that a vector
+/// growing one step differently is not a failing test, while anything per cell or per entry
 /// still is.
 const SLACK: usize = 16;
 
@@ -213,4 +220,90 @@ fn a_second_read_of_the_same_bag_costs_the_same() {
     let (_, first) = calls_to_allocate(|| parse_boc(&bag).expect("parses"));
     let (_, second) = calls_to_allocate(|| parse_boc(&bag).expect("parses"));
     assert_eq!(first, second, "reading a bag is not allowed to vary");
+}
+
+/// A 256-bit key whose `forks` significant bits sit at every other position, counting the
+/// value `index` out over them.
+///
+/// The shape matters. A dictionary over keys counting up in the usual way is dense at the
+/// bottom, and a dense fork shares no bits with its sibling, so its label is empty. An empty
+/// label asks the allocator for nothing whichever way it is held, a vector that reserves
+/// nothing and takes nothing having no reason to, so that shape shows almost none of what a
+/// label costs.
+/// Spreading the significant bits with a zero between each gives every fork on the path a
+/// label of one bit and the leaf a label of the zeros that are left, so a tree `forks` deep
+/// reads `forks + 1` labels on the way to a leaf.
+fn spread_key(index: u32, forks: usize) -> [u8; 32] {
+    let mut key = [0u8; 32];
+    for bit in 0..forks {
+        if (index >> (forks - 1 - bit)) & 1 == 1 {
+            let at = 2 * bit + 1;
+            key[at / 8] |= 1 << (7 - (at % 8));
+        }
+    }
+    key
+}
+
+/// Every key of a tree `forks` deep, and the dictionary holding them.
+fn spread_dict(forks: usize) -> (Dict, Vec<[u8; 32]>) {
+    let keys: Vec<[u8; 32]> = (0..1u32 << forks).map(|i| spread_key(i, forks)).collect();
+    let mut value = Builder::new();
+    value.store_uint(0xdead_beef, 32).expect("a value fits");
+    let dict = Dict::from_items(256, keys.iter().map(|key| (*key, &value))).expect("builds");
+    (dict, keys)
+}
+
+#[test]
+fn a_dictionary_lookup_costs_one_allocation_however_deep_the_tree() {
+    // The one call is the vector the caller's key bytes are spread into, which a lookup makes
+    // once. The labels a descent reads on the way down are held inline and cost nothing, and
+    // that is what the three depths are here to show: a label held on the heap would put the
+    // depth into this number, and the deepest tree here is six forks deeper than the
+    // shallowest.
+    for forks in [4usize, 8, 10] {
+        let (dict, keys) = spread_dict(forks);
+        let key = keys
+            .get(keys.len() / 2)
+            .copied()
+            .expect("a key in the middle");
+
+        let (found, asked) = calls_to_allocate(|| dict.get(&key).expect("the lookup runs"));
+        assert!(matches!(found, Lookup::Found(_)), "the key was stored");
+        assert_eq!(
+            asked, 1,
+            "a lookup down {forks} forks asked the allocator {asked} times"
+        );
+
+        // A key that is not there but walks the same edges, so it has to cost the same: it
+        // agrees with a stored key down every fork and parts from it inside the leaf's own
+        // label. The bit it adds sits at an even position, which no spread key ever sets.
+        let mut absent = key;
+        let at = 2 * forks;
+        absent[at / 8] |= 1 << (7 - (at % 8));
+        let (missed, asked) = calls_to_allocate(|| dict.get(&absent).expect("the lookup runs"));
+        assert_eq!(missed, Lookup::Absent);
+        assert_eq!(
+            asked, 1,
+            "a lookup that finds nothing down {forks} forks asked the allocator {asked} times"
+        );
+    }
+}
+
+#[test]
+fn walking_a_dictionary_costs_one_allocation_for_each_key_it_hands_back() {
+    // A walk carries the key bits spelled out above each node it has still to visit, and it
+    // holds them inline, so what it costs is the key vector it hands the caller per entry and
+    // nothing besides. The tree is the deep-labelled shape again: every node on it carries a
+    // label, so a walk that read those onto the heap would cost several calls an entry rather
+    // than one.
+    const FORKS: usize = 10;
+    let (dict, keys) = spread_dict(FORKS);
+
+    let (walked, asked) = calls_to_allocate(|| dict.iter().count());
+    assert_eq!(walked, keys.len(), "the walk reached every key");
+    assert!(
+        asked <= walked + SLACK,
+        "walking {walked} entries asked the allocator {asked} times, which is more than the \
+         key each one hands back"
+    );
 }
