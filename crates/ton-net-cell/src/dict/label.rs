@@ -470,8 +470,17 @@ mod tests {
         read_label_into(&mut slice, 64, &mut label).expect("the long one");
         assert_eq!(label.len(), 40);
         read_label_into(&mut slice, 64, &mut label).expect("the short one");
+
+        // The whole value rather than the run it spells, and in that order, because a read
+        // back stops at the length: a bit of the long label left underneath the short one
+        // is invisible to `spelled` and shows only in the value itself.
+        assert_eq!(
+            label,
+            label_of(&[false]),
+            "a stale bit survived the refill: the two spell the same run and part in what \
+             sits past the end of it, which is why they print alike"
+        );
         assert_eq!(spelled(&label), vec![false]);
-        assert_eq!(label, label_of(&[false]), "a stale bit survived the refill");
     }
 
     #[test]
