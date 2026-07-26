@@ -472,8 +472,9 @@ mod tests {
     ///
     /// Every part of a cell that used to cost an allocation of its own is a field of a fixed
     /// size here. One is still a pointer to a second allocation, `Identity`'s hashes above
-    /// the lowest, which only a cell with a level mask has: a pruned branch, and its ancestors
-    /// up to the nearest Merkle cell. A field that grows back into a vector, or one that stops fitting
+    /// the lowest, which only a cell with a level mask has: a pruned branch, and the cells
+    /// above it the mask still reaches once each Merkle cell between them has shifted it down a
+    /// level. A field that grows back into a vector, or one that stops fitting
     /// beside a hash, shows up here rather than in a memory profile a year later.
     ///
     /// This is the layout, not the allocation count; a boxed field keeps the size and adds

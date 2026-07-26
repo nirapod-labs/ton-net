@@ -18,8 +18,9 @@
 //!
 //! One of those per cell is the cell itself. The other is the hashes above the lowest, which
 //! only a cell significant at more than one level has, and 886 of the block's 1121 cells are.
-//! A pruned branch carries a mask of its own, and the mask reaches its ancestors until a Merkle
-//! cell shifts it away, which is why 886 and not all 1121. Nothing else in a read is per cell.
+//! A pruned branch carries a mask of its own and the mask reaches its ancestors, losing a level
+//! at each Merkle cell above it, which is why 886 of the 1121. Nothing else in a read is per
+//! cell.
 //!
 //! Counting them at all means installing a global allocator, and a global allocator means
 //! `unsafe`. That is why this is a test binary and not the library: the library forbids

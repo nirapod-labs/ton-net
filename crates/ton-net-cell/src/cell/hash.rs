@@ -22,8 +22,9 @@ const MAX_HASHES: usize = 4;
 /// The hashes run lowest significant level first, [`count`](Identity::count) of them, reached
 /// by position with [`hash`](Identity::hash) or by level with [`hash_at`](Identity::hash_at).
 /// A cell with an empty mask has exactly one. A pruned branch has one per level it marks, and
-/// so does each ancestor the mask reaches, up to the nearest Merkle cell: a Merkle cell shifts
-/// the mask it covers down by one, so the mask stops there.
+/// so does each ancestor the mask reaches. A Merkle cell shifts the mask it covers down a
+/// level, so a mask loses a level at each Merkle cell above it and reaches no further once it
+/// is empty.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Identity {
     /// The cell's level mask, which fixes how many hashes it has and which answers for a level.
