@@ -21,7 +21,8 @@ const MAX_HASHES: usize = 4;
 ///
 /// The hashes run lowest significant level first, [`count`](Identity::count) of them, reached
 /// by position with [`hash`](Identity::hash) or by level with [`hash_at`](Identity::hash_at).
-/// An ordinary cell has exactly one; only a proof's cells have more.
+/// A cell with an empty mask has exactly one. A pruned branch puts a mask on every cell above
+/// it, and those have more, whether or not they are ordinary.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Identity {
     /// The cell's level mask, which fixes how many hashes it has and which answers for a level.
@@ -32,9 +33,9 @@ pub struct Identity {
     depth0: u16,
     /// Everything above the lowest level, held apart and boxed.
     ///
-    /// A cell with an empty mask has one hash and no more, and outside a proof that is every
-    /// cell in a bag. Keeping the rest here costs those cells a pointer instead of the space
-    /// for three hashes they will never have.
+    /// A cell with an empty mask has one hash and no more, and in a bag with no pruned branch
+    /// in it that is every cell. Keeping the rest here costs those cells a pointer instead of
+    /// the space for three hashes they will never have.
     extra: Option<Box<Extra>>,
 }
 

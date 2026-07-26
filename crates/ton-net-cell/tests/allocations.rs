@@ -5,7 +5,7 @@
 //!
 //! Wall-clock timing on the machine this was written on swings by tens of percent between
 //! runs of identical code, which is enough to hide a real regression and enough to invent
-//! one. A count does not move with the weather: reading the same bag asked the allocator the
+//! one. A count does not move with the weather: reading the same bag calls the allocator the
 //! same number of times every run, on every machine, and that count is what the memory a
 //! large bag needs is proportional to. So the layout is held to a count rather than a clock.
 //!
@@ -21,7 +21,7 @@
 //! a block carries its state update as a Merkle update, and the mask a pruned branch
 //! introduces propagates up through every ancestor of it. Nothing else in a read is per cell.
 //!
-//! Seeing the asked at all means installing a global allocator, and a global allocator means
+//! Counting them at all means installing a global allocator, and a global allocator means
 //! `unsafe`. That is why this is a test binary and not the library: the library forbids
 //! unsafe code and goes on forbidding it, and a test binary is a crate of its own.
 
@@ -38,7 +38,7 @@ thread_local! {
     static CALLS: Cell<usize> = const { Cell::new(0) };
 }
 
-/// The system allocator, counting the asked that ask it for memory.
+/// The system allocator, counting the callers that ask it for memory.
 struct Counting;
 
 /// Records one call, if this thread still has somewhere to record it.
@@ -78,8 +78,13 @@ fn calls_to_allocate<T>(body: impl FnOnce() -> T) -> (T, usize) {
     (value, counted)
 }
 
-/// What a read costs beyond its cells: a buffer for the bag, and a few vectors sized once.
-const FIXED: usize = 32;
+/// Headroom over what a read costs beyond its cells, which is a buffer for the bag and a few
+/// vectors sized once.
+///
+/// Measured at six. The bounds below are stated with room over that rather than against it, so
+/// that a vector growing one step differently is not a failing test, while anything per cell
+/// still is.
+const SLACK: usize = 16;
 
 /// The captured mainnet account proof, hex encoded.
 const PROOF_HEX: &str = include_str!("fixtures/account-proof.hex");
@@ -115,12 +120,12 @@ fn building_a_bag_costs_one_allocation_for_a_cell_and_one_for_its_higher_hashes(
         let (roots, asked) = calls_to_allocate(|| parse_boc(&bag).expect("the fixture parses"));
         assert!(!roots.is_empty());
 
-        // A cell costs its own allocation and nothing more: its data is a window on one
-        // buffer the whole bag shares, and its references, level mask, hash and depth all sit
-        // inside it. The only second allocation a cell can cost is the hashes above the
-        // lowest, and a cell with an empty mask has none of those.
+        // A cell costs its own allocation, and one more only for the hashes above the
+        // lowest. Its data is a window on one buffer the whole bag shares, and its
+        // references, level mask, hash and depth all sit inside it, so none of those is an
+        // allocation at all.
         assert!(
-            asked <= cells * 2 + FIXED,
+            asked <= cells * 2 + SLACK,
             "reading the {name} built {cells} cells and asked the allocator {asked} times, \
              which is more than a cell and its higher hashes apiece"
         );
@@ -128,7 +133,7 @@ fn building_a_bag_costs_one_allocation_for_a_cell_and_one_for_its_higher_hashes(
 }
 
 #[test]
-fn a_bag_of_ordinary_cells_costs_exactly_one_allocation_for_each() {
+fn a_bag_of_ordinary_cells_costs_at_most_one_allocation_for_each() {
     // Every cell here has an empty level mask, so none of them has a hash above the lowest
     // and none of them may cost a second allocation. This is the shape a contract's code, a
     // message body and a shard state all have.
@@ -155,7 +160,7 @@ fn a_bag_of_ordinary_cells_costs_exactly_one_allocation_for_each() {
 
     let (_, asked) = calls_to_allocate(|| parse_boc(&bag).expect("parses"));
     assert!(
-        asked <= cells + FIXED,
+        asked <= cells + SLACK,
         "reading {cells} ordinary cells asked the allocator {asked} times, which is more \
          than one apiece: something is allocating for a cell's contents again"
     );
@@ -188,15 +193,14 @@ fn verifying_a_bag_costs_less_than_building_it() {
     // hash and depth, so the cells it allocates for are only the ones significant above the
     // lowest level. Building allocates for every cell on top of that. Verifying is the path a
     // bag too large to hold as a graph goes down, so it has to be the cheaper one.
-    assert!(
-        verifying < building,
-        "verifying {cells} cells asked the allocator {verifying} times and building asked \
-         {building}"
-    );
-    assert!(
-        verifying <= cells + FIXED,
-        "verifying {cells} cells asked the allocator {verifying} times, which is more than \
-         the higher hashes apiece"
+    // Exactly one allocation per cell separates them, on both fixtures, because that one is
+    // the cell itself and verifying builds none. A bound with room in it would let a
+    // regression confined to the cells that need nothing else slip through; this cannot.
+    assert_eq!(
+        building - verifying,
+        cells,
+        "building {cells} cells cost {building} and verifying cost {verifying}, so they differ \
+         by something other than one allocation for each cell built"
     );
 }
 

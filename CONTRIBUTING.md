@@ -100,7 +100,8 @@ way is not testing anything.
 Conventional commits, `type(scope): subject`, imperative and lowercase, around 50
 characters, no trailing period. Wrap a body at 72 columns.
 
-Types in use: `feat`, `fix`, `refactor`, `test`, `docs`, `build`, `ci`, `chore`.
+Types in use: `feat`, `fix`, `perf`, `refactor`, `test`, `bench`, `docs`, `build`,
+`ci`, `chore`.
 Scopes follow the crate the change lands in: `tl`, `cell`, `block`, `adnl`,
 `lite`, `net`, `node`. A change spanning the workspace takes no scope.
 

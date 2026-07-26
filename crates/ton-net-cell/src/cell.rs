@@ -470,13 +470,19 @@ mod tests {
 
     /// The layout, asserted exactly.
     ///
-    /// A cell costs one allocation, and every part of it that used to cost another is now a
-    /// field of a fixed size. A field that grows back into a vector, or an identity that
-    /// stops fitting beside a hash, shows up here rather than in a memory profile a year
-    /// later. The sizes are the ones a 64-bit target gives; a narrower one has its own.
+    /// Every part of a cell that used to cost an allocation of its own is a field of a fixed
+    /// size here. One is still a pointer to a second allocation, `Identity`'s hashes above
+    /// the lowest, which a cell only has when a pruned branch sits under it. A field that
+    /// grows back into a vector, or an identity that stops fitting beside a hash, shows up
+    /// here rather than in a memory profile a year later.
+    ///
+    /// This is the layout, not the allocation count; a boxed field keeps the size and adds
+    /// the allocation. `tests/allocations.rs` counts.
+    ///
+    /// The sizes are the ones a 64-bit target gives; a narrower one has its own.
     #[test]
     #[cfg(target_pointer_width = "64")]
-    fn a_cell_is_one_allocation_and_stays_one() {
+    fn a_cells_parts_stay_inline_and_stay_that_way() {
         assert_eq!(size_of::<Cell>(), 8, "a cell is a pointer");
         assert_eq!(
             size_of::<Payload>(),

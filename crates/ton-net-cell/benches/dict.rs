@@ -67,12 +67,12 @@ fn dict(c: &mut Criterion) {
 /// A fixed workload, run at both ends of the measurement, that touches none of this crate.
 ///
 /// Every benchmark in a run shares one machine, and a machine that heats up reports all of
-/// them as slower with nothing having changed. This does what parsing a bag does, a few
-/// dozen small allocations and a walk over the bytes in them, so it moves when the machine
-/// moves. A hash would not: the chip runs one on a unit of its own and reports the same
-/// figure while everything around it slows down.
+/// them as slower with nothing having changed. Rebuilding a dictionary node allocates and
+/// walks a short run of bytes, so a few dozen of those move when the machine moves. A hash
+/// would not: the chip runs one on a unit of its own and reports the same figure while
+/// everything around it slows down.
 fn reference(c: &mut Criterion, end: &str) {
-    /// The fixture is 45 cells averaging 35 bytes, so this is the shape of parsing it.
+    /// A node's label and value are short, and a set rebuilds a handful of nodes.
     const BLOCKS: u8 = 45;
     const EACH: usize = 35;
 

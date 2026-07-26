@@ -92,14 +92,4 @@ mod tests {
         assert!(refs.push(cell_of(0xE5)).is_err(), "a fifth does not fit");
         assert_eq!(refs, full, "and the refusal changed nothing");
     }
-
-    #[test]
-    fn references_cost_no_allocation_of_their_own() {
-        // Four pointers and a tag. A vector here would be three words plus a heap block,
-        // per cell, for at most four pointers.
-        assert!(
-            size_of::<Refs>() <= (MAX_REFS + 1) * size_of::<usize>(),
-            "references are held inline"
-        );
-    }
 }
