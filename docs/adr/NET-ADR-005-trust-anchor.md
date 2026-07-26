@@ -114,9 +114,9 @@ chain's side of the world. Everything else is earned by cryptography.
 ## Consequences
 
 - A first sync is a cold walk over every key block published since the pinned block: about
-  1242 links, a couple of minutes, and roughly fifty megabytes against mainnet in July 2026,
-  growing about 800 links a year while the pinned block stays fixed. A warm sync from a saved
-  anchor is a link or two.
+  1242 links, a couple of minutes, and roughly fifty megabytes against mainnet in July 2026.
+  That is 460 days of chain, so the count grows by about a thousand links a year while the
+  pinned block stays fixed. A warm sync from a saved anchor is a link or two.
 - The bundled snapshot goes stale as the pinned block recedes. Refreshing it is release work,
   and a refresh moves nobody's trust, because the value is what the network published rather
   than one this library invented.

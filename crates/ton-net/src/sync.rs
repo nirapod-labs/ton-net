@@ -34,9 +34,10 @@ const MAX_LINKS_PER_REPLY: usize = 64;
 
 /// The most links one sync may check.
 ///
-/// A cold sync from the block the mainnet config pins was 1242 links in July 2026, and
-/// that figure grows by about 800 a year for as long as the config keeps pinning the same
-/// block. This leaves room for several years of that and still ends a runaway chain.
+/// A cold sync from the block the mainnet config pins was 1242 links in July 2026, over
+/// the 460 days since that block, so the figure grows by about a thousand a year for as
+/// long as the config keeps pinning the same one. This leaves room for a few years of
+/// that and still ends a runaway chain.
 const MAX_LINKS_PER_SYNC: usize = 4096;
 
 /// The most replies one sync may take. A cold sync took 78.
