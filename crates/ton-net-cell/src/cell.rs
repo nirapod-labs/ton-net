@@ -27,7 +27,7 @@ pub use exotic::CellType;
 pub use metadata::{Metadata, RefMetadata};
 
 use hash::compute;
-pub use hash::Summary;
+pub use hash::{Summary, SummaryRef};
 use level::{bits_descriptor, hash_index, level_of, refs_descriptor};
 
 /// The most data bits a cell may hold.
@@ -92,9 +92,18 @@ impl Cell {
         cell_type: CellType,
         level_mask: u8,
     ) -> Result<Self, CellError> {
-        let summaries: Vec<Summary> = refs.iter().map(Summary::of).collect();
+        // Borrowed rather than copied. A child already holds everything its parent hashes
+        // over, and a cell has at most four of them, so the slots sit on the stack and no
+        // reference costs an allocation to look at.
+        let mut children = [SummaryRef::NONE; MAX_REFS];
+        for (slot, child) in children.iter_mut().zip(&refs) {
+            *slot = child.summary_view();
+        }
+        let children = children
+            .get(..refs.len())
+            .ok_or(CellError::Malformed("cell has more than four references"))?;
         let (hashes, depths) =
-            summarize(&data, bits, &summaries, cell_type, level_mask)?.into_parts();
+            summarize(&data, bits, children, cell_type, level_mask)?.into_parts();
         Ok(Self {
             inner: Arc::new(Inner {
                 data,
@@ -106,6 +115,15 @@ impl Cell {
                 depths,
             }),
         })
+    }
+
+    /// This cell's identity, borrowed for a parent about to hash itself over it.
+    pub(crate) fn summary_view(&self) -> SummaryRef<'_> {
+        SummaryRef::new(
+            self.inner.level_mask,
+            &self.inner.hashes,
+            &self.inner.depths,
+        )
     }
 
     /// The cell's data bytes.
@@ -342,7 +360,7 @@ impl Cell {
 pub fn summarize(
     data: &[u8],
     bits: u16,
-    refs: &[Summary],
+    refs: &[SummaryRef<'_>],
     cell_type: CellType,
     mask: u8,
 ) -> Result<Summary, CellError> {

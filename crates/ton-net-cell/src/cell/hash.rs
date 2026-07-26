@@ -5,7 +5,7 @@
 
 use sha2::{Digest, Sha256};
 
-use super::{bits_descriptor, hash_index, level_of, refs_descriptor, Cell, CellType};
+use super::{bits_descriptor, hash_index, level_of, refs_descriptor, CellType};
 use crate::error::CellError;
 
 /// A child's stored identity, enough to hash its parent without holding the child cell.
@@ -25,16 +25,6 @@ pub struct Summary {
 }
 
 impl Summary {
-    /// Reads a built cell's identity into a summary.
-    pub fn of(cell: &Cell) -> Self {
-        let (hashes, depths) = cell.stored();
-        Self {
-            level_mask: cell.level_mask(),
-            hashes: hashes.to_vec(),
-            depths: depths.to_vec(),
-        }
-    }
-
     /// A summary from parts already computed, as [`summarize`](super::summarize) returns.
     pub fn from_parts(level_mask: u8, hashes: Vec<[u8; 32]>, depths: Vec<u16>) -> Self {
         Self {
@@ -42,11 +32,6 @@ impl Summary {
             hashes,
             depths,
         }
-    }
-
-    /// The summarised cell's level mask.
-    pub fn level_mask(&self) -> u8 {
-        self.level_mask
     }
 
     /// The summarised cell's significant hashes, lowest level first.
@@ -69,18 +54,66 @@ impl Summary {
         (self.hashes, self.depths)
     }
 
-    /// The summarised cell's hash at `level`, clamped to its topmost, as [`Cell::hash_at`].
-    #[expect(
-        clippy::indexing_slicing,
-        reason = "clamped to the last hash, and a summary is built with at least one"
-    )]
+    /// The summarised cell's hash at `level`, clamped to its topmost, as [`Cell::hash_at`](super::Cell::hash_at).
+    fn hash_at(&self, level: u8) -> [u8; 32] {
+        self.as_view().hash_at(level)
+    }
+
+    /// Borrows this summary's identity, for a parent about to hash itself over it.
+    pub fn as_view(&self) -> SummaryRef<'_> {
+        SummaryRef::new(self.level_mask, &self.hashes, &self.depths)
+    }
+}
+
+/// A summarised cell's identity, borrowed from wherever it already sits.
+///
+/// Hashing a parent reads three things from each of its references: the level mask, the
+/// hashes and the depths. All three are already held by the child, so the parent borrows
+/// them. Copying them out into an owned [`Summary`] first costs two allocations for every
+/// reference of every cell, and building a bag is the one place in this crate where that is
+/// measurable.
+#[derive(Clone, Copy)]
+pub struct SummaryRef<'a> {
+    level_mask: u8,
+    hashes: &'a [[u8; 32]],
+    depths: &'a [u16],
+}
+
+impl<'a> SummaryRef<'a> {
+    /// What a reference slot holds before a child is put in it.
+    ///
+    /// A caller passes only the slots it filled, so nothing ever hashes over this.
+    pub(crate) const NONE: Self = Self {
+        level_mask: 0,
+        hashes: &[],
+        depths: &[],
+    };
+
+    /// Borrows an identity from the parts a cell or a summary already holds.
+    pub(crate) fn new(level_mask: u8, hashes: &'a [[u8; 32]], depths: &'a [u16]) -> Self {
+        Self {
+            level_mask,
+            hashes,
+            depths,
+        }
+    }
+
+    /// The summarised cell's level mask.
+    pub fn level_mask(&self) -> u8 {
+        self.level_mask
+    }
+
+    /// The hash at `level`, clamped to the topmost this cell has, as [`Cell::hash_at`](super::Cell::hash_at).
     fn hash_at(&self, level: u8) -> [u8; 32] {
         let index = hash_index(self.level_mask, level);
         let last = self.hashes.len().saturating_sub(1);
-        self.hashes[index.min(last)]
+        self.hashes
+            .get(index.min(last))
+            .copied()
+            .unwrap_or([0u8; 32])
     }
 
-    /// The summarised cell's depth at `level`, clamped to its topmost, as [`Cell::depth_at`].
+    /// The depth at `level`, clamped to the topmost this cell has, as [`Cell::depth_at`](super::Cell::depth_at).
     fn depth_at(&self, level: u8) -> u16 {
         let index = hash_index(self.level_mask, level);
         let last = self.depths.len().saturating_sub(1);
@@ -125,7 +158,7 @@ fn read_depth(data: &[u8], at: usize) -> Result<u16, CellError> {
 pub(super) fn compute(
     data: &[u8],
     bits: u16,
-    refs: &[Summary],
+    refs: &[SummaryRef<'_>],
     cell_type: CellType,
     mask: u8,
 ) -> Result<(Vec<[u8; 32]>, Vec<u16>), CellError> {

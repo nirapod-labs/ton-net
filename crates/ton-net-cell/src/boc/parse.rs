@@ -4,7 +4,7 @@
 //! Reading a bag's cells into a graph, once its header has been checked.
 
 use super::{bit_len, read_header, Header, Reader, MAX_DEPTH};
-use crate::cell::{summarize, Cell, CellType, Summary, MAX_BITS, MAX_REFS};
+use crate::cell::{summarize, Cell, CellType, Summary, SummaryRef, MAX_BITS, MAX_REFS};
 use crate::error::CellError;
 
 /// A cell as read from the bag, with its references still as indices.
@@ -211,20 +211,28 @@ pub(super) fn verify_roots(
     // Position k in `summaries` holds cell `count-1-k`, as `built` does in read_and_build.
     let mut summaries: Vec<Summary> = Vec::with_capacity(count);
     for raw_cell in raw.iter().rev() {
-        let mut children = Vec::with_capacity(raw_cell.refs.len());
-        for &target in &raw_cell.refs {
-            let child = summaries
-                .get(count - 1 - target)
+        // The children are borrowed out of the summaries already kept, so a cell costs no
+        // allocation to look at. The borrows end with the block, which is what lets the
+        // summary this produces be pushed onto the same vector.
+        let summary = {
+            let mut children = [SummaryRef::NONE; MAX_REFS];
+            for (slot, &target) in children.iter_mut().zip(&raw_cell.refs) {
+                *slot = summaries
+                    .get(count - 1 - target)
+                    .ok_or(CellError::BadReference)?
+                    .as_view();
+            }
+            let children = children
+                .get(..raw_cell.refs.len())
                 .ok_or(CellError::BadReference)?;
-            children.push(child.clone());
-        }
-        let summary = summarize(
-            &raw_cell.data,
-            raw_cell.bits,
-            &children,
-            raw_cell.cell_type,
-            raw_cell.level_mask,
-        )?;
+            summarize(
+                &raw_cell.data,
+                raw_cell.bits,
+                children,
+                raw_cell.cell_type,
+                raw_cell.level_mask,
+            )?
+        };
         if let Some(stored) = &raw_cell.stored {
             check_stored(summary.hashes(), summary.depths(), stored)?;
         }
