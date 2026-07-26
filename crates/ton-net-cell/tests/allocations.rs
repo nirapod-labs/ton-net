@@ -38,7 +38,7 @@ thread_local! {
     static CALLS: Cell<usize> = const { Cell::new(0) };
 }
 
-/// The system allocator, counting the callers that ask it for memory.
+/// The system allocator, counting every call that asks it for memory.
 struct Counting;
 
 /// Records one call, if this thread still has somewhere to record it.
@@ -193,9 +193,10 @@ fn verifying_a_bag_costs_less_than_building_it() {
     // hash and depth, so the cells it allocates for are only the ones significant above the
     // lowest level. Building allocates for every cell on top of that. Verifying is the path a
     // bag too large to hold as a graph goes down, so it has to be the cheaper one.
-    // Exactly one allocation per cell separates them, on both fixtures, because that one is
-    // the cell itself and verifying builds none. A bound with room in it would let a
-    // regression confined to the cells that need nothing else slip through; this cannot.
+    //
+    // Exactly one allocation per cell separates them, because that one is the cell itself and
+    // verifying builds none. A bound with room in it would let a regression confined to the
+    // cells that need nothing else slip through; this cannot.
     assert_eq!(
         building - verifying,
         cells,

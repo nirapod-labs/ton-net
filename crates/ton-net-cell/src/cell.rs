@@ -472,9 +472,9 @@ mod tests {
     ///
     /// Every part of a cell that used to cost an allocation of its own is a field of a fixed
     /// size here. One is still a pointer to a second allocation, `Identity`'s hashes above
-    /// the lowest, which a cell only has when a pruned branch sits under it. A field that
-    /// grows back into a vector, or an identity that stops fitting beside a hash, shows up
-    /// here rather than in a memory profile a year later.
+    /// the lowest, which only a cell with a level mask has: a pruned branch, and everything
+    /// above one. A field that grows back into a vector, or an identity that stops fitting
+    /// beside a hash, shows up here rather than in a memory profile a year later.
     ///
     /// This is the layout, not the allocation count; a boxed field keeps the size and adds
     /// the allocation. `tests/allocations.rs` counts.
