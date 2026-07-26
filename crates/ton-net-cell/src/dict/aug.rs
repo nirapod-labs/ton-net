@@ -8,9 +8,9 @@ use core::borrow::Borrow;
 
 use super::label::read_label;
 use super::{
-    check_key_bits, collapse, collect_fork_extras, descend, key_of, leaf, lookup, rebuild, reroot,
-    rest, split, traverse, validate_tree, walk_step, AugNode, DictEntry, Entry, ForkExtra, Lookup,
-    Pending, Shape, Traverse,
+    build_all, check_key_bits, collapse, collect_fork_extras, descend, key_of, leaf, lookup,
+    rebuild, reroot, rest, split, traverse, validate_tree, walk_step, AugNode, DictEntry, Entry,
+    ForkExtra, Lookup, Pending, Shape, Traverse,
 };
 use crate::builder::Builder;
 use crate::cell::Cell;
@@ -385,13 +385,27 @@ impl<A: Augmentation> AugDict<A> {
     ///
     /// Each item is a key, the summary of the value under it, and the value. A key given
     /// more than once keeps the last of each it was given, and the result is the one
-    /// canonical dictionary for its final key set, the same tree [`set`](AugDict::set) builds
-    /// one entry at a time and independent of the order the items arrive in.
+    /// canonical dictionary for its final key set, independent of the order the items arrive
+    /// in.
+    ///
+    /// Wherever [`set`](AugDict::set) can build that dictionary at all, this builds the same
+    /// tree. It can also build ones [`set`](AugDict::set) cannot, for the reason
+    /// [`Dict::from_items`](crate::Dict::from_items) gives: a first key inserted alone carries
+    /// a label its whole width, and a value that fits beside the finished tree's short label
+    /// may not fit beside that one.
+    ///
+    /// The items are sorted by key once and the tree is laid out from the leaves up, so each
+    /// fork is built with both children already final and its summary is combined from them
+    /// where they stand. Repeated [`set`](AugDict::set) instead rebuilds the forks it
+    /// descended through, recombining each summary, once per key stored.
     ///
     /// # Errors
     ///
-    /// Returns [`CellError`] as [`set`](AugDict::set) does for the first item that will not
-    /// fit or whose key is too short.
+    /// Returns [`CellError::Malformed`] if a key `key_bits` wide could not label a cell,
+    /// [`CellError::KeyLength`] where an item's key is too short, reported at the earliest
+    /// such item the iterator yields, or [`CellError::NoRoomForBits`] where a label, a
+    /// summary and a value will not share one cell. Whatever
+    /// [`Augmentation::combine`] reports is returned as it stands.
     pub fn from_items<K, V>(
         aug: A,
         key_bits: u16,
@@ -401,11 +415,8 @@ impl<A: Augmentation> AugDict<A> {
         K: AsRef<[u8]>,
         V: Borrow<Builder>,
     {
-        let mut dict = Self::new(aug, key_bits)?;
-        for (key, extra, value) in items {
-            dict.set(key.as_ref(), &extra, value.borrow())?;
-        }
-        Ok(dict)
+        let root = build_all(&Aug(&aug), key_bits, items)?;
+        Self::from_root(aug, root, key_bits)
     }
 
     /// The number of entries, computed by walking the dictionary.
@@ -690,6 +701,35 @@ mod tests {
         }
     }
 
+    /// A summary that is not commutative, so which child a fork reads first shows in the
+    /// tree's root hash.
+    ///
+    /// `CountSum` cannot see that: addition gives a fork the same summary whichever way round
+    /// its children are read, so a build that swapped them agrees with one that did not. Every
+    /// augmentation shipped with a real dictionary is free to be order-sensitive, and a bulk
+    /// build that read its children in the wrong order would corrupt one silently. The
+    /// trait asks a summary to fold two children in order; it does not ask it to commute.
+    struct CountSkew;
+
+    impl Augmentation for CountSkew {
+        type Extra = u32;
+
+        fn read(&self, slice: &mut Slice<'_>) -> Result<u32, CellError> {
+            slice.load_u32()
+        }
+
+        fn combine(&self, left: &u32, right: &u32) -> Result<u32, CellError> {
+            // Wrapping because 31 compounds up the tree and leaves a u32 within a few
+            // levels. The value only has to differ under a swap, not mean anything.
+            Ok(left.wrapping_mul(31).wrapping_add(*right))
+        }
+
+        fn write(&self, extra: &u32, into: &mut Builder) -> Result<(), CellError> {
+            into.store_uint(u64::from(*extra), 32)?;
+            Ok(())
+        }
+    }
+
     /// The same summary read and written the same way, but combined wrongly, so a tree its
     /// forks were built for reads as inconsistent under it.
     struct CountOff;
@@ -804,6 +844,162 @@ mod tests {
             bulk.root().map(Cell::repr_hash),
             counted(&[1, 2, 3, 100]).root().map(Cell::repr_hash),
         );
+    }
+
+    /// The same summary as [`CountSum`], which counts the calls to
+    /// [`combine`](Augmentation::combine) it takes.
+    ///
+    /// A fork's summary is combined once when the fork is built, so the tally is the number
+    /// of forks a build constructed rather than the number the finished tree holds. That is
+    /// what tells a build that lays each fork down once from one that rebuilds forks it has
+    /// already written.
+    struct CountedCombines(core::cell::Cell<usize>);
+
+    impl Augmentation for CountedCombines {
+        type Extra = u32;
+
+        fn read(&self, slice: &mut Slice<'_>) -> Result<u32, CellError> {
+            slice.load_u32()
+        }
+
+        fn combine(&self, left: &u32, right: &u32) -> Result<u32, CellError> {
+            self.0.set(self.0.get() + 1);
+            Ok(left + right)
+        }
+
+        fn write(&self, extra: &u32, into: &mut Builder) -> Result<(), CellError> {
+            into.store_uint(u64::from(*extra), 32)?;
+            Ok(())
+        }
+    }
+
+    /// An item for each key, summarised by the count 1.
+    /// The same items, each carrying a summary of its own.
+    ///
+    /// [`counted_items`] gives every leaf the summary one, which makes a fork's two children
+    /// equal wherever the tree is balanced, and `31a + a` is the same whichever way round a
+    /// fork with equal children reads them. Under those items a build that swapped its
+    /// children is invisible at every fork of a balanced tree. Distinct summaries make the
+    /// swap show at every fork instead of only at the sizes that happen to be lopsided.
+    fn skewed_items(keys: &[u32]) -> Vec<([u8; 4], u32, Builder)> {
+        let mut value = Builder::new();
+        value.store_uint(0, 8).expect("a byte fits");
+        keys.iter()
+            .enumerate()
+            .map(|(i, key)| {
+                let extra = u32::try_from(i).expect("a small count") + 1;
+                (key.to_be_bytes(), extra, value.clone())
+            })
+            .collect()
+    }
+
+    fn counted_items(keys: &[u32]) -> Vec<([u8; 4], u32, Builder)> {
+        let mut value = Builder::new();
+        value.store_uint(0, 8).expect("a byte fits");
+        keys.iter()
+            .map(|key| (key.to_be_bytes(), 1u32, value.clone()))
+            .collect()
+    }
+
+    #[test]
+    fn a_bulk_build_combines_a_summary_once_per_fork_it_lays_down() {
+        // Sixteen keys make a tree of sixteen leaves over fifteen forks, and a build that
+        // constructs each fork once combines fifteen summaries. Anything above that is a
+        // fork built more than once.
+        let keys: Vec<u32> = (0..16u32).collect();
+
+        let bulk = AugDict::from_items(
+            CountedCombines(core::cell::Cell::new(0)),
+            32,
+            counted_items(&keys),
+        )
+        .expect("from_items");
+        let combines = bulk.aug.0.get();
+        assert_eq!(
+            combines,
+            bulk.fork_extras().expect("reads").len(),
+            "one combine per fork the finished tree holds"
+        );
+        assert_eq!(combines, keys.len() - 1);
+
+        // The same keys one at a time recombine every summary above each key as it arrives,
+        // which is the work the bulk build does not repeat.
+        let mut one_at_a_time =
+            AugDict::new(CountedCombines(core::cell::Cell::new(0)), 32).expect("a dictionary");
+        for (key, extra, value) in counted_items(&keys) {
+            one_at_a_time.set(&key, &extra, &value).expect("set");
+        }
+        assert_eq!(
+            one_at_a_time.root().map(Cell::repr_hash),
+            bulk.root().map(Cell::repr_hash),
+            "the two builds are the same tree",
+        );
+        assert!(
+            one_at_a_time.aug.0.get() > combines,
+            "{} combines one at a time against {combines} in bulk",
+            one_at_a_time.aug.0.get(),
+        );
+    }
+
+    #[test]
+    fn a_bulk_augmented_build_is_the_tree_the_same_items_set_one_at_a_time_give() {
+        // The summaries are part of what the root hash covers, so a bulk build that folded
+        // one up the tree differently disagrees here. Nothing and one entry are the shapes
+        // with no fork to summarise and two is the smallest with one; the key families run
+        // from keys that share every bit but the last few to keys that part at their first.
+        for n in [0u32, 1, 2, 3, 8, 17, 64] {
+            for (what, keys) in [
+                ("counting up from zero", (0..n).collect::<Vec<u32>>()),
+                ("ending on a fixed bit", (0..n).map(|i| i << 1).collect()),
+                (
+                    "parting at the first bit",
+                    (0..n).map(u32::reverse_bits).collect(),
+                ),
+            ] {
+                let items = counted_items(&keys);
+                let bulk = AugDict::from_items(CountSum, 32, items.clone()).expect("from_items");
+
+                let mut one_at_a_time = AugDict::new(CountSum, 32).expect("a dictionary");
+                for (key, extra, value) in &items {
+                    one_at_a_time.set(key, extra, value).expect("set");
+                }
+                assert_eq!(
+                    bulk.root().map(Cell::repr_hash),
+                    one_at_a_time.root().map(Cell::repr_hash),
+                    "{n} keys {what}",
+                );
+
+                // Again under a summary that is not commutative, over items whose leaf
+                // summaries all differ. Both are needed: `CountSum` cannot see a swapped
+                // fork at all, and `CountSkew` cannot see one whose two children carry the
+                // same summary, which is every fork of a balanced tree under `counted_items`.
+                let skewed = skewed_items(&keys);
+                let skew_bulk =
+                    AugDict::from_items(CountSkew, 32, skewed.clone()).expect("from_items");
+                let mut skew_one = AugDict::new(CountSkew, 32).expect("a dictionary");
+                for (key, extra, value) in &skewed {
+                    skew_one.set(key, extra, value).expect("set");
+                }
+                assert_eq!(
+                    skew_bulk.root().map(Cell::repr_hash),
+                    skew_one.root().map(Cell::repr_hash),
+                    "{n} keys {what}, under a summary that reads its children in order",
+                );
+                skew_bulk
+                    .validate()
+                    .expect("every fork folds its children in order");
+
+                // Every leaf counts one, so the root summary is the number of keys, and the
+                // tree the bulk build wrote holds to its own summary rule.
+                bulk.validate().expect("every fork sums its children");
+                let expected = u32::try_from(keys.len()).expect("a small count");
+                assert_eq!(
+                    bulk.root_extra().expect("extra"),
+                    (n > 0).then_some(expected),
+                    "{n} keys {what}",
+                );
+            }
+        }
     }
 
     #[test]

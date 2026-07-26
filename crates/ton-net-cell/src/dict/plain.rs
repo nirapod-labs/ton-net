@@ -471,6 +471,124 @@ mod tests {
         );
     }
 
+    /// The key families a bulk build has to lay out, each over `n` distinct 32-bit keys.
+    ///
+    /// Three of them run together at the top of the key and part near its end, so the tree is
+    /// a long label over a cluster of forks at the bottom. The fourth carries the counter in
+    /// the high bits instead, which parts consecutive keys at their leading bit.
+    fn families(n: u32) -> Vec<(&'static str, Vec<u32>)> {
+        vec![
+            ("counting up from zero", (0..n).collect()),
+            // A run of set bits above the counter, which is the label form a run of one
+            // repeated bit takes.
+            (
+                "sharing all but the last byte",
+                (0..n).map(|i| 0xffff_ff00 | i).collect(),
+            ),
+            // Every key ends in a zero, so every leaf still carries a label of its own.
+            ("ending on a fixed bit", (0..n).map(|i| i << 1).collect()),
+            (
+                "parting at the first bit",
+                (0..n).map(u32::reverse_bits).collect(),
+            ),
+        ]
+    }
+
+    #[test]
+    fn a_bulk_build_is_the_tree_the_same_items_set_one_at_a_time_give() {
+        // The root hash is over the whole structure, so a bulk build that laid out a
+        // differently shaped trie, or wrote one label under the wrong width, disagrees here.
+        // Nothing and one entry are the shapes with no fork at all and two is the smallest
+        // with one, which is where a bulk build is likeliest to be wrong; a size that is not
+        // a power of two is where its two subtrees come out uneven.
+        for n in [0u32, 1, 2, 3, 8, 17, 64, 100] {
+            for (what, keys) in families(n) {
+                let items = items(&keys);
+                let bulk = Dict::from_items(32, items.clone()).expect("from_items");
+
+                let mut one_at_a_time = Dict::new(32).expect("a dictionary");
+                for (key, value) in &items {
+                    one_at_a_time.set(key, value).expect("set");
+                }
+                assert_eq!(
+                    bulk.root().map(Cell::repr_hash),
+                    one_at_a_time.root().map(Cell::repr_hash),
+                    "{n} keys {what}",
+                );
+                assert_eq!(bulk.count().expect("count"), keys.len(), "{n} keys {what}");
+
+                // The same items handed over backwards, because a radix tree has one shape
+                // per key set and the sort is what has to make that true here.
+                let mut reversed = items;
+                reversed.reverse();
+                assert_eq!(
+                    Dict::from_items(32, reversed)
+                        .expect("from_items")
+                        .root()
+                        .map(Cell::repr_hash),
+                    bulk.root().map(Cell::repr_hash),
+                    "{n} keys {what}, reversed",
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_bulk_build_over_a_zero_bit_key_is_the_one_entry_that_width_holds() {
+        // A zero-bit key spells out nothing, so the dictionary holds one entry under the
+        // empty key and every item handed over is that same key.
+        let empty: [([u8; 0], Builder); 0] = [];
+        assert!(Dict::from_items(0, empty).expect("from_items").is_empty());
+
+        let bulk =
+            Dict::from_items(0, [([0u8; 0], value(1)), ([0u8; 0], value(2))]).expect("from_items");
+        let mut one_at_a_time = Dict::new(0).expect("a dictionary");
+        one_at_a_time.set(&[], &value(1)).expect("set");
+        one_at_a_time.set(&[], &value(2)).expect("set");
+        assert_eq!(
+            bulk.root().map(Cell::repr_hash),
+            one_at_a_time.root().map(Cell::repr_hash),
+        );
+        assert_eq!(bulk.count().expect("count"), 1);
+    }
+
+    #[test]
+    fn a_bulk_build_holds_items_no_order_of_set_can_hold() {
+        // The doc comments and the changelog say a bulk build accepts item sets `set`
+        // refuses, so the claim needs a case. A key inserted alone labels a cell its whole
+        // width: 2 bits of tag, 6 for a length under a 32-bit key, and the 32 bits
+        // themselves. The finished tree gives each of these two leaves a 2-bit label
+        // instead, because they part at their last bit. So a value of 1000 bits fits every
+        // leaf of the tree that exists and fits neither leaf on the way to it.
+        let mut big = Builder::new();
+        for _ in 0..15 {
+            big.store_uint(0, 64).expect("a chunk of the value fits");
+        }
+        big.store_uint(0, 40).expect("the last chunk fits");
+        assert_eq!(big.bits_used(), 1000);
+
+        // Alternating bits, because a key that is one run of the same bit labels as a short
+        // repeat instead of spelling itself out, and would fit beside the value after all.
+        let left = 0xAAAA_AAAAu32.to_be_bytes();
+        let right = 0xAAAA_AAABu32.to_be_bytes();
+
+        let bulk = Dict::from_items(32, [(left, &big), (right, &big)]).expect("from_items");
+        assert_eq!(bulk.count().expect("count"), 2);
+
+        // Either key refused as the opening insert is what makes this no order rather than
+        // one unlucky order: whichever goes first is the one that cannot be stored.
+        for first in [left, right] {
+            let mut one_at_a_time = Dict::new(32).expect("a dictionary");
+            assert!(
+                matches!(
+                    one_at_a_time.set(&first, &big),
+                    Err(CellError::NoRoomForBits { .. })
+                ),
+                "a key inserted alone carries a full-width label, leaving no room beside it"
+            );
+        }
+    }
+
     #[test]
     fn from_items_keeps_the_last_value_given_for_a_key() {
         let repeated = [

@@ -118,6 +118,8 @@ foundations most others build on.
 | [NET-ADR-008](docs/adr/NET-ADR-008-versioning-and-bindings.md) | Versioning, the verification epoch, and the binding sequence. |
 | [NET-ADR-009](docs/adr/NET-ADR-009-code-structure.md) | Flat layered crates, and how a crate grows. |
 | [NET-ADR-010](docs/adr/NET-ADR-010-boc-compression.md) | BoC compression behind a feature, on the untrusted boundary. |
+| [NET-ADR-011](docs/adr/NET-ADR-011-identity-and-trust.md) | What a cell's identity is, and the barrier a trusted hash may not cross. |
+| [NET-ADR-012](docs/adr/NET-ADR-012-scale-contract.md) | What the cell engine promises at scale. |
 
 The [architecture overview](docs/architecture.md) and the [system design](docs/design/system-design.md)
 carry the same decisions at more length. The rest of the documentation covers the shape of the

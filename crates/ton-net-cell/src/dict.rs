@@ -14,9 +14,12 @@
 //! [`AugDict`]. A plain fork is its label and two references and nothing else; an
 //! augmented one also carries a summary of its subtree, and rebuilding it recomputes those
 //! summaries rather than copying them forward. The two differ only in what a node carries
-//! between its label and its value, so the descent, the split and the rebuild are written
+//! between its label and its value, so the descent, the split, the rebuild and the bulk
+//! build are written
 //! once over a private `Shape` seam and shared. The label codec that gives a dictionary
 //! its one canonical hash lives in the `label` submodule.
+
+use core::borrow::Borrow;
 
 use crate::builder::Builder;
 use crate::cell::{Cell, MAX_BITS};
@@ -180,8 +183,8 @@ fn pack(bits: &[bool]) -> Vec<u8> {
 /// What a dictionary node carries between its label and its value.
 ///
 /// A plain node carries nothing there; an augmented one carries a summary of everything
-/// below it. That is the only difference between the two, so the descent, the split and
-/// the rebuild below are written once over this rather than twice.
+/// below it. That is the only difference between the two, so the descent, the split, the
+/// rebuild and the bulk build below are written once over this rather than twice.
 trait Shape {
     /// The summary a node carries, or `()` where it carries none.
     type Extra;
@@ -502,6 +505,118 @@ fn rebuild<S: Shape>(shape: &S, mut path: Vec<Step>, mut child: Cell) -> Result<
         child = step.rebuild(shape, &child)?;
     }
     Ok(child)
+}
+
+/// One item a bulk build was handed: the key as its bits, the summary, and the value.
+type BulkItem<E, V> = (Vec<bool>, E, V);
+
+/// Builds the dictionary `items` holds, or `None` where `items` is empty.
+///
+/// A radix tree is canonical: a key set determines its shape, which the order-independence
+/// tests and the mainnet root hashes hold this crate to. So it does not have to be found by
+/// putting the keys in one at a time: the entries under a subtree share a key prefix, and
+/// sorting puts keys that share a prefix next to each other, which leaves each subtree as one
+/// contiguous run for [`build_run`] to lay out from the leaves up with its children already
+/// final. A writer taking the same keys one at a time instead rebuilds the forks [`descend`]
+/// recorded on the way down, which is the path [`rebuild`] walks back up, once per key.
+///
+/// The sort is stable, so a key given more than once keeps the arrival order of its values
+/// and the run it forms ends on the last of them, which is what [`build_run`] stores at the
+/// leaf.
+fn build_all<S, K, V>(
+    shape: &S,
+    key_bits: u16,
+    items: impl IntoIterator<Item = (K, S::Extra, V)>,
+) -> Result<Option<Cell>, CellError>
+where
+    S: Shape,
+    K: AsRef<[u8]>,
+    V: Borrow<Builder>,
+{
+    check_key_bits(key_bits)?;
+    let mut sorted: Vec<BulkItem<S::Extra, V>> = items
+        .into_iter()
+        .map(|(key, extra, value)| Ok((key_of(key.as_ref(), key_bits)?, extra, value)))
+        .collect::<Result<_, CellError>>()?;
+    if sorted.is_empty() {
+        return Ok(None);
+    }
+    sorted.sort_by(|left, right| left.0.cmp(&right.0));
+    build_run(shape, &sorted, 0, key_bits).map(Some)
+}
+
+/// Builds the node the sorted run `items` sits under, and the subtree beneath it.
+///
+/// `depth` is how many key bits the edges above this node already spelled out and
+/// `remaining` is what is left to spend at it, so the two add to the key width. The run is
+/// required to be in ascending key order, with its items agreeing on the key bits above
+/// `depth`. [`build_all`] enters at a depth of zero, which any run satisfies, and the two
+/// recursive calls below narrow a run that agrees to the two halves that agree on one bit
+/// more.
+///
+/// This recurses rather than looping because it descends into two children at once. The
+/// recursive calls pass `remaining - shared - 1`, so each call spends the label and the bit
+/// that picks the branch, which comes to one bit even where the label is empty, and the
+/// recursion goes no deeper than the key width.
+fn build_run<S, V>(
+    shape: &S,
+    items: &[BulkItem<S::Extra, V>],
+    depth: usize,
+    remaining: u16,
+) -> Result<Cell, CellError>
+where
+    S: Shape,
+    V: Borrow<Builder>,
+{
+    let (Some(first), Some(last)) = (items.first(), items.last()) else {
+        return Err(CellError::Malformed("a dictionary node over no entries"));
+    };
+
+    // The run is sorted, so the bits its first and last keys agree on are the bits every key
+    // between them agrees on, and that run of bits is this edge's label.
+    let mut shared = 0u16;
+    while shared < remaining {
+        let at = depth + usize::from(shared);
+        if first.0.get(at) != last.0.get(at) {
+            break;
+        }
+        shared += 1;
+    }
+
+    // The key is spent, so the run is one key and this is its leaf, labelled with everything
+    // left of it. A key handed over more than once arrives here as a run of equal keys, and
+    // the last of them is the one the leaf takes.
+    if shared == remaining {
+        let entry = Entry {
+            extra: &last.1,
+            value: last.2.borrow(),
+        };
+        return leaf(shape, rest(&last.0, depth), &entry, remaining);
+    }
+
+    // The keys part at the bit just past the label, which makes it the bit that picks the
+    // branch: a zero there goes left and a one right. In key order the two are contiguous.
+    // The run ascends and its ends disagree at that bit, so the first key carries a zero
+    // there and the last a one, which leaves a key on either side of the split.
+    // partition_point answers within the run, so the split does not fall off its end.
+    let at = depth + usize::from(shared);
+    let (low, high) =
+        items.split_at(items.partition_point(|(key, _, _)| key.get(at) == Some(&false)));
+
+    let below = remaining - shared - 1;
+    let left = build_run(shape, low, at + 1, below)?;
+    let right = build_run(shape, high, at + 1, below)?;
+
+    let mut fork = Builder::new();
+    let label = rest(&first.0, depth)
+        .get(..usize::from(shared))
+        .unwrap_or(&[]);
+    store_label(&mut fork, label, remaining)?;
+    let extra = shape.fork_extra(&left, &right, below)?;
+    shape.write_extra(&extra, &mut fork)?;
+    fork.store_ref(left)?;
+    fork.store_ref(right)?;
+    fork.build()
 }
 
 /// Re-roots at the subtree every key beginning with `want` lives under.
