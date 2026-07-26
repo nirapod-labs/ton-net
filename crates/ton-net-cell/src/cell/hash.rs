@@ -177,11 +177,10 @@ pub(super) fn compute(
         }
         // At its own level it is only a cell, hashed as it stands.
         let (d1, d2) = (refs_descriptor(0, true, mask, level), bits_descriptor(bits));
-        let mut repr = Vec::with_capacity(2 + data.len());
-        repr.push(d1);
-        repr.push(d2);
-        repr.extend_from_slice(data);
-        hashes.push(Sha256::digest(&repr).into());
+        let mut sum = Sha256::new();
+        sum.update([d1, d2]);
+        sum.update(data);
+        hashes.push(sum.finalize().into());
         depths.push(0);
         return Ok((hashes, depths));
     }
@@ -198,28 +197,32 @@ pub(super) fn compute(
             bits_descriptor(bits),
         );
 
-        let mut repr = Vec::with_capacity(2 + data.len() + refs.len() * 34);
-        repr.push(d1);
-        repr.push(d2);
+        // The representation goes into the hash a piece at a time rather than into a buffer
+        // that is then hashed. The bytes are the same either way, and this is the innermost
+        // loop of the crate: gathering them first costs an allocation and a copy of the
+        // cell's data and of every child's hash, per level, per cell.
+        let mut sum = Sha256::new();
+        sum.update([d1, d2]);
         match hashes.last() {
             // The lowest hash is taken over the cell's data.
-            None => repr.extend_from_slice(data),
+            None => sum.update(data),
             // A higher hash is taken over the hash below it.
-            Some(previous) => repr.extend_from_slice(previous),
+            Some(previous) => sum.update(previous),
         }
 
+        // Every child's depth precedes every child's hash, so the depths are fed here and
+        // the hashes below rather than in one pass over the references.
         let mut depth = 0u16;
         for child in refs {
-            depth = depth.max(child.depth_at(child_level).saturating_add(1));
+            let child_depth = child.depth_at(child_level);
+            depth = depth.max(child_depth.saturating_add(1));
+            sum.update(child_depth.to_be_bytes());
         }
         for child in refs {
-            repr.extend_from_slice(&child.depth_at(child_level).to_be_bytes());
-        }
-        for child in refs {
-            repr.extend_from_slice(&child.hash_at(child_level));
+            sum.update(child.hash_at(child_level));
         }
 
-        hashes.push(Sha256::digest(&repr).into());
+        hashes.push(sum.finalize().into());
         depths.push(depth);
     }
 
