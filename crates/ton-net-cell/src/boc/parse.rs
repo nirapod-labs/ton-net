@@ -18,11 +18,23 @@ use crate::error::CellError;
 struct RawCell {
     data: Span,
     bits: u16,
-    refs: Vec<usize>,
+    /// Where each reference points, as a position among the bag's cells.
+    ///
+    /// Inline, because a vector here is an allocation per cell for at most four small
+    /// numbers, and a bag is bounded well inside what they fit in.
+    refs: [u32; MAX_REFS],
+    ref_count: u8,
     cell_type: CellType,
     level_mask: u8,
     /// Where the hashes and depths the cell carried ahead of its data sit, when it carried them.
     stored: Option<Span>,
+}
+
+impl RawCell {
+    /// The positions this cell references, in order.
+    fn refs(&self) -> &[u32] {
+        self.refs.get(..usize::from(self.ref_count)).unwrap_or(&[])
+    }
 }
 
 /// Parses a bag of cells and returns its root cells.
@@ -102,8 +114,8 @@ fn read_raw(reader: &mut Reader<'_>, header: &Header) -> Result<Vec<RawCell>, Ce
         }
         let cell_type = classify(exotic, data, level_mask, ref_count)?;
 
-        let mut refs = Vec::with_capacity(ref_count);
-        for _ in 0..ref_count {
+        let mut refs = [0u32; MAX_REFS];
+        for slot in refs.get_mut(..ref_count).ok_or(CellError::BadReference)? {
             #[allow(
                 clippy::cast_possible_truncation,
                 reason = "ref_size is at most 4, so this is under 2^32"
@@ -113,13 +125,18 @@ fn read_raw(reader: &mut Reader<'_>, header: &Header) -> Result<Vec<RawCell>, Ce
             if target >= count || target <= index {
                 return Err(CellError::BadReference);
             }
-            refs.push(target);
+            *slot = u32::try_from(target).map_err(|_| CellError::BadReference)?;
         }
 
         raw.push(RawCell {
             data: span,
             bits,
             refs,
+            #[allow(
+                clippy::cast_possible_truncation,
+                reason = "held to MAX_REFS above, so this is at most four"
+            )]
+            ref_count: ref_count as u8,
             cell_type,
             level_mask,
             stored,
@@ -137,7 +154,8 @@ fn check_depths(raw: &[RawCell], count: usize) -> Result<(), CellError> {
     let mut depth: Vec<usize> = Vec::with_capacity(count);
     for raw_cell in raw.iter().rev() {
         let mut deepest = 0usize;
-        for &target in &raw_cell.refs {
+        for &target in raw_cell.refs() {
+            let target = target as usize;
             deepest = deepest.max(depth.get(count - 1 - target).copied().unwrap_or(0) + 1);
         }
         if deepest > MAX_DEPTH {
@@ -181,9 +199,9 @@ pub(super) fn read_and_build(
     let mut built: Vec<Cell> = Vec::with_capacity(count);
     for raw_cell in raw.iter().rev() {
         let mut refs = Refs::None;
-        for &target in &raw_cell.refs {
+        for &target in raw_cell.refs() {
             let child = built
-                .get(count - 1 - target)
+                .get(count - 1 - target as usize)
                 .ok_or(CellError::BadReference)?;
             refs.push(child.clone())?;
         }
@@ -232,13 +250,13 @@ pub(super) fn verify_roots(
         let identity = {
             let unfilled = Identity::NONE;
             let mut children = [&unfilled; MAX_REFS];
-            for (slot, &target) in children.iter_mut().zip(&raw_cell.refs) {
+            for (slot, &target) in children.iter_mut().zip(raw_cell.refs()) {
                 *slot = identities
-                    .get(count - 1 - target)
+                    .get(count - 1 - target as usize)
                     .ok_or(CellError::BadReference)?;
             }
             let children = children
-                .get(..raw_cell.refs.len())
+                .get(..raw_cell.refs().len())
                 .ok_or(CellError::BadReference)?;
             summarize(
                 raw_cell.data.of(bytes)?,
@@ -373,8 +391,13 @@ pub(super) fn build_at(raw: &RawCells, state: &mut Build, index: usize) -> Resul
             _ => continue,
         }
         order.push(position);
-        for &target in &raw.cells.get(position).ok_or(CellError::BadReference)?.refs {
-            stack.push(target);
+        for &target in raw
+            .cells
+            .get(position)
+            .ok_or(CellError::BadReference)?
+            .refs()
+        {
+            stack.push(target as usize);
         }
     }
     order.sort_unstable();
@@ -382,10 +405,10 @@ pub(super) fn build_at(raw: &RawCells, state: &mut Build, index: usize) -> Resul
     for position in order.into_iter().rev() {
         let raw_cell = raw.cells.get(position).ok_or(CellError::BadReference)?;
         let mut refs = Refs::None;
-        for &target in &raw_cell.refs {
+        for &target in raw_cell.refs() {
             let child = state
                 .built
-                .get(target)
+                .get(target as usize)
                 .and_then(Option::as_ref)
                 .ok_or(CellError::BadReference)?;
             refs.push(child.clone())?;
