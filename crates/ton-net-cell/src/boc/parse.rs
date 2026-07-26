@@ -339,7 +339,16 @@ fn parallelism() -> usize {
 /// a width the worker count does not divide gives shares differing by fewer cells than
 /// there are workers, and the last of them can fall under a full [`CELLS_PER_WORKER`].
 fn workers_for(width: usize) -> usize {
-    parallelism().min(width / CELLS_PER_WORKER).max(1)
+    // The width is asked first, and the machine only if the width could use an answer. A
+    // wave under two full shares is running on the caller's thread whatever the machine
+    // says, and asking anyway is not free: the reading is taken once and kept, so the first
+    // bag read in a process would pay for it and every later one would not. A bag's cost
+    // has to be the same every time it is read, which `tests/allocations.rs` holds it to.
+    let affords = width / CELLS_PER_WORKER;
+    if affords < 2 {
+        return 1;
+    }
+    parallelism().min(affords).max(1)
 }
 
 /// What finalizing one wave produced, against the cell index each outcome came from.
