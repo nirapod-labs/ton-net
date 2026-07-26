@@ -6,7 +6,7 @@
 
 use core::borrow::Borrow;
 
-use super::label::read_label;
+use super::label::{skip_label, Label};
 use super::{
     build_all, check_key_bits, collapse, collect_fork_extras, descend, key_of, leaf, lookup,
     rebuild, reroot, rest, split, traverse, validate_tree, walk_step, AugNode, DictEntry, Entry,
@@ -122,7 +122,9 @@ fn extra_of<S: Shape>(shape: &S, node: &Cell, max: u16) -> Result<S::Extra, Cell
         return Err(CellError::Pruned);
     }
     let mut slice = node.parse();
-    read_label(&mut slice, max)?;
+    // The summary is whatever follows the label, so the label itself is stepped over rather
+    // than read. This runs once per child of every fork a rebuild touches.
+    skip_label(&mut slice, max)?;
     shape.read_extra(&mut slice)
 }
 
@@ -375,7 +377,7 @@ impl<A: Augmentation> AugDict<A> {
             stack: self
                 .root
                 .clone()
-                .map(|root| vec![(root, Vec::new(), self.key_bits)])
+                .map(|root| vec![(root, Label::new(), self.key_bits)])
                 .unwrap_or_default(),
             done: false,
         }
