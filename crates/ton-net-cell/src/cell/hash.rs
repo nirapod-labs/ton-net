@@ -21,8 +21,9 @@ const MAX_HASHES: usize = 4;
 ///
 /// The hashes run lowest significant level first, [`count`](Identity::count) of them, reached
 /// by position with [`hash`](Identity::hash) or by level with [`hash_at`](Identity::hash_at).
-/// A cell with an empty mask has exactly one. A pruned branch puts a mask on every cell above
-/// it, and those have more, whether or not they are ordinary.
+/// A cell with an empty mask has exactly one. A pruned branch has one per level it marks, and
+/// so does each ancestor the mask reaches, up to the nearest Merkle cell: a Merkle cell shifts
+/// the mask it covers down by one, so the mask stops there.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Identity {
     /// The cell's level mask, which fixes how many hashes it has and which answers for a level.
@@ -35,7 +36,7 @@ pub struct Identity {
     ///
     /// A cell with an empty mask has one hash and no more, and in a bag with no pruned branch
     /// in it that is every cell. Keeping the rest here costs those cells a pointer instead of
-    /// the space for three hashes they will never have.
+    /// the space for three hashes their mask does not call for.
     extra: Option<Box<Extra>>,
 }
 
@@ -108,8 +109,8 @@ impl Identity {
 
     /// How many hashes and depths the cell has, one per level its mask makes significant.
     ///
-    /// This is one more than the mask's set bits, so it is one for an ordinary cell and at
-    /// most four for any cell.
+    /// This is one more than the mask's set bits, so it is one for a cell with an empty mask
+    /// and at most four for any.
     #[must_use]
     pub fn count(&self) -> usize {
         self.level_mask.count_ones() as usize + 1

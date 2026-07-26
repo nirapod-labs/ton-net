@@ -33,6 +33,9 @@ struct RawCell {
 impl RawCell {
     /// The positions this cell references, in order.
     fn refs(&self) -> &[u32] {
+        // `ref_count` is held to MAX_REFS when the cell is read, so the fallback is
+        // unreachable; taking it would build a cell with fewer references than it declared,
+        // which hashes to a different identity.
         self.refs.get(..usize::from(self.ref_count)).unwrap_or(&[])
     }
 }

@@ -6,7 +6,7 @@
 //! A bag of cells arrives as one run of bytes and every cell's data is already inside it,
 //! so a cell can hold a window on that run instead of a copy of its own slice of it. The
 //! buffer lives as long as any cell taken from it, which is what makes the window safe and
-//! what a reader should know: keeping one cell of a bag keeps the bag's bytes.
+//! what it costs: keeping one cell of a bag keeps the bag's bytes.
 //! [`MAX_CELLS`](crate::MAX_CELLS) is what bounds how much that is.
 //!
 //! A cell that comes from a [`Builder`](crate::Builder) rather than a bag owns its own

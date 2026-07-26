@@ -457,7 +457,7 @@ mod tests {
 
         let identity = parent.identity();
         assert_eq!(identity.level_mask(), parent.level_mask());
-        assert_eq!(identity.count(), 1, "an ordinary cell has one hash");
+        assert_eq!(identity.count(), 1, "a cell with an empty mask has one hash");
         assert_eq!(identity.hash(0), Some(parent.hash()));
         assert_eq!(identity.depth(0), Some(parent.depth()));
         assert_eq!(identity.hash(1), None, "and no more");
@@ -472,8 +472,8 @@ mod tests {
     ///
     /// Every part of a cell that used to cost an allocation of its own is a field of a fixed
     /// size here. One is still a pointer to a second allocation, `Identity`'s hashes above
-    /// the lowest, which only a cell with a level mask has: a pruned branch, and everything
-    /// above one. A field that grows back into a vector, or an identity that stops fitting
+    /// the lowest, which only a cell with a level mask has: a pruned branch, and its ancestors
+    /// up to the nearest Merkle cell. A field that grows back into a vector, or one that stops fitting
     /// beside a hash, shows up here rather than in a memory profile a year later.
     ///
     /// This is the layout, not the allocation count; a boxed field keeps the size and adds
@@ -507,7 +507,7 @@ mod tests {
     }
 
     #[test]
-    fn an_ordinary_cell_carries_one_hash_and_no_more() {
+    fn a_cell_with_an_empty_mask_carries_one_hash_and_no_more() {
         let cell = cell_of(0xAB);
         assert_eq!(cell.level_mask(), 0);
         assert_eq!(cell.identity().count(), 1);

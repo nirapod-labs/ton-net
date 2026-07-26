@@ -72,7 +72,9 @@ fn dict(c: &mut Criterion) {
 /// would not: the chip runs one on a unit of its own and reports the same figure while
 /// everything around it slows down.
 fn reference(c: &mut Criterion, end: &str) {
-    /// A node's label and value are short, and a set rebuilds a handful of nodes.
+    /// The same workload `benches/cells.rs` uses, so the two groups read one machine the
+    /// same way. It models neither a dictionary node nor a cell: what it has to share with
+    /// them is a run of small allocations and a walk over the bytes in them.
     const BLOCKS: u8 = 45;
     const EACH: usize = 35;
 
