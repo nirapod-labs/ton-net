@@ -14,4 +14,5 @@ mod hashing;
 mod hostile;
 mod mainnet_boc;
 mod merkle;
+mod roundtrip;
 mod whole_block;
