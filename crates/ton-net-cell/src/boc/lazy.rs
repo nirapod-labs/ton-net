@@ -81,8 +81,9 @@ impl LazyBoc {
     ///
     /// This is [`built_count`](LazyBoc::built_count) plus whatever work was repeated, so the
     /// two are equal exactly when nothing has been built more than once. A rebuilt cell is
-    /// equal to the one it replaced and takes the same place, so this is the only thing that
-    /// tells the difference.
+    /// equal to the one it replaced and takes the same place, so no count of cells held says
+    /// it happened. The other thing that does is [`Cell::ptr_eq`](crate::Cell::ptr_eq), which
+    /// asks whether two handles are one cell rather than two equal ones.
     #[must_use]
     pub fn builds_run(&self) -> usize {
         self.build.borrow().builds()
@@ -280,8 +281,7 @@ mod tests {
         let lazy = LazyBoc::open(&bag).expect("the header reads");
         let first = lazy.cell(1).expect("builds");
         let again = lazy.cell(1).expect("the kept cell");
-        // Equal is not enough: a rebuilt cell is equal to the one it replaced. The same cell
-        // is the claim, so identity is what is asserted.
+        // Equal is not enough: a rebuilt cell is equal to the one it replaced.
         assert!(first.ptr_eq(&again), "the second ask rebuilt the cell");
         assert_eq!(lazy.builds_run(), 1, "and did so without building anything");
         assert_eq!(again.data(), &[0xcd]);
