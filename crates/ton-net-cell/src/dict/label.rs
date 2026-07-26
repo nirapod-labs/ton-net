@@ -391,16 +391,14 @@ pub(super) fn store_label<R: BitRun + ?Sized>(
 
     let short = 2 * bits + 2;
     let long = 2 + width + bits;
-    let repeated = if len == 0 {
-        // An empty label spells no bit to repeat, so the repeated form is not on offer.
-        u32::MAX
+    // The repeated form is on offer for an empty label as well, a bit run no times at all,
+    // and costs 3 + width bits there. It never wins: the short form spells an empty label in
+    // two, under that whatever the width, so an empty label takes the short form below.
+    let first = label.bit(0);
+    let repeated = if (1..label.len()).all(|index| label.bit(index) == first) {
+        3 + width
     } else {
-        let first = label.bit(0);
-        if (1..label.len()).all(|index| label.bit(index) == first) {
-            3 + width
-        } else {
-            u32::MAX
-        }
+        u32::MAX
     };
 
     if short <= long && short <= repeated {
