@@ -12,7 +12,7 @@
 //! computed once, at the end, from what was stored. There is no way to set a hash, and
 //! no way to reach the constructor that would let one disagree with its contents.
 
-use crate::cell::{Cell, CellType, Refs, MAX_BITS, MAX_REFS};
+use crate::cell::{Cell, CellType, Payload, Refs, MAX_BITS, MAX_REFS};
 use crate::dict::Dict;
 use crate::error::CellError;
 use crate::slice::Slice;
@@ -470,7 +470,13 @@ impl Builder {
                 *last |= 1 << (7 - (self.bits % 8));
             }
         }
-        Cell::from_parts(self.data, self.bits, self.refs, cell_type, level_mask)
+        Cell::from_parts(
+            Payload::owned(self.data)?,
+            self.bits,
+            self.refs,
+            cell_type,
+            level_mask,
+        )
     }
 }
 

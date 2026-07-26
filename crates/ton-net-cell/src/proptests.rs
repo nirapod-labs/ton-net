@@ -27,7 +27,7 @@ use proptest::prelude::*;
 
 use crate::{
     boc::{bit_len, parse_boc, serialize_boc},
-    cell::{Cell, CellType, Refs},
+    cell::{Cell, CellType, Payload, Refs},
 };
 
 /// The largest data payload a cell can hold, in bytes.
@@ -45,7 +45,8 @@ fn ordinary(data: Vec<u8>, bits: u16, refs: Vec<Cell>) -> Cell {
     for child in refs {
         held.push(child).unwrap();
     }
-    Cell::from_parts(data, bits, held, CellType::Ordinary, 0).unwrap()
+    let payload = Payload::owned(data).unwrap();
+    Cell::from_parts(payload, bits, held, CellType::Ordinary, 0).unwrap()
 }
 
 /// Data bytes together with the bit count they represent.

@@ -3,19 +3,26 @@
 
 //! Reading a bag's cells into a graph, once its header has been checked.
 
+use std::sync::Arc;
+
 use super::{bit_len, read_header, Header, Reader, MAX_DEPTH};
-use crate::cell::{summarize, Cell, CellType, Identity, Refs, MAX_BITS, MAX_REFS};
+use crate::cell::{summarize, Cell, CellType, Identity, Payload, Refs, Span, MAX_BITS, MAX_REFS};
 use crate::error::CellError;
 
-/// A cell as read from the bag, with its references still as indices.
+/// A cell as read from the bag, with its references still as indices and its bytes still
+/// in the bag.
+///
+/// The data and the stored hashes are where they were rather than copied out. A bag is one
+/// run of bytes and every cell's contents are already inside it, so a read that copies them
+/// out pays an allocation and a copy per cell for bytes it is holding either way.
 struct RawCell {
-    data: Vec<u8>,
+    data: Span,
     bits: u16,
     refs: Vec<usize>,
     cell_type: CellType,
     level_mask: u8,
-    /// The hashes and depths the cell carried ahead of its data, when it carried them.
-    stored: Option<Vec<u8>>,
+    /// Where the hashes and depths the cell carried ahead of its data sit, when it carried them.
+    stored: Option<Span>,
 }
 
 /// Parses a bag of cells and returns its root cells.
@@ -79,17 +86,21 @@ fn read_raw(reader: &mut Reader<'_>, header: &Header) -> Result<Vec<RawCell>, Ce
         // the cell's own contents give, so a bag that describes itself wrongly is refused.
         let stored = if d1 & 16 != 0 {
             let per_level = level_mask.count_ones() as usize + 1;
-            Some(reader.take(per_level * (32 + 2))?.to_vec())
+            let at = reader.consumed();
+            let taken = reader.take(per_level * (32 + 2))?;
+            Some(Span::new(at, taken.len())?)
         } else {
             None
         };
 
-        let data = reader.take(usize::from((d2 >> 1) + (d2 & 1)))?.to_vec();
-        let bits = bit_len(d2, &data)?;
+        let at = reader.consumed();
+        let data = reader.take(usize::from((d2 >> 1) + (d2 & 1)))?;
+        let span = Span::new(at, data.len())?;
+        let bits = bit_len(d2, data)?;
         if bits > MAX_BITS {
             return Err(CellError::Malformed("cell holds more than 1023 bits"));
         }
-        let cell_type = classify(exotic, &data, level_mask, ref_count)?;
+        let cell_type = classify(exotic, data, level_mask, ref_count)?;
 
         let mut refs = Vec::with_capacity(ref_count);
         for _ in 0..ref_count {
@@ -106,7 +117,7 @@ fn read_raw(reader: &mut Reader<'_>, header: &Header) -> Result<Vec<RawCell>, Ce
         }
 
         raw.push(RawCell {
-            data,
+            data: span,
             bits,
             refs,
             cell_type,
@@ -160,6 +171,9 @@ pub(super) fn read_and_build(
     header: &Header,
 ) -> Result<Vec<Cell>, CellError> {
     let count = header.count;
+    // One buffer for the bag, shared by every cell built from it, in place of a copy of
+    // each cell's bytes.
+    let payload: Arc<[u8]> = Arc::from(reader.bytes);
     let raw = read_raw(reader, header)?;
     check_depths(&raw, count)?;
 
@@ -174,14 +188,14 @@ pub(super) fn read_and_build(
             refs.push(child.clone())?;
         }
         let cell = Cell::from_parts(
-            raw_cell.data.clone(),
+            Payload::window(&payload, raw_cell.data)?,
             raw_cell.bits,
             refs,
             raw_cell.cell_type,
             raw_cell.level_mask,
         )?;
         if let Some(stored) = &raw_cell.stored {
-            check_stored(cell.identity(), stored)?;
+            check_stored(cell.identity(), stored.of(&payload)?)?;
         }
         built.push(cell);
     }
@@ -204,6 +218,8 @@ pub(super) fn verify_roots(
     header: &Header,
 ) -> Result<Vec<[u8; 32]>, CellError> {
     let count = header.count;
+    // Nothing is built here, so the bag's own bytes serve and no buffer is taken.
+    let bytes = reader.bytes;
     let raw = read_raw(reader, header)?;
     check_depths(&raw, count)?;
 
@@ -225,7 +241,7 @@ pub(super) fn verify_roots(
                 .get(..raw_cell.refs.len())
                 .ok_or(CellError::BadReference)?;
             summarize(
-                &raw_cell.data,
+                raw_cell.data.of(bytes)?,
                 raw_cell.bits,
                 children,
                 raw_cell.cell_type,
@@ -233,7 +249,7 @@ pub(super) fn verify_roots(
             )?
         };
         if let Some(stored) = &raw_cell.stored {
-            check_stored(&identity, stored)?;
+            check_stored(&identity, stored.of(bytes)?)?;
         }
         identities.push(identity);
     }
@@ -249,6 +265,9 @@ pub(super) fn verify_roots(
 /// after cell without going back to the bytes.
 pub(super) struct RawCells {
     cells: Vec<RawCell>,
+    /// The bag the spans above are windows on, kept because the cells built from it point
+    /// into it.
+    payload: Arc<[u8]>,
 }
 
 impl RawCells {
@@ -264,9 +283,10 @@ impl RawCells {
 ///
 /// As [`read_and_build`], for the cells it reads.
 pub(super) fn read_cells(reader: &mut Reader<'_>, header: &Header) -> Result<RawCells, CellError> {
+    let payload: Arc<[u8]> = Arc::from(reader.bytes);
     let cells = read_raw(reader, header)?;
     check_depths(&cells, header.count)?;
-    Ok(RawCells { cells })
+    Ok(RawCells { cells, payload })
 }
 
 /// The cells built from a bag so far, and the scratch a repeated build reuses.
@@ -371,14 +391,14 @@ pub(super) fn build_at(raw: &RawCells, state: &mut Build, index: usize) -> Resul
             refs.push(child.clone())?;
         }
         let cell = Cell::from_parts(
-            raw_cell.data.clone(),
+            Payload::window(&raw.payload, raw_cell.data)?,
             raw_cell.bits,
             refs,
             raw_cell.cell_type,
             raw_cell.level_mask,
         )?;
         if let Some(stored) = &raw_cell.stored {
-            check_stored(cell.identity(), stored)?;
+            check_stored(cell.identity(), stored.of(&raw.payload)?)?;
         }
         if let Some(slot) = state.built.get_mut(position) {
             *slot = Some(cell);

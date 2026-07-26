@@ -18,6 +18,7 @@ mod dump;
 mod exotic;
 mod hash;
 mod level;
+mod payload;
 mod refs;
 
 #[cfg(feature = "json")]
@@ -28,6 +29,7 @@ pub use exotic::CellType;
 use hash::compute;
 pub use hash::Identity;
 use level::{bits_descriptor, hash_index, level_of, refs_descriptor};
+pub use payload::{Payload, Span};
 pub use refs::Refs;
 
 /// The most data bits a cell may hold.
@@ -66,7 +68,7 @@ pub struct Cell {
 }
 
 struct Inner {
-    data: Vec<u8>,
+    data: Payload,
     bits: u16,
     refs: Refs,
     cell_type: CellType,
@@ -83,7 +85,7 @@ impl Cell {
     /// hashes and depths its level mask claims, or if the level mask is not the one the
     /// cell's kind and children imply.
     pub(crate) fn from_parts(
-        data: Vec<u8>,
+        data: Payload,
         bits: u16,
         refs: Refs,
         cell_type: CellType,
@@ -100,7 +102,7 @@ impl Cell {
         let children = children
             .get(..refs.as_slice().len())
             .ok_or(CellError::Malformed("cell has more than four references"))?;
-        let identity = summarize(&data, bits, children, cell_type, level_mask)?;
+        let identity = summarize(data.as_slice(), bits, children, cell_type, level_mask)?;
         Ok(Self {
             inner: Arc::new(Inner {
                 data,
@@ -119,7 +121,7 @@ impl Cell {
     /// is the form the representation hash is taken over.
     #[must_use]
     pub fn data(&self) -> &[u8] {
-        &self.inner.data
+        self.inner.data.as_slice()
     }
 
     /// The number of data bits the cell holds, at most 1023.
@@ -454,14 +456,43 @@ mod tests {
         assert_eq!(reference.depth(0), Some(child.depth()));
     }
 
+    /// The layout, asserted exactly.
+    ///
+    /// A cell costs one allocation, and every part of it that used to cost another is now a
+    /// field of a fixed size. A field that grows back into a vector, or an identity that
+    /// stops fitting beside a hash, shows up here rather than in a memory profile a year
+    /// later. The sizes are the ones a 64-bit target gives; a narrower one has its own.
     #[test]
-    fn an_ordinary_cell_carries_no_extra_hashes() {
-        // The layout the crate is built on: a cell outside a proof has one hash and pays
-        // nothing for the three it will never have.
-        assert_eq!(size_of::<Cell>(), size_of::<usize>(), "a cell is a pointer");
-        assert!(
-            size_of::<Identity>() <= 48,
-            "an identity is inline, not a pair of vectors"
+    #[cfg(target_pointer_width = "64")]
+    fn a_cell_is_one_allocation_and_stays_one() {
+        assert_eq!(size_of::<Cell>(), 8, "a cell is a pointer");
+        assert_eq!(
+            size_of::<Payload>(),
+            24,
+            "a buffer shared with the bag, and a window on it"
         );
+        assert_eq!(
+            size_of::<Refs>(),
+            40,
+            "four references and the tag that counts them"
+        );
+        assert_eq!(
+            size_of::<Identity>(),
+            48,
+            "a hash, its depth, the level mask, and a pointer to the levels above"
+        );
+        assert_eq!(
+            size_of::<Inner>(),
+            120,
+            "all of it, in the one allocation a cell costs"
+        );
+    }
+
+    #[test]
+    fn an_ordinary_cell_carries_one_hash_and_no_more() {
+        let cell = cell_of(0xAB);
+        assert_eq!(cell.level_mask(), 0);
+        assert_eq!(cell.identity().count(), 1);
+        assert_eq!(cell.identity().hash(1), None, "and pays for no others");
     }
 }
