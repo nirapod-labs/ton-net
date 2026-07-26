@@ -345,6 +345,12 @@ type WaveOutcomes<T> = Vec<(usize, Result<Option<T>, CellError>)>;
 /// The workers read the cells already held and write nothing, so what comes back is the
 /// same list of outcomes the wave would have produced here, against the index each came
 /// from.
+///
+/// A wave with no cells is refused along with the widths one worker takes. The share
+/// below is the width divided among the workers, which is zero cells there, and a wave cut
+/// into shares of nothing has no last share to stop at. Nothing arrives here that way from
+/// [`run_wave`], since [`workers_for`] answers one for a width of zero, so what the guard
+/// covers is a caller passing the worker count itself.
 #[cfg(feature = "parallel")]
 fn split_across_workers<T, F>(
     wave: &[usize],
@@ -356,7 +362,7 @@ where
     T: Send + Sync,
     F: Fn(usize, &[Option<T>]) -> Result<Option<T>, CellError> + Sync,
 {
-    if workers < 2 {
+    if workers < 2 || wave.is_empty() {
         return None;
     }
     let each = wave.len().div_ceil(workers);
