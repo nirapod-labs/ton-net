@@ -911,6 +911,40 @@ mod tests {
     }
 
     #[test]
+    fn a_merged_edge_spells_the_survivor_s_own_label_after_the_branch_bit() {
+        // The merge above holds where the survivor's label is empty, which says nothing
+        // about the order the bits go back in. Keys 100 and 101100 part on the third bit and
+        // leave the survivor a label of 100 past the fork, a run that reads differently
+        // backwards: the merged edge has to spell the fork's label, then the branch bit,
+        // then that label, or the key that comes back is not the key that was stored.
+        let mut dict = PfxDict::new(8).expect("a dictionary");
+        dict.set(&[0b1000_0000], 3, &val(0xa1)).expect("set 100");
+        dict.set(&[0b1011_0000], 6, &val(0xb2)).expect("set 101100");
+
+        assert!(dict.remove(&[0b1000_0000], 3).expect("remove 100"));
+        let Lookup::Found(entry) = dict.get(&[0b1011_0000], 6).expect("query") else {
+            panic!("101100 remains, under the key it was stored with")
+        };
+        assert_eq!(value_of(&entry), 0xb2);
+        let walked: Vec<(Vec<u8>, u16)> = dict
+            .iter()
+            .map(|item| {
+                let (key, len, _) = item.expect("an entry");
+                (key, len)
+            })
+            .collect();
+        assert_eq!(walked, vec![(vec![0b1011_0000], 6)]);
+
+        let mut only = PfxDict::new(8).expect("a dictionary");
+        only.set(&[0b1011_0000], 6, &val(0xb2)).expect("set 101100");
+        assert_eq!(
+            dict.root().map(Cell::repr_hash),
+            only.root().map(Cell::repr_hash),
+            "the merged edge is the one 101100 alone builds"
+        );
+    }
+
+    #[test]
     fn removing_the_only_key_empties_the_dictionary() {
         let mut dict = PfxDict::new(8).expect("a dictionary");
         dict.set(&[0b1100_0000], 2, &val(0x01)).expect("set 11");
