@@ -1174,6 +1174,17 @@ mod tests {
                 waved_hashes, one_pass_hashes,
                 "the plan a bag was verified under reached a caller"
             );
+            // The two reads of the same bytes, held to the same refusal. A caller that
+            // reads a bag for its identity alone runs the second, and a bag it accepts
+            // that the first refuses is a malformed cell accepted, so this is the
+            // comparison across the two paths rather than across the two plans. It has
+            // something to say on the bags the pass refuses and is an equality of
+            // absences on the rest.
+            assert_eq!(
+                waved.as_ref().err(),
+                waved_hashes.as_ref().err(),
+                "building a bag and verifying it refused it differently"
+            );
 
             finalized += 1;
             if waved.is_err() {
