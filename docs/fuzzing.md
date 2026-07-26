@@ -55,9 +55,14 @@ default. An hour at that rate is around two million cases per target. `--nocaptu
 shows the per-target report of how many cases got past the reader, which is the only way to
 see what a run covered rather than only that it finished.
 
-The scheduled job in CI runs a million cases per target nightly, next to the mutation
-testing and for the same reason: the answer does not change between two commits on the same
-day.
+The budget is a number of cases rather than a switch. A value that does not parse as one
+falls back to the gate budget, and zero is floored at one case. A run of no cases would
+clear the floor on how many got past the reader as well, and report a battery that read no
+case at all as a battery that passed.
+
+The scheduled job in CI runs a million cases per target nightly, half an hour at the rate
+above, next to the mutation testing and for the same reason: the answer does not change
+between two commits on the same day.
 
 Run the long campaign in the default profile rather than `--release`. Debug builds check arithmetic
 overflow, and an overflow on a length read off the wire is one of the failures worth
@@ -88,20 +93,28 @@ Each holds the reader to the properties that make the boundary sound, rather tha
 having survived, which the test runner reports anyway.
 
 - **`bag_of_cells`** runs `parse_boc` over the whole case. What parses has to sit inside
-  `MAX_CELLS`, `MAX_DEPTH` over the reference graph, `MAX_BITS` and `MAX_REFS`, carry
-  exactly the bytes its bit count needs, and hold to at most one cell per two bytes of
-  input, which is the form the no-unbounded-allocation rule takes here: every cell costs
-  its two descriptor bytes, and the header reader refuses a count the remaining bytes could
-  not hold before it allocates for that count. What parses then round trips, to the same
-  root representation hashes and to the same bytes twice running, for every bag but the one
-  shape named below.
+  `MAX_CELLS` and inside `MAX_DEPTH` over the reference graph, and each of its cells has to
+  carry exactly the bytes its bit count needs. `MAX_BITS` and `MAX_REFS` are not checked,
+  because neither is a bound the reader gets the chance to miss. `bit_len` in
+  `crates/ton-net-cell/src/boc.rs` halves a descriptor byte, multiplies by eight and adds
+  seven at its widest, which is `MAX_BITS` at a descriptor of 255, and `Refs` in
+  `crates/ton-net-cell/src/cell/refs.rs` is an enum whose widest variant holds `MAX_REFS`
+  cells. What parses then round trips, to the same root representation hashes and to the
+  same bytes twice running, for every bag but the one shape named below.
 
-- **`header`** opens the same case through `BocView` and checks the counts it reports
-  against the same bounds. It then reads the bag four ways, through `parse_boc`,
-  `BocView::materialize`, `BocView::verify` and `BocView::cell`, and requires the same
-  answer or the same error down all four. Those paths share a header reader and a cell
-  reader and diverge in what they keep, so an input where they disagree is an input where
-  one of them has a bound the others do not.
+- **`header`** opens the same case through `BocView` and checks what the header states about
+  itself before a cell is built: a cell count inside `MAX_CELLS`, at least one root and no
+  more roots than cells, a cell area no larger than the bag, and at most one cell per two
+  bytes the bag carries. That last is the form the no-unbounded-allocation rule takes here.
+  Every cell costs its two descriptor bytes, so a count the remaining bytes could not hold
+  is a count nothing behind it can honour, and the header reader refuses one before it
+  allocates for it. This is the door that can see that: counting the cells of a bag that
+  already parsed cannot, because a parsed bag has read those two bytes per cell already. It
+  then reads the bag four ways, through `parse_boc`, `BocView::materialize`,
+  `BocView::verify` and `BocView::cell`, and requires the same answer or the same error down
+  all four. Those paths share a header reader and a cell reader and diverge in what they
+  keep, so an input where they disagree is an input where one of them has a bound the others
+  do not.
 
 - **`slice_reads`** drives a `Slice` over the cells of a bag that parsed, with a read
   script taken from the case's own bytes. A read either moves the cursor forward inside the
@@ -130,13 +143,18 @@ classification and the stored-hash check at all.
 
 Around those sit the two smallest bags that parse, the four combinations of the offset
 index and the trailing checksum written out so both are reached whatever the fixtures
-happen to carry, and one bag built by hand whose cells share their children.
+happen to carry, and three bags built by hand. One has cells that share their children. The
+other two stand one step past a published limit, one cell past `MAX_CELLS` and one
+reference past `MAX_DEPTH`. A captured bag is nowhere near either, and a limit no case
+reaches is a limit no check has to hold: without those two, removing either limit from the
+crate leaves all five targets here green.
 
-A case is built four ways. Bytes with nothing behind them and bytes behind the magic number
+A case is built five ways. Bytes with nothing behind them and bytes behind the magic number
 cover the early refusals. A header written field by field puts a chosen reference size,
 offset size, cell count, root count and cell-area size in front of real cell bytes, which
 is where the accounting between those five is decided rather than where each is
-range-checked. A corpus seed put through byte-level edits covers the rest.
+range-checked. A seed as it stands is what reaches the two bags built to stand on a limit,
+which any edit moves off. A corpus seed put through byte-level edits covers the rest.
 
 Two repairs run after an edit, each most of the time and neither always. A bag states how
 many bytes its cells take and the reader holds it to that statement, so an edit that
@@ -169,8 +187,19 @@ A dictionary walk is not bounded by the size of the bag it walks. References poi
 forward, which keeps the graph acyclic, and it does not stop two branches of a fork naming
 the same next cell. A chain of such forks is a bag of `n` cells holding `2^(n-1)` entries,
 so a walk over one runs for a length the bag's own size says nothing about. The harness
-therefore caps the walk itself, and the corpus carries a small bag of that shape so the
-capped path is exercised.
+therefore caps the walk at 4,096 entries, and the corpus carries a bag of that shape:
+thirty-three cells, holding 4,294,967,296 entries when opened at a key thirty-two bits wide.
+
+How long a walk over it runs is decided by the key width the target draws rather than by the
+bag. A walk spends one key bit per level, so a width shorter than the chain stops above the
+leaf, a width equal to it reaches the leaf, and a width longer runs out of levels and errors.
+The widths a target draws from are a fixed list, and that is why the chain is thirty-two
+levels: thirty-two is on the list, and it leaves the upper half of the chain past the cap at
+the next width down too.
+Measured at the default seed on the machine this was written on, the longest walk is 4,096
+entries, the cap, at the gate budget of fifteen hundred cases per target, with seventy-eight
+walks stopped there; at forty thousand cases per target the longest is the same 4,096, with
+1,887 stopped. The cap binds. It is not a budget waiting for a case that reaches it.
 
 `decompress` returns a buffer no longer than the length the compressed input's prefix
 names, and not necessarily one that long. The decoder underneath sizes its buffer from the
@@ -182,8 +211,10 @@ The round trip is checked for every bag except one, and that exception is a defe
 than a property. A bag's root list may name one cell twice, so a bag can carry more root
 entries than it has distinct cells; `serialize_boc` writes one root entry per root it was
 handed against a cell count of the distinct cells it walked, and a header stating more
-roots than cells is refused on the way back in. The `bag_of_cells` target names the case it
-covers rather than covering a case it would fail, and the comment beside it says so.
+roots than cells is refused on the way back in. The defect is pinned as its own case in
+`crates/ton-net-cell/tests/cell/roundtrip.rs`, which holds the sixteen byte bag that
+reproduces it and the two directions a fix could take. The `bag_of_cells` target only states
+which bags its round-trip check covers.
 
 ## Adding a target
 

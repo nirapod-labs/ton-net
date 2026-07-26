@@ -29,11 +29,17 @@
 //! Not that the process survived, which the test runner gives away. Each target holds the
 //! reader to the properties that make the boundary sound:
 //!
-//! - What parses stays inside the limits the crate publishes: `MAX_CELLS`, `MAX_DEPTH`,
-//!   `MAX_BITS` and `MAX_REFS`, and a cell's stored bytes are the ones its bit count needs.
-//! - What parses is bounded by its own input. A bag reaches at most one cell per two bytes
-//!   it carries, because the header reader refuses a count the remaining bytes could not
-//!   hold before it allocates for that count.
+//! - What parses stays inside the two limits a reader could miss: `MAX_CELLS`, which a
+//!   header states, and `MAX_DEPTH` over the reference graph it builds. The corpus carries a
+//!   bag one past each, so removing either check in the crate fails a target here. A cell's
+//!   stored bytes are also the ones its bit count needs. `MAX_BITS` and `MAX_REFS` are not
+//!   asserted: `bit_len` in `src/boc.rs` is a byte halved and multiplied by eight plus at
+//!   most seven, which is `MAX_BITS` at a descriptor of 255, and `Refs` in `src/cell/refs.rs`
+//!   is an enum whose widest variant holds `MAX_REFS`. Neither is a bound a reader has the
+//!   chance to get wrong.
+//! - A header is bounded by its own input. It states at most one cell per two bytes the bag
+//!   carries, because the header reader refuses a count the remaining bytes could not hold
+//!   before it allocates for that count.
 //! - The doors agree. `parse_boc`, `BocView::materialize`, `BocView::verify` and
 //!   `BocView::cell` read the same bag through four paths, and every input has to reach the
 //!   same answer or the same error down all four.
@@ -61,7 +67,9 @@ mod targets;
 use std::collections::HashSet;
 use std::fmt::Write as _;
 
-use ton_net_cell::{parse_boc, serialize_boc_with, BocOptions, Builder, Cell};
+use ton_net_cell::{
+    parse_boc, serialize_boc_with, BocOptions, Builder, Cell, MAX_CELLS, MAX_DEPTH,
+};
 
 use crate::whole_block::unhex;
 
@@ -120,9 +128,16 @@ const REACH_DIVISOR: usize = 20;
 
 /// How many levels the shared-subtree dictionary seed carries.
 ///
-/// Each level doubles the entries a walk over it visits, so this is the largest value that
-/// stays cheap. `docs/fuzzing.md` records what the shape is for and what it showed.
-const SHARED_LEVELS: usize = 12;
+/// A walk spends one key bit per level and doubles the entries it visits at each, so how long
+/// a walk over this shape runs is decided by the key width the dictionary target draws rather
+/// than by the shape alone. A width shorter than the chain stops above the leaf with two
+/// entries for every level it did descend, a width equal to the chain reaches the leaf, and a
+/// width longer runs out of levels and errors. The value is therefore one of the widths the
+/// target draws from, and it is long enough that the upper half of the chain is still past
+/// the cap at the next width down, which is what makes a capped walk something a gate run
+/// meets rather than something a long one might. `docs/fuzzing.md` records the lengths
+/// measured.
+const SHARED_LEVELS: usize = 32;
 
 /// A deterministic stream of fuzz decisions.
 ///
@@ -298,6 +313,8 @@ fn corpus() -> Vec<Vec<u8>> {
         ONE_CELL.to_vec(),
         TWO_CELLS.to_vec(),
         shared_subtree_dictionary(SHARED_LEVELS),
+        one_cell_past_the_cell_limit(),
+        one_reference_past_the_depth_limit(),
     ];
 
     if let Ok(roots) = parse_boc(&unhex(ACCOUNT_PROOF)) {
@@ -312,6 +329,63 @@ fn corpus() -> Vec<Vec<u8>> {
     seeds
 }
 
+/// A bag stating one cell more than `MAX_CELLS`, carrying the two descriptor bytes each of
+/// them costs.
+///
+/// Written out at the length the count claims rather than stated short. A bag stating this
+/// count and carrying no cell bytes would be refused either way: the header reader also
+/// refuses a count the remaining bytes could not hold, so with the limit taken out the short
+/// bag is still refused and no target here notices. The bytes are what leave the limit itself
+/// as what stands between the count and the allocation it sizes. Without this seed, taking
+/// the limit out leaves all five targets green.
+fn one_cell_past_the_cell_limit() -> Vec<u8> {
+    let count = MAX_CELLS + 1;
+    // No references, no data, and no stored hashes, which is the smallest a cell encodes to.
+    let cells = vec![0u8; count * 2];
+
+    let mut bag = Vec::from(MAGIC);
+    bag.push(0x03); // three bytes per reference index, no index, no checksum
+    bag.push(0x03); // three bytes per offset
+    push_be(&mut bag, u64::try_from(count).unwrap_or(0), 3);
+    push_be(&mut bag, 1, 3); // one root
+    push_be(&mut bag, 0, 3); // no absent cells
+    push_be(&mut bag, u64::try_from(cells.len()).unwrap_or(0), 3);
+    push_be(&mut bag, 0, 3); // the root is cell zero
+    bag.extend_from_slice(&cells);
+    bag
+}
+
+/// A bag whose cells form one chain, `MAX_DEPTH + 1` references from the root to the leaf.
+///
+/// Depth is counted in references rather than cells, so a chain one past the limit is
+/// `MAX_DEPTH + 2` cells. The limit is what keeps a later walk or a drop off the stack, and
+/// no captured bag comes near it: without this seed, taking the limit out leaves all five
+/// targets green.
+fn one_reference_past_the_depth_limit() -> Vec<u8> {
+    let links = MAX_DEPTH + 1;
+    let count = links + 1;
+
+    let mut cells: Vec<u8> = Vec::new();
+    for index in 0..links {
+        // One reference, ordinary, no data.
+        cells.extend_from_slice(&[0x01, 0x00]);
+        push_be(&mut cells, u64::try_from(index + 1).unwrap_or(0), 2);
+    }
+    // The leaf, with nothing under it.
+    cells.extend_from_slice(&[0x00, 0x00]);
+
+    let mut bag = Vec::from(MAGIC);
+    bag.push(0x02); // two bytes per reference index, no index, no checksum
+    bag.push(0x02); // two bytes per offset
+    push_be(&mut bag, u64::try_from(count).unwrap_or(0), 2);
+    push_be(&mut bag, 1, 2); // one root
+    push_be(&mut bag, 0, 2); // no absent cells
+    push_be(&mut bag, u64::try_from(cells.len()).unwrap_or(0), 2);
+    push_be(&mut bag, 0, 2); // the root is cell zero
+    bag.extend_from_slice(&cells);
+    bag
+}
+
 /// A bag whose cells form a chain of dictionary forks, each pointing at the next cell twice.
 ///
 /// Every cell of the chain is a fork with an empty label and two references, and both
@@ -321,7 +395,7 @@ fn corpus() -> Vec<Vec<u8>> {
 ///
 /// It is in the corpus because a decode boundary is a place where the cost of reading has
 /// to follow the size of the input, and this is the shape where it does not.
-/// `docs/fuzzing.md` records what a walk over it costs.
+/// `docs/fuzzing.md` records how long a walk over it runs against the cap that stops it.
 fn shared_subtree_dictionary(levels: usize) -> Vec<u8> {
     let mut cells: Vec<u8> = Vec::new();
     for index in 0..levels {
@@ -400,7 +474,15 @@ fn boc_case(rng: &mut Rng, corpus: &[Vec<u8>]) -> Vec<u8> {
             out
         }
         2 | 3 => header_shaped(rng, corpus),
-        4..=9 => derived(rng, corpus),
+        4 => {
+            // A seed as it stands. Every other branch changes what it was handed, and a
+            // seed built to sit one past a limit is a seed any change moves off that limit:
+            // the bag one reference past `MAX_DEPTH` reaches the depth check only while its
+            // chain is intact, and an edit anywhere along it breaks a link instead.
+            let pick = rng.below(corpus.len());
+            corpus.get(pick).cloned().unwrap_or_default()
+        }
+        5..=9 => derived(rng, corpus),
         _ => edited(rng, corpus),
     };
     // A bag states its own length and carries its own checksum, and an edit breaks both
@@ -578,10 +660,13 @@ fn header_shaped(rng: &mut Rng, corpus: &[Vec<u8>]) -> Vec<u8> {
         2 => usize::MAX,
         _ => rng.below(8),
     };
-    let roots = if rng.below(4) == 0 {
-        rng.below(1 << 16)
-    } else {
-        1 + rng.below(3)
+    // Zero is chosen outright rather than left to the wide draw below it. A bag naming no
+    // root is refused on its own line in the header reader, and a draw under 2^16 lands on
+    // zero once in sixty-five thousand, which is not once in a gate run.
+    let roots = match rng.below(4) {
+        0 => 0,
+        1 => rng.below(1 << 16),
+        _ => 1 + rng.below(3),
     };
     let cell_area = if rng.below(4) == 0 {
         rng.below(1 << 24)
@@ -621,12 +706,16 @@ fn header_shaped(rng: &mut Rng, corpus: &[Vec<u8>]) -> Vec<u8> {
     bag
 }
 
-/// How many cases a target runs.
+/// How many cases a target runs, floored at one.
+///
+/// A budget of zero would run no case, and the floor on how many got past the reader would
+/// then be zero as well, so the battery would pass having read no case at all. A number the
+/// environment names is a budget, not a way to turn the battery off.
 fn iterations() -> usize {
     let Ok(text) = std::env::var(ITERATIONS_VAR) else {
         return GATE_ITERATIONS;
     };
-    text.trim().parse().unwrap_or(GATE_ITERATIONS)
+    text.trim().parse().unwrap_or(GATE_ITERATIONS).max(1)
 }
 
 /// The seed the cases are generated from.

@@ -18,7 +18,7 @@ use std::collections::HashMap;
 
 use ton_net_cell::{
     parse_boc, serialize_boc, AugDict, Augmentation, BocView, Builder, Cell, CellError, Dict,
-    PfxDict, Slice, MAX_BITS, MAX_CELLS, MAX_DEPTH, MAX_REFS,
+    PfxDict, Slice, MAX_CELLS, MAX_DEPTH,
 };
 
 use super::{distinct_cells, Rng};
@@ -44,7 +44,7 @@ const KEY_WIDTHS: [u16; 10] = [0, 1, 7, 8, 15, 16, 32, 64, 256, 267];
 /// Nothing in the crate bounds this walk, and a bag whose forks share one child names two
 /// entries per cell, so a few hundred bytes describe a walk no run finishes. The cap is the
 /// harness holding itself to a budget the code under test does not impose; `docs/fuzzing.md`
-/// records the measurement.
+/// records how long the longest walk in a run gets before this stops it.
 const WALK_CAP: usize = 4_096;
 
 /// The longest chain of references under `roots`, which is the number `MAX_DEPTH` bounds.
@@ -86,9 +86,9 @@ fn reference_depth(roots: &[Cell]) -> usize {
 
 /// `parse_boc` over arbitrary bytes, the top of the untrusted path.
 ///
-/// What is checked is the shape of what came back: the published limits, the bound the
-/// input length puts on the graph, and the round trip that says the bag can be written
-/// again as the same cells.
+/// What is checked is the shape of what came back: the two published limits a reader could
+/// miss, the stored bytes of each cell against its bit count, and the round trip that says
+/// the bag can be written again as the same cells.
 pub(super) fn bag_of_cells(bytes: &[u8]) -> bool {
     let Ok(roots) = parse_boc(bytes) else {
         return false;
@@ -101,33 +101,19 @@ pub(super) fn bag_of_cells(bytes: &[u8]) -> bool {
         "a bag of {} cells parsed past the {MAX_CELLS} cell limit",
         cells.len()
     );
-    // Every cell costs at least its two descriptor bytes, and the header reader refuses a
-    // count the remaining bytes could not hold before it allocates for that count. So a
-    // bag cannot expand to more cells than half its own length, which is the form the
-    // no-unbounded-allocation rule takes at this boundary.
-    assert!(
-        cells.len() * 2 <= bytes.len(),
-        "{} bytes parsed to {} cells, more than two bytes each",
-        bytes.len(),
-        cells.len()
-    );
     let deepest = reference_depth(&roots);
     assert!(
         deepest <= MAX_DEPTH,
         "a chain of {deepest} references parsed past the {MAX_DEPTH} depth limit"
     );
 
+    // A cell's bit count and reference count are bounded by the types that carry them rather
+    // than by a check the reader performs: `bit_len` reads a byte, halves it, multiplies by
+    // eight and adds at most seven, which lands on `MAX_BITS` at its widest, and a cell holds
+    // its references in an enum whose widest variant has `MAX_REFS` slots. Asserting either
+    // here would be asserting arithmetic, so what is left is the one property of a cell's
+    // stored bytes that the reader does decide.
     for cell in &cells {
-        assert!(
-            cell.bit_len() <= MAX_BITS,
-            "a cell of {} bits parsed past the {MAX_BITS} bit limit",
-            cell.bit_len()
-        );
-        assert!(
-            cell.refs().len() <= MAX_REFS,
-            "a cell parsed with {} references, past the {MAX_REFS} the model allows",
-            cell.refs().len()
-        );
         // The stored bytes are the ones the bit count needs and no more, so a cell carries
         // no byte the representation hash covers and the bit count does not account for.
         assert_eq!(
@@ -140,13 +126,12 @@ pub(super) fn bag_of_cells(bytes: &[u8]) -> bool {
     let written = serialize_boc(&roots).expect("a bag that parsed serializes");
 
     // The round trip is checked for every bag but one shape, and the exception is a defect
-    // rather than a property. A bag's root list may name one cell twice, so a bag can have
-    // more root entries than it has distinct cells. `serialize_boc` writes one root entry
-    // per root it was handed and a cell count of the distinct cells it walked, which leaves
-    // the written header stating more roots than cells, and a root count above the cell
-    // count is the one thing `read_header` refuses outright. The fuzzer reached it from a
-    // sixteen byte bag. Fixing it is not part of this change, so the check below states the
-    // case it covers rather than covering a case it would fail.
+    // rather than a property: a bag whose root list names one cell twice is written back
+    // with more root entries than cells, and a root count above the cell count is the one
+    // thing `read_header` refuses outright. The fuzzer reached it from a sixteen byte bag.
+    // The defect is pinned as its own case in `tests/cell/roundtrip.rs`, which is where the
+    // reproduction and the two directions a fix could take are written down; the condition
+    // below only states which bags this check covers.
     if roots.len() <= cells.len() {
         let back = parse_boc(&written).expect("a bag this crate wrote parses back");
         assert_eq!(
@@ -175,6 +160,10 @@ pub(super) fn bag_of_cells(bytes: &[u8]) -> bool {
 /// `parse_boc`, `BocView::materialize`, `BocView::verify` and `BocView::cell` read one bag
 /// four ways. They share a header reader and a cell reader and diverge in what they keep, so
 /// an input where they disagree is an input where one of them has a bound the others do not.
+///
+/// Of those four, this is the one that stops at the header, before a cell is built, which is
+/// where the counts a bag states about itself are still statements rather than things
+/// already read.
 pub(super) fn header(bytes: &[u8]) -> bool {
     let opened = BocView::open(bytes);
     let parsed = parse_boc(bytes);
@@ -196,6 +185,12 @@ pub(super) fn header(bytes: &[u8]) -> bool {
         "a header declaring {} cells opened past the {MAX_CELLS} cell limit",
         view.cell_count()
     );
+    // Every cell costs at least its two descriptor bytes, so a count the remaining bytes
+    // could not hold is a count nothing behind it can honour. The header reader refuses one
+    // before it allocates for it, and this is the door that can see that: the count a view
+    // reports is the one the header stated, so a view that opened on a count the bytes
+    // cannot hold is a refusal that did not happen. Counting the cells of a bag that already
+    // parsed would not see it, because a parsed bag has read those two bytes per cell.
     assert!(
         view.cell_count() * 2 <= bytes.len(),
         "a header of a {} byte bag declared {} cells",
