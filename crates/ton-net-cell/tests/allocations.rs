@@ -6,7 +6,7 @@
 //! Wall-clock timing on the machine this was written on swings by tens of percent between
 //! runs of identical code, which is enough to hide a real regression and enough to invent
 //! one. A count does not move with the weather: reading the same bag calls the allocator the
-//! same number of times every run, on every machine, and that count is what the memory a
+//! same number of times every run, and that count is what the memory a
 //! large bag needs is proportional to. So the layout is held to a count rather than a clock.
 //!
 //! What the counts say today, on the captured mainnet fixtures:

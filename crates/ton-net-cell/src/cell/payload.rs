@@ -49,7 +49,8 @@ impl Span {
     }
 }
 
-/// The one buffer every empty cell points at, so an empty cell costs no allocation.
+/// The buffer an owned empty payload points at, so a cell built with no data costs no
+/// allocation. A cell read out of a bag shares the bag's buffer instead, empty or not.
 fn nothing() -> Arc<[u8]> {
     static NOTHING: OnceLock<Arc<[u8]>> = OnceLock::new();
     Arc::clone(NOTHING.get_or_init(|| Arc::from(&[][..])))
@@ -129,13 +130,31 @@ mod tests {
     }
 
     #[test]
-    fn an_empty_cell_costs_no_buffer_of_its_own() {
+    fn an_owned_empty_payload_costs_no_buffer_of_its_own() {
         let first = Payload::owned(Vec::new()).expect("empty is a payload");
         let second = Payload::owned(Vec::new()).expect("empty is a payload");
         assert!(first.as_slice().is_empty());
         assert!(
             Arc::ptr_eq(&first.bytes, &second.bytes),
-            "every empty cell points at the same nothing"
+            "two owned empty payloads point at the same nothing"
+        );
+    }
+
+    #[test]
+    fn an_empty_cell_read_from_a_bag_shares_the_bag() {
+        // The nothing buffer is reachable from `owned` alone. A bag's empty cell holds a
+        // zero-length window on the bag, which is why keeping it keeps the bag's bytes.
+        let bag: Arc<[u8]> = Arc::from(&[7u8, 8, 9][..]);
+        let empty = Payload::window(&bag, Span::new(1, 0).expect("a span")).expect("a window");
+        assert!(empty.as_slice().is_empty());
+        assert!(
+            Arc::ptr_eq(&empty.bytes, &bag),
+            "an empty cell out of a bag points at the bag, not at the nothing buffer"
+        );
+        let owned = Payload::owned(Vec::new()).expect("empty is a payload");
+        assert!(
+            !Arc::ptr_eq(&empty.bytes, &owned.bytes),
+            "and so is not the buffer an owned empty payload points at"
         );
     }
 }
