@@ -329,10 +329,15 @@ fn parallelism() -> usize {
 ///
 /// The whole of the dispatch decision. Two numbers reach it, the wave's width and what
 /// [`parallelism`] reports, and the width is the one the bag has any say in: nothing here
-/// asks what kind of bag it is. A worker is handed a full [`CELLS_PER_WORKER`] or it is
-/// not started, so a bag shaped like a path answers one for every wave it has and runs
-/// with no coordination at all, while a bag whose waves are several workers wide answers
-/// the smaller of what the width affords and what the machine reports.
+/// asks what kind of bag it is. A wave is split only once its width holds a full
+/// [`CELLS_PER_WORKER`] for every worker started, so a bag shaped like a path answers one
+/// for every wave it has and runs with no coordination at all, while a bag whose waves are
+/// several workers wide answers the smaller of what the width affords and what the machine
+/// reports.
+///
+/// The shares themselves are cut from the width rather than measured out at that size, so
+/// a width the worker count does not divide gives shares differing by fewer cells than
+/// there are workers, and the last of them can fall under a full [`CELLS_PER_WORKER`].
 fn workers_for(width: usize) -> usize {
     parallelism().min(width / CELLS_PER_WORKER).max(1)
 }
@@ -1266,10 +1271,16 @@ mod tests {
             .map(<[usize]>::len)
             .max()
             .expect("the fan has waves");
-        assert!(
-            workers_for(widest) == parallelism().min(4),
-            "the leaves of this fan are a wave the dispatch splits as far as the machine \
-             allows, up to four ways"
+        // Stated as a width rather than as a worker count. What the dispatch does with it
+        // is the machine's to decide and a test cannot pin it on every machine, but that
+        // the fan offers it four full shares to decide over is a property of the fixture
+        // and holds anywhere, so a fan that quietly stopped being wide enough to split is
+        // caught here rather than passing as a wave nobody split.
+        assert_eq!(
+            widest / CELLS_PER_WORKER,
+            4,
+            "the leaves of this fan are four workers' shares, so nothing but the machine \
+             holds the dispatch back here"
         );
 
         let mut compared = 0usize;
@@ -1309,11 +1320,50 @@ mod tests {
         );
     }
 
+    /// What the machine reports, read here rather than through [`parallelism`].
+    ///
+    /// An expectation written in terms of the same call the code under test makes holds
+    /// however that call answers, so a dispatch that stopped asking the machine at all
+    /// would satisfy it. This asks the standard library directly, which leaves the two
+    /// readings free to disagree and the assertion able to say so.
+    #[cfg(feature = "parallel")]
+    fn machine_threads() -> usize {
+        std::thread::available_parallelism().map_or(1, NonZeroUsize::get)
+    }
+
+    /// How many cells each worker was handed, smallest share first.
+    ///
+    /// The outcomes carry the thread that produced them, so the shares are counted from
+    /// what the workers report rather than from a second copy of the arithmetic that cut
+    /// them.
+    #[cfg(feature = "parallel")]
+    fn shares_of(produced: &WaveOutcomes<std::thread::ThreadId>) -> Vec<usize> {
+        let mut counted: Vec<(std::thread::ThreadId, usize)> = Vec::new();
+        for (_, outcome) in produced {
+            let ran_on = outcome
+                .as_ref()
+                .ok()
+                .and_then(|held| *held)
+                .expect("a worker reports the thread it ran on");
+            match counted.iter_mut().find(|(id, _)| *id == ran_on) {
+                Some((_, share)) => *share += 1,
+                None => counted.push((ran_on, 1)),
+            }
+        }
+        let mut shares: Vec<usize> = counted.into_iter().map(|(_, share)| share).collect();
+        shares.sort_unstable();
+        shares
+    }
+
     #[test]
     #[cfg(feature = "parallel")]
     fn a_wave_is_split_only_where_each_worker_gets_a_full_share() {
-        // What the width gate answers, stated against the machine rather than against a
-        // number this machine happened to produce.
+        /// Four workers' worth of cells and one over, a width four workers do not divide.
+        const UNEVEN: usize = CELLS_PER_WORKER * 4 + 1;
+
+        // What the width gate answers, against what the machine reports rather than
+        // against what the dispatch made of it.
+        let machine = machine_threads();
         assert_eq!(workers_for(0), 1, "an empty wave stays here");
         assert_eq!(
             workers_for(CELLS_PER_WORKER * 2 - 1),
@@ -1322,8 +1372,95 @@ mod tests {
         );
         assert_eq!(
             workers_for(CELLS_PER_WORKER * 4),
-            parallelism().min(4),
+            machine.min(4),
             "four workers' worth is split as far as the machine goes, up to four"
+        );
+
+        // A width the worker count does not divide, which is where the gate's own wording
+        // has to be exact. Four workers' worth and one cell over is still four workers'
+        // worth, and the shares cut from it are not four full ones: three take a cell more
+        // than an even quarter and the fourth takes what is left, which is under a full
+        // share. The count of workers is what the width affords; the size of a share is
+        // what the cutting leaves.
+        assert_eq!(
+            workers_for(UNEVEN),
+            machine.min(4),
+            "a cell over four shares is still four workers' worth"
+        );
+
+        // The shares as the workers were actually handed them. Four is passed rather than
+        // asked for, so this holds whatever the machine reports.
+        let wave: Vec<usize> = (0..UNEVEN).collect();
+        let held: Vec<Option<std::thread::ThreadId>> = vec![None; UNEVEN];
+        let running_on =
+            |_: usize, _: &[Option<std::thread::ThreadId>]| Ok(Some(std::thread::current().id()));
+        let produced =
+            split_across_workers(&wave, &held, &running_on, 4).expect("four workers is a split");
+        let shares = shares_of(&produced);
+        assert_eq!(
+            shares,
+            vec![1022, 1025, 1025, 1025],
+            "the shares four workers cut a width of four shares and one cell into"
+        );
+        assert!(
+            shares
+                .first()
+                .is_some_and(|&least| least < CELLS_PER_WORKER),
+            "so a worker is handed less than a full share where the width does not divide"
+        );
+        assert!(
+            shares
+                .last()
+                .zip(shares.first())
+                .is_some_and(|(most, least)| most - least < 4),
+            "and the shares differ by fewer cells than there are workers"
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "parallel")]
+    fn a_wave_handed_two_workers_is_run_across_both_of_them() {
+        // Whether the dispatch splits at all, which is a thing the width gate cannot say
+        // on its own: a machine reporting one thread answers one worker for every width,
+        // and a gate stated in those terms agrees with a dispatch that never splits. The
+        // worker count is passed here rather than asked for, so what is left is the split.
+        let wave: Vec<usize> = (0..CELLS_PER_WORKER * 2).collect();
+        let held: Vec<Option<usize>> = vec![None; wave.len()];
+        let one = |index: usize, _: &[Option<usize>]| Ok(Some(index));
+
+        let empty: [usize; 0] = [];
+        assert!(
+            split_across_workers(&empty, &held, &one, 2).is_none(),
+            "a wave with no cells has no share to hand out"
+        );
+        assert!(
+            split_across_workers(&wave, &held, &one, 1).is_none(),
+            "one worker is this thread"
+        );
+
+        let produced = split_across_workers(&wave, &held, &one, 2).expect("two workers is a split");
+        let mut ran: Vec<usize> = produced.iter().map(|&(index, _)| index).collect();
+        ran.sort_unstable();
+        assert_eq!(ran, wave, "a split ran every cell of the wave once");
+        for (index, outcome) in &produced {
+            assert_eq!(
+                outcome.as_ref().ok().and_then(|held| *held),
+                Some(*index),
+                "a worker produced a value for a cell other than the one it was given"
+            );
+        }
+
+        // And handed to two workers rather than to one that took the wave whole, which is
+        // a split the assertions above would not tell from no split at all.
+        let unheld: Vec<Option<std::thread::ThreadId>> = vec![None; wave.len()];
+        let running_on =
+            |_: usize, _: &[Option<std::thread::ThreadId>]| Ok(Some(std::thread::current().id()));
+        let across =
+            split_across_workers(&wave, &unheld, &running_on, 2).expect("two workers is a split");
+        assert_eq!(
+            shares_of(&across),
+            vec![CELLS_PER_WORKER, CELLS_PER_WORKER],
+            "two workers took an even half of the wave each"
         );
     }
 
@@ -1345,12 +1482,23 @@ mod tests {
             0,
             "and no wave of it holds more than one cell"
         );
-        assert_eq!(
-            path.iter()
-                .filter(|wave| workers_for(wave.len()) > 1)
-                .count(),
-            0,
-            "so no wave of a path is split across threads, whatever the machine has"
+        // And what that comes to when the plan is run: every cell of the path is finalized
+        // on the thread that asked for it. Watched rather than derived, and derived from
+        // the machine least of all, so it says the same thing on a machine reporting one
+        // thread as on one reporting many. What keeps a path here is the width of its
+        // waves, so a dispatch that stopped reading the width would hand these waves out
+        // and be caught here.
+        let here = std::thread::current().id();
+        let (ran_on, lowest) = finalize(LINKS + 1, &path, &|_: usize, _: &[Option<_>]| {
+            Ok(Some(std::thread::current().id()))
+        });
+        assert!(
+            lowest.into_result().is_ok(),
+            "the path finalizes without a failure"
+        );
+        assert!(
+            ran_on.iter().all(|held| *held == Some(here)),
+            "a wave of a path was handed to a thread other than the caller's"
         );
 
         let fan = plan_for(&fan_bag(FAN_DEEP));
