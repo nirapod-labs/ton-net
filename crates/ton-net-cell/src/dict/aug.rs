@@ -385,8 +385,14 @@ impl<A: Augmentation> AugDict<A> {
     ///
     /// Each item is a key, the summary of the value under it, and the value. A key given
     /// more than once keeps the last of each it was given, and the result is the one
-    /// canonical dictionary for its final key set, the same tree [`set`](AugDict::set) builds
-    /// one entry at a time and independent of the order the items arrive in.
+    /// canonical dictionary for its final key set, independent of the order the items arrive
+    /// in.
+    ///
+    /// Wherever [`set`](AugDict::set) can build that dictionary at all, this builds the same
+    /// tree. It can also build ones [`set`](AugDict::set) cannot, for the reason
+    /// [`Dict::from_items`](crate::Dict::from_items) gives: a first key inserted alone carries
+    /// a label its whole width, and a value that fits beside the finished tree's short label
+    /// may not fit beside that one.
     ///
     /// The items are sorted by key once and the tree is laid out from the leaves up, so each
     /// fork is built with both children already final and its summary is combined from them
@@ -695,6 +701,34 @@ mod tests {
         }
     }
 
+    /// A summary that is not commutative, so which child a fork reads first shows in the
+    /// tree's root hash.
+    ///
+    /// `CountSum` cannot see that: addition gives a fork the same summary whichever way round
+    /// its children are read, so a build that swapped them agrees with one that did not. Every
+    /// augmentation shipped with a real dictionary is free to be order-sensitive, and a bulk
+    /// build that read its children in the wrong order would corrupt one silently.
+    struct CountSkew;
+
+    impl Augmentation for CountSkew {
+        type Extra = u32;
+
+        fn read(&self, slice: &mut Slice<'_>) -> Result<u32, CellError> {
+            slice.load_u32()
+        }
+
+        fn combine(&self, left: &u32, right: &u32) -> Result<u32, CellError> {
+            // Wrapping because a summary is folded up the whole tree and the lint floor
+            // forbids a panic on the read path.
+            Ok(left.wrapping_mul(31).wrapping_add(*right))
+        }
+
+        fn write(&self, extra: &u32, into: &mut Builder) -> Result<(), CellError> {
+            into.store_uint(u64::from(*extra), 32)?;
+            Ok(())
+        }
+    }
+
     /// The same summary read and written the same way, but combined wrongly, so a tree its
     /// forks were built for reads as inconsistent under it.
     struct CountOff;
@@ -914,6 +948,24 @@ mod tests {
                     one_at_a_time.root().map(Cell::repr_hash),
                     "{n} keys {what}",
                 );
+
+                // Again under a summary that is not commutative, which is what makes the
+                // order a fork reads its children in observable. Under `CountSum` a build
+                // that swapped them agrees with one that did not.
+                let skew_bulk =
+                    AugDict::from_items(CountSkew, 32, items.clone()).expect("from_items");
+                let mut skew_one = AugDict::new(CountSkew, 32).expect("a dictionary");
+                for (key, extra, value) in &items {
+                    skew_one.set(key, extra, value).expect("set");
+                }
+                assert_eq!(
+                    skew_bulk.root().map(Cell::repr_hash),
+                    skew_one.root().map(Cell::repr_hash),
+                    "{n} keys {what}, under a summary that reads its children in order",
+                );
+                skew_bulk
+                    .validate()
+                    .expect("every fork folds its children in order");
 
                 // Every leaf counts one, so the root summary is the number of keys, and the
                 // tree the bulk build wrote holds to its own summary rule.

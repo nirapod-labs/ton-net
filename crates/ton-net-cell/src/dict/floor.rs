@@ -20,8 +20,13 @@ impl Dict {
     ///
     /// Each item is a key and the value stored under it. A key given more than once keeps
     /// the last value it was given, and the result is the one canonical dictionary for its
-    /// final key set: the same tree [`set`](Dict::set) builds one entry at a time, and the
-    /// same whatever order the items arrive in.
+    /// final key set, whatever order the items arrive in: the shape follows from the keys.
+    ///
+    /// Wherever [`set`](Dict::set) can build that dictionary at all, this builds the same
+    /// tree. It can also build ones [`set`](Dict::set) cannot: inserting one entry at a time
+    /// makes the first key carry a label its whole width, and a value that fits beside the
+    /// short label of the finished tree may not fit beside that one. Which keys those are
+    /// depends on the order, so this accepts item sets no order of [`set`](Dict::set) does.
     ///
     /// The items are sorted by key once and the tree is laid out from the leaves up, so each
     /// node is built with its children already final. Repeated [`set`](Dict::set) instead

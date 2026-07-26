@@ -34,6 +34,9 @@ never published.
   already final. Both were a loop over `set`, which rebuilds the forks it
   descended through, once per key stored. Neither signature changes, and the
   tree is the same one, held to the same mainnet root hashes it already was.
+  Both now accept item sets no order of `set` builds: inserting one entry at a
+  time gives the first key a label its whole width, and a value that fits beside
+  the finished tree's short label need not fit beside that one.
 - `SessionCiphers::seal` returns `Result<Vec<u8>, FrameError>` and refuses a
   payload larger than one frame carries. The read side already refused a body
   outside that range, so the two ends now hold to the same ceiling. Nothing is
