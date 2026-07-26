@@ -148,45 +148,168 @@ fn read_raw(reader: &mut Reader<'_>, header: &Header) -> Result<Vec<RawCell>, Ce
     Ok(raw)
 }
 
-/// Refuses a graph deeper than [`MAX_DEPTH`](super::MAX_DEPTH).
+/// The failure a pass reports: whichever of the cells it judged sits at the lowest index.
 ///
-/// References point forward, so a descending pass meets every child before its parent, and
-/// depths accumulate in that order: position k holds the depth of cell `count - 1 - k`,
-/// the convention the builds below read their children by.
-fn check_depths(raw: &[RawCell], count: usize) -> Result<(), CellError> {
-    let mut depth: Vec<usize> = Vec::with_capacity(count);
-    for raw_cell in raw.iter().rev() {
-        let mut deepest = 0usize;
-        for &target in raw_cell.refs() {
-            let target = target as usize;
-            deepest = deepest.max(depth.get(count - 1 - target).copied().unwrap_or(0) + 1);
-        }
-        if deepest > MAX_DEPTH {
-            return Err(CellError::TooDeep { limit: MAX_DEPTH });
-        }
-        depth.push(deepest);
-    }
-    Ok(())
+/// A pass that returned as soon as it met a failure would report the cell its own traversal
+/// reached soonest, so one bag of bytes would produce one error read descending and another
+/// read in waves. NET-ADR-012 fixes the rule instead: the lowest index wins, whatever order
+/// the work ran in. Reaching it costs a pass that carries on over a bag it is going to
+/// refuse anyway.
+///
+/// A cell is judged once the cells it references have been finalized, and skipped when one
+/// of them produced no value, so a parent left unbuildable by a failure beneath it records
+/// no failure of its own. Recording a missing child there would name the consequence in
+/// place of the cause, and would name it at a lower index, which under this rule is the
+/// index that wins.
+#[derive(Default)]
+struct Lowest {
+    held: Option<(usize, CellError)>,
 }
 
-/// The bag's root cells, read from the positions the header names in a descending build.
-fn roots<T: Clone>(built: &[T], header: &Header, count: usize) -> Result<Vec<T>, CellError> {
+impl Lowest {
+    /// Keeps `error` if `index` is lower than the failure held so far.
+    fn record(&mut self, index: usize, error: CellError) {
+        if self.held.as_ref().is_none_or(|(at, _)| index < *at) {
+            self.held = Some((index, error));
+        }
+    }
+
+    /// The failure to report, if the pass held one.
+    fn into_result(self) -> Result<(), CellError> {
+        match self.held {
+            Some((_, error)) => Err(error),
+            None => Ok(()),
+        }
+    }
+}
+
+/// The structural height of each of the bag's cells, indexed by cell index, refusing a
+/// graph deeper than [`MAX_DEPTH`](super::MAX_DEPTH).
+///
+/// A cell's height is one more than the tallest of its children's, and zero for a cell with
+/// no references. References point strictly forward, which [`read_raw`] refuses a bag for
+/// breaking, so a pass from the highest index down meets a child before its parent and the
+/// heights accumulate in one sweep.
+///
+/// The sweep finishes before anything is refused, so the refusal is a property of the bag
+/// rather than of where the sweep began. [`CellError::TooDeep`] carries no cell index, so
+/// this is the reporting rule of [`Lowest`] holding here rather than a difference a caller
+/// can see.
+fn heights(raw: &[RawCell], count: usize) -> Result<Vec<usize>, CellError> {
+    let mut height: Vec<usize> = vec![0; count];
+    for index in (0..count).rev() {
+        let Some(raw_cell) = raw.get(index) else {
+            continue;
+        };
+        let mut tallest = 0usize;
+        for &target in raw_cell.refs() {
+            let below = height.get(target as usize).copied().unwrap_or(0);
+            tallest = tallest.max(below + 1);
+        }
+        if let Some(slot) = height.get_mut(index) {
+            *slot = tallest;
+        }
+    }
+    if height.iter().any(|&at| at > MAX_DEPTH) {
+        return Err(CellError::TooDeep { limit: MAX_DEPTH });
+    }
+    Ok(height)
+}
+
+/// The bag's root cells, read from the positions the header names.
+fn roots<T: Clone>(built: &[Option<T>], header: &Header) -> Result<Vec<T>, CellError> {
     header
         .root_list
         .iter()
         .map(|&index| {
             built
-                .get(count - 1 - index)
+                .get(index)
+                .and_then(Option::as_ref)
                 .cloned()
                 .ok_or(CellError::BadReference)
         })
         .collect()
 }
 
+/// Builds one cell from its raw form, over the cells already built.
+///
+/// Returns `Ok(None)` when a cell this one references has no value in `built`. References
+/// point strictly forward, which [`read_raw`] refuses a bag for breaking, and a cell at a
+/// higher index is finalized first, so an empty slot was reached and produced no value: it
+/// failed, or a cell beneath it did. A cell's identity is hashed over its children's
+/// identities, so there is none to compute here, and what [`Lowest`] wants is the earlier
+/// failure below rather than the gap this call found.
+fn build_one(
+    raw_cell: &RawCell,
+    payload: &Arc<[u8]>,
+    built: &[Option<Cell>],
+) -> Result<Option<Cell>, CellError> {
+    let mut refs = Refs::None;
+    for &target in raw_cell.refs() {
+        match built.get(target as usize) {
+            Some(Some(child)) => refs.push(child.clone())?,
+            Some(None) => return Ok(None),
+            // read_raw holds every reference under the bag's cell count, so a slot past
+            // the end is unreachable rather than a shape a bag can ask for.
+            None => return Err(CellError::BadReference),
+        }
+    }
+    let cell = Cell::from_parts(
+        Payload::window(payload, raw_cell.data)?,
+        raw_cell.bits,
+        refs,
+        raw_cell.cell_type,
+        raw_cell.level_mask,
+    )?;
+    if let Some(stored) = &raw_cell.stored {
+        check_stored(cell.identity(), stored.of(payload)?)?;
+    }
+    Ok(Some(cell))
+}
+
+/// Summarizes one cell from its raw form, over the identities already computed.
+///
+/// What [`build_one`] is for a graph, this is for identities alone: it keeps a summary of
+/// each cell in place of the cell, and reports a missing child the same way, with
+/// `Ok(None)`.
+fn summarize_one(
+    raw_cell: &RawCell,
+    bytes: &[u8],
+    computed: &[Option<Identity>],
+) -> Result<Option<Identity>, CellError> {
+    // The children are borrowed out of the identities already kept, so a cell costs no
+    // allocation to look at.
+    let unfilled = Identity::NONE;
+    let mut children = [&unfilled; MAX_REFS];
+    for (slot, &target) in children.iter_mut().zip(raw_cell.refs()) {
+        match computed.get(target as usize) {
+            Some(Some(child)) => *slot = child,
+            Some(None) => return Ok(None),
+            // Unreachable for the reason build_one gives.
+            None => return Err(CellError::BadReference),
+        }
+    }
+    let children = children
+        .get(..raw_cell.refs().len())
+        .ok_or(CellError::BadReference)?;
+    let identity = summarize(
+        raw_cell.data.of(bytes)?,
+        raw_cell.bits,
+        children,
+        raw_cell.cell_type,
+        raw_cell.level_mask,
+    )?;
+    if let Some(stored) = &raw_cell.stored {
+        check_stored(&identity, stored.of(bytes)?)?;
+    }
+    Ok(Some(identity))
+}
+
 /// Reads the cells of a bag whose header has been read, and returns its roots.
 ///
-/// Cells are built in the one order a bag stores them, every child before its parent, so
-/// each is finished before anything references it.
+/// References point strictly forward, which [`read_raw`] refuses a bag for breaking, so a
+/// pass that runs from the highest cell index down finishes a cell before it reaches
+/// anything that references it.
 pub(super) fn read_and_build(
     reader: &mut Reader<'_>,
     header: &Header,
@@ -196,32 +319,40 @@ pub(super) fn read_and_build(
     // each cell's bytes.
     let payload: Arc<[u8]> = Arc::from(reader.bytes);
     let raw = read_raw(reader, header)?;
-    check_depths(&raw, count)?;
+    heights(&raw, count)?;
 
-    // Built in the same descending order. Position k in `built` holds cell `count-1-k`.
-    let mut built: Vec<Cell> = Vec::with_capacity(count);
-    for raw_cell in raw.iter().rev() {
-        let mut refs = Refs::None;
-        for &target in raw_cell.refs() {
-            let child = built
-                .get(count - 1 - target as usize)
-                .ok_or(CellError::BadReference)?;
-            refs.push(child.clone())?;
-        }
-        let cell = Cell::from_parts(
-            Payload::window(&payload, raw_cell.data)?,
-            raw_cell.bits,
-            refs,
-            raw_cell.cell_type,
-            raw_cell.level_mask,
-        )?;
-        if let Some(stored) = &raw_cell.stored {
-            check_stored(cell.identity(), stored.of(&payload)?)?;
-        }
-        built.push(cell);
+    // Position k holds cell k, so a reference is read at the index it names.
+    let mut built: Vec<Option<Cell>> = vec![None; count];
+    let mut lowest = Lowest::default();
+    for index in (0..count).rev() {
+        let Some(raw_cell) = raw.get(index) else {
+            continue;
+        };
+        let outcome = build_one(raw_cell, &payload, &built);
+        keep(&mut built, &mut lowest, index, outcome);
     }
+    lowest.into_result()?;
 
-    roots(&built, header, count)
+    roots(&built, header)
+}
+
+/// Records what finalizing a cell produced: the value, a skip where a cell below it
+/// failed, or the failure against the index it came from.
+fn keep<T>(
+    built: &mut [Option<T>],
+    lowest: &mut Lowest,
+    index: usize,
+    outcome: Result<Option<T>, CellError>,
+) {
+    match outcome {
+        Ok(Some(value)) => {
+            if let Some(slot) = built.get_mut(index) {
+                *slot = Some(value);
+            }
+        }
+        Ok(None) => {}
+        Err(error) => lowest.record(index, error),
+    }
 }
 
 /// Hash-verifies a bag's cells without building its graph, and returns its roots' identities.
@@ -242,40 +373,21 @@ pub(super) fn verify_roots(
     // Nothing is built here, so the bag's own bytes serve and no buffer is taken.
     let bytes = reader.bytes;
     let raw = read_raw(reader, header)?;
-    check_depths(&raw, count)?;
+    heights(&raw, count)?;
 
-    // Position k in `identities` holds cell `count-1-k`, as `built` does in read_and_build.
-    let mut identities: Vec<Identity> = Vec::with_capacity(count);
-    for raw_cell in raw.iter().rev() {
-        // The children are borrowed out of the identities already kept, so a cell costs no
-        // allocation to look at. The borrows end with the block, which is what lets the
-        // identity this produces be pushed onto the same vector.
-        let identity = {
-            let unfilled = Identity::NONE;
-            let mut children = [&unfilled; MAX_REFS];
-            for (slot, &target) in children.iter_mut().zip(raw_cell.refs()) {
-                *slot = identities
-                    .get(count - 1 - target as usize)
-                    .ok_or(CellError::BadReference)?;
-            }
-            let children = children
-                .get(..raw_cell.refs().len())
-                .ok_or(CellError::BadReference)?;
-            summarize(
-                raw_cell.data.of(bytes)?,
-                raw_cell.bits,
-                children,
-                raw_cell.cell_type,
-                raw_cell.level_mask,
-            )?
+    // Position k holds cell k, as `built` does in read_and_build.
+    let mut identities: Vec<Option<Identity>> = vec![None; count];
+    let mut lowest = Lowest::default();
+    for index in (0..count).rev() {
+        let Some(raw_cell) = raw.get(index) else {
+            continue;
         };
-        if let Some(stored) = &raw_cell.stored {
-            check_stored(&identity, stored.of(bytes)?)?;
-        }
-        identities.push(identity);
+        let outcome = summarize_one(raw_cell, bytes, &identities);
+        keep(&mut identities, &mut lowest, index, outcome);
     }
+    lowest.into_result()?;
 
-    let roots = roots(&identities, header, count)?;
+    let roots = roots(&identities, header)?;
     Ok(roots.iter().map(|identity| *identity.repr_hash()).collect())
 }
 
@@ -306,7 +418,7 @@ impl RawCells {
 pub(super) fn read_cells(reader: &mut Reader<'_>, header: &Header) -> Result<RawCells, CellError> {
     let payload: Arc<[u8]> = Arc::from(reader.bytes);
     let cells = read_raw(reader, header)?;
-    check_depths(&cells, header.count)?;
+    heights(&cells, header.count)?;
     Ok(RawCells { cells, payload })
 }
 
@@ -430,29 +542,16 @@ pub(super) fn build_at(raw: &RawCells, state: &mut Build, index: usize) -> Resul
     }
     order.sort_unstable();
 
+    let mut lowest = Lowest::default();
     for position in order.into_iter().rev() {
         let raw_cell = raw.cells.get(position).ok_or(CellError::BadReference)?;
-        let mut refs = Refs::None;
-        for &target in raw_cell.refs() {
-            let child = state
-                .built
-                .get(target as usize)
-                .and_then(Option::as_ref)
-                .ok_or(CellError::BadReference)?;
-            refs.push(child.clone())?;
+        match build_one(raw_cell, &raw.payload, &state.built) {
+            Ok(Some(cell)) => state.keep(position, cell),
+            Ok(None) => {}
+            Err(error) => lowest.record(position, error),
         }
-        let cell = Cell::from_parts(
-            Payload::window(&raw.payload, raw_cell.data)?,
-            raw_cell.bits,
-            refs,
-            raw_cell.cell_type,
-            raw_cell.level_mask,
-        )?;
-        if let Some(stored) = &raw_cell.stored {
-            check_stored(cell.identity(), stored.of(&raw.payload)?)?;
-        }
-        state.keep(position, cell);
     }
+    lowest.into_result()?;
 
     state.get(index).ok_or(CellError::BadReference)
 }

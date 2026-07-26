@@ -198,6 +198,85 @@ fn what_survives_reserialization_parses_back() {
     assert!(checked > 0, "no corrupted tree survived to be reserialized");
 }
 
+/// A two-cell bag, each cell flawed or sound as asked, the two flaws independent.
+///
+/// Neither cell references the other, so neither failure hides the other. A flawed cell
+/// beneath another leaves its parent unbuildable, and then there is one failure to report
+/// and no choice between failures to make.
+///
+/// Cell zero claims a level mask its children would have to justify, and it carries no
+/// children. Cell one carries the hash and depth a cell may store ahead of its data,
+/// filled with bytes its own contents do not produce. Both faults are found where a bag's
+/// cells are finalized rather than where its bytes are read, which is the pass whose order
+/// the test below pins.
+fn two_flawed_cells(first_flawed: bool, second_flawed: bool) -> Vec<u8> {
+    // d1 is 32 * level_mask + 8 * exotic + reference count, and bit four says the cell
+    // carries its own hashes and depths ahead of its data. d2 is zero for a cell with no
+    // data bits.
+    let mut cells = vec![
+        if first_flawed { 0x20 } else { 0x00 },
+        0x00,
+        if second_flawed { 0x10 } else { 0x00 },
+        0x00,
+    ];
+    if second_flawed {
+        // One hash and one depth, which is what a cell of an empty level mask stores, and
+        // no part of it is what this cell's contents hash to.
+        cells.extend([0xaa; 34]);
+    }
+
+    let mut bag = vec![
+        0xb5, 0xee, 0x9c, 0x72, // magic
+        0x01, // one byte per reference, no index, no checksum
+        0x01, // one byte per offset
+        0x02, // two cells
+        0x01, // one root
+        0x00, // no absent cells
+    ];
+    bag.push(u8::try_from(cells.len()).expect("the cell area is under 256 bytes"));
+    bag.push(0x00); // the root is cell zero
+    bag.extend(cells);
+    bag
+}
+
+#[test]
+fn a_bag_with_two_flawed_cells_is_refused_for_the_lower_one() {
+    // Which failure a bag with more than one comes back with must not depend on the order
+    // its cells were finalized in, or the same bytes would produce different errors as
+    // that order changed. The rule is that the lowest cell index wins. The two cells here
+    // fail for different reasons, so which one the rule picked is legible in the error.
+    const BY_LEVEL: CellError =
+        CellError::Malformed("cell level mask is not the one its children imply");
+    const BY_HASH: CellError = CellError::Malformed("cell stores a hash its contents do not give");
+
+    // Each flaw on its own, which is what says the pair below was refused for the fault
+    // planted in one cell rather than for anything the two cells share.
+    assert_eq!(
+        parse_boc(&two_flawed_cells(true, false)),
+        Err(BY_LEVEL),
+        "the first cell claims a level nothing below it gives it"
+    );
+    assert_eq!(
+        parse_boc(&two_flawed_cells(false, true)),
+        Err(BY_HASH),
+        "the second cell stores a hash its contents do not give"
+    );
+
+    // Both at once. Finalizing runs from the highest cell index down, so the second cell's
+    // failure is the one met first and the first cell's is the one reported.
+    assert_eq!(
+        parse_boc(&two_flawed_cells(true, true)),
+        Err(BY_LEVEL),
+        "a bag failing at two cells reports the lower of them"
+    );
+
+    // And the same bag with neither flaw is read, so the shape itself is not what was
+    // being refused.
+    let sound = parse_boc(&two_flawed_cells(false, false))
+        .expect("two sound cells make a bag this crate reads");
+    exercise_roots(&sound);
+}
+
 /// A serialized bag holding one chain: a leaf under `links` parents, so its root has depth
 /// `links`. Both assertions below rest on that being the depth and not one either side of it.
 fn deep_chain(links: usize) -> Vec<u8> {
