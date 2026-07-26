@@ -235,52 +235,129 @@ pub(super) fn verify_roots(
     Ok(roots.iter().map(Summary::repr_hash).collect())
 }
 
-/// Builds one cell of the bag, and only the cells it reaches, leaving the rest unbuilt.
+/// A bag's cells as they were read, before any of them is built.
+///
+/// Reading a bag and building its cells are two costs, and only the second one is per cell.
+/// A reader that keeps this has paid the first in full, which is what lets it build cell
+/// after cell without going back to the bytes.
+pub(super) struct RawCells {
+    cells: Vec<RawCell>,
+}
+
+impl RawCells {
+    /// How many cells the bag holds.
+    pub(super) fn len(&self) -> usize {
+        self.cells.len()
+    }
+}
+
+/// Reads and checks every cell of a bag whose header has been read, building none of them.
+///
+/// # Errors
+///
+/// As [`read_and_build`], for the cells it reads.
+pub(super) fn read_cells(reader: &mut Reader<'_>, header: &Header) -> Result<RawCells, CellError> {
+    let cells = read_raw(reader, header)?;
+    check_depths(&cells, header.count)?;
+    Ok(RawCells { cells })
+}
+
+/// The cells built from a bag so far, and the scratch a repeated build reuses.
+///
+/// A walk marks what it reaches with a generation number rather than a flag, so opening one
+/// costs a counter where clearing a flag vector would cost the length of the bag. That is
+/// what keeps reading one cell proportional to its own subtree rather than to the bag, however
+/// many cells have been read before it.
+pub(super) struct Build {
+    built: Vec<Option<Cell>>,
+    /// The walk that last reached each cell. Equal to `generation` means reached by this one.
+    seen: Vec<u32>,
+    generation: u32,
+}
+
+impl Build {
+    /// Room to build the cells of a bag holding `count` of them, with none built.
+    pub(super) fn new(count: usize) -> Self {
+        Self {
+            built: vec![None; count],
+            seen: vec![0; count],
+            generation: 0,
+        }
+    }
+
+    /// The cell at `index`, if it has been built.
+    pub(super) fn get(&self, index: usize) -> Option<Cell> {
+        self.built.get(index).cloned().flatten()
+    }
+
+    /// How many cells have been built and kept.
+    pub(super) fn count(&self) -> usize {
+        self.built.iter().flatten().count()
+    }
+
+    /// Opens a walk and returns the generation it marks cells with.
+    fn open_walk(&mut self) -> u32 {
+        if let Some(next) = self.generation.checked_add(1) {
+            self.generation = next;
+        } else {
+            // A generation that wrapped would read a mark left by an older walk as one of its
+            // own, so the marks go back to nothing and counting starts again.
+            self.seen.fill(0);
+            self.generation = 1;
+        }
+        self.generation
+    }
+}
+
+/// Builds the cell at `index` and every cell it reaches that is not built already, keeping
+/// each one.
 ///
 /// `index` is a position among the bag's cells in stored order, the roots first. References
-/// point forward, so a cell's subtree is a set of cells at higher indices; this reads every
-/// cell to know the structure and to check it, but builds only the ones the requested cell
-/// reaches, so a single cell of a large bag costs its own subtree rather than the whole graph.
+/// point strictly forward, which [`read_cells`] has already checked, so a cell's subtree is a
+/// set of cells at higher indices and building in descending order reaches every child before
+/// its parent.
+///
+/// A cell is only ever built together with its whole subtree, so one already built needs
+/// nothing below it walked again.
 ///
 /// # Errors
 ///
 /// [`CellError::BadReference`] if `index` is past the bag's cell count, and otherwise as
-/// [`read_and_build`], for the cells it reads and builds.
-pub(super) fn build_cell(
-    reader: &mut Reader<'_>,
-    header: &Header,
-    index: usize,
-) -> Result<Cell, CellError> {
-    let count = header.count;
-    if index >= count {
+/// [`read_and_build`], for the cells it builds.
+pub(super) fn build_at(raw: &RawCells, state: &mut Build, index: usize) -> Result<Cell, CellError> {
+    if index >= raw.cells.len() {
         return Err(CellError::BadReference);
     }
-    let raw = read_raw(reader, header)?;
-    check_depths(&raw, count)?;
+    if let Some(cell) = state.get(index) {
+        return Ok(cell);
+    }
 
-    // Mark the cells the requested one reaches, following references forward.
-    let mut needed = vec![false; count];
+    // Walk what the requested cell reaches and has not been built, collecting the positions
+    // rather than scanning the bag for them afterwards.
+    let generation = state.open_walk();
+    let mut order: Vec<usize> = Vec::new();
     let mut stack = vec![index];
     while let Some(position) = stack.pop() {
-        match needed.get_mut(position) {
-            Some(slot) if !*slot => *slot = true,
+        if state.built.get(position).is_some_and(Option::is_some) {
+            continue;
+        }
+        match state.seen.get_mut(position) {
+            Some(mark) if *mark != generation => *mark = generation,
             _ => continue,
         }
-        for &target in &raw.get(position).ok_or(CellError::BadReference)?.refs {
+        order.push(position);
+        for &target in &raw.cells.get(position).ok_or(CellError::BadReference)?.refs {
             stack.push(target);
         }
     }
+    order.sort_unstable();
 
-    // Build the marked cells in descending order, so a child is built before its parent.
-    let mut built: Vec<Option<Cell>> = (0..count).map(|_| None).collect();
-    for position in (0..count).rev() {
-        if needed.get(position) != Some(&true) {
-            continue;
-        }
-        let raw_cell = raw.get(position).ok_or(CellError::BadReference)?;
+    for position in order.into_iter().rev() {
+        let raw_cell = raw.cells.get(position).ok_or(CellError::BadReference)?;
         let mut refs = Vec::with_capacity(raw_cell.refs.len());
         for &target in &raw_cell.refs {
-            let child = built
+            let child = state
+                .built
                 .get(target)
                 .and_then(Option::as_ref)
                 .ok_or(CellError::BadReference)?;
@@ -297,16 +374,35 @@ pub(super) fn build_cell(
             let (hashes, depths) = cell.stored();
             check_stored(hashes, depths, stored)?;
         }
-        if let Some(slot) = built.get_mut(position) {
+        if let Some(slot) = state.built.get_mut(position) {
             *slot = Some(cell);
         }
     }
 
-    built
-        .into_iter()
-        .nth(index)
-        .flatten()
-        .ok_or(CellError::BadReference)
+    state.get(index).ok_or(CellError::BadReference)
+}
+
+/// Builds one cell of the bag, and only the cells it reaches, leaving the rest unbuilt.
+///
+/// This reads the bag to know its structure and to check it, builds the requested cell's
+/// subtree, and drops the rest. A caller reading more than one cell of the same bag wants
+/// [`read_cells`] and [`build_at`] instead, which read once and keep what they build.
+///
+/// # Errors
+///
+/// [`CellError::BadReference`] if `index` is past the bag's cell count, and otherwise as
+/// [`read_and_build`], for the cells it reads and builds.
+pub(super) fn build_cell(
+    reader: &mut Reader<'_>,
+    header: &Header,
+    index: usize,
+) -> Result<Cell, CellError> {
+    if index >= header.count {
+        return Err(CellError::BadReference);
+    }
+    let raw = read_cells(reader, header)?;
+    let mut state = Build::new(header.count);
+    build_at(&raw, &mut state, index)
 }
 
 /// Determines a cell's kind, and holds an exotic cell to the shape that kind must have.
