@@ -40,8 +40,9 @@ The whole battery, at the budget the gate runs:
 cargo test -p ton-net-cell --all-features fuzz
 ```
 
-That is five targets at fifteen hundred cases each, about four seconds. It runs inside
-`just gate` and inside the `check` job of CI, because it is part of `cargo test`.
+That is five targets at fifteen hundred cases each, about a second and a half on the machine
+this was written on. It runs inside `just gate` and inside the `check` job of CI, because it
+is part of `cargo test`.
 
 A longer run sets the budget:
 
@@ -64,10 +65,11 @@ The scheduled job in CI runs a million cases per target nightly, half an hour at
 above, next to the mutation testing and for the same reason: the answer does not change
 between two commits on the same day.
 
-Run the long campaign in the default profile rather than `--release`. Debug builds check arithmetic
-overflow, and an overflow on a length read off the wire is one of the failures worth
-finding. `--release` wraps instead, which turns that failure into a wrong value nothing
-reports.
+Run the long campaign in the default profile rather than `--release`. Debug builds check
+arithmetic overflow, and an overflow on a length read off the wire is one of the failures
+worth finding. `--release` wraps instead, which turns that failure into a wrong value
+nothing reports. The `just fuzz` recipe and the CI job below both point here for that
+reason rather than restating it.
 
 ## Reproducing a failure
 
@@ -93,9 +95,11 @@ Each holds the reader to the properties that make the boundary sound, rather tha
 having survived, which the test runner reports anyway.
 
 - **`bag_of_cells`** runs `parse_boc` over the whole case. What parses has to sit inside
-  `MAX_CELLS` and inside `MAX_DEPTH` over the reference graph, and each of its cells has to
-  carry exactly the bytes its bit count needs. `MAX_BITS` and `MAX_REFS` are not checked,
-  because neither is a bound the reader gets the chance to miss. `bit_len` in
+  `MAX_DEPTH` over the reference graph, and each of its cells has to carry exactly the bytes
+  its bit count needs. `MAX_CELLS` is checked in `header` instead, which is the door that
+  reads the count a bag states rather than one that counts what a bag already parsed to.
+  `MAX_BITS` and `MAX_REFS` are not checked at all, because neither is a bound the reader
+  gets the chance to miss. `bit_len` in
   `crates/ton-net-cell/src/boc.rs` halves a descriptor byte, multiplies by eight and adds
   seven at its widest, which is `MAX_BITS` at a descriptor of 255, and `Refs` in
   `crates/ton-net-cell/src/cell/refs.rs` is an enum whose widest variant holds `MAX_REFS`
@@ -110,11 +114,14 @@ having survived, which the test runner reports anyway.
   is a count nothing behind it can honour, and the header reader refuses one before it
   allocates for it. This is the door that can see that: counting the cells of a bag that
   already parsed cannot, because a parsed bag has read those two bytes per cell already. It
-  then reads the bag four ways, through `parse_boc`, `BocView::materialize`,
-  `BocView::verify` and `BocView::cell`, and requires the same answer or the same error down
-  all four. Those paths share a header reader and a cell reader and diverge in what they
-  keep, so an input where they disagree is an input where one of them has a bound the others
-  do not.
+  then reads the bag five ways, through `parse_boc`, `BocView::materialize`,
+  `BocView::verify`, `BocView::cell` and `LazyBoc`, and requires the same answer or the same
+  error down all five. Those paths share a header reader and a cell reader and diverge in
+  what they keep, so an input where they disagree is an input where one of them has a bound
+  the others do not. `LazyBoc` is the one that keeps what it builds, so it is asked for a
+  bag's cells deepest index first and then asked again: the second ask has to hand back the
+  cell it is holding rather than a second copy of it, which is the only door that reaches the
+  steps the builder takes around ground already built.
 
 - **`slice_reads`** drives a `Slice` over the cells of a bag that parsed, with a read
   script taken from the case's own bytes. A read either moves the cursor forward inside the
@@ -163,14 +170,15 @@ looked at. A bag may also carry a CRC-32C, and an edit under one is refused at t
 checksum. Repairing both is what puts an edit in front of the cell reader; leaving them
 broken some of the time is what keeps the two gates themselves under test.
 
-Byte editing alone is not enough on this format. Measured over this corpus it got three
-or four cases in a hundred past `parse_boc`: an edit lands on a cell descriptor about as
-often as on cell data, and a changed descriptor moves every cell after it, so the bag stops
-reading at the first one. So a case is as often derived through the cell model instead: a
-subtree of a mainnet block serialized on its own is a valid bag whose root is a dictionary
-node, a pruned branch or a Merkle proof, sometimes with its bits changed through a builder,
-which puts the readers above the parser in front of real structure. That took the share of
-cases reaching the reader to about a third for the bag targets and half for the header.
+Byte editing alone is not enough on this format. Measured over this corpus at the default
+seed it got about five cases in a hundred past `parse_boc`: an edit lands on a cell
+descriptor about as often as on cell data, and a changed descriptor moves every cell after
+it, so the bag stops reading at the first one. So a case is as often derived through the
+cell model instead: a subtree of a mainnet block serialized on its own is a valid bag whose
+root is a dictionary node, a pruned branch or a Merkle proof, sometimes with its bits
+changed through a builder, which puts the readers above the parser in front of real
+structure. That took the share of cases reaching the reader to about three in ten for the
+bag targets and half for the header.
 
 Each target reports that share and fails under a floor. Without it a fixture that moved, a
 corpus that stopped reaching the reader or a repair that stopped repairing would leave
@@ -213,8 +221,10 @@ entries than it has distinct cells; `serialize_boc` writes one root entry per ro
 handed against a cell count of the distinct cells it walked, and a header stating more
 roots than cells is refused on the way back in. The defect is pinned as its own case in
 `crates/ton-net-cell/tests/cell/roundtrip.rs`, which holds the sixteen byte bag that
-reproduces it and the two directions a fix could take. The `bag_of_cells` target only states
-which bags its round-trip check covers.
+reproduces it and the two directions a fix could take. It is a case rather than a comment
+because a defect described in prose beside the assertion that steps around it reads as
+design; that is the one statement of the reason, and the code points here for it. The
+`bag_of_cells` target only states which bags its round-trip check covers.
 
 ## Adding a target
 

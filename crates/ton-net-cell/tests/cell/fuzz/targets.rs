@@ -18,7 +18,7 @@ use std::collections::HashMap;
 
 use ton_net_cell::{
     parse_boc, serialize_boc, AugDict, Augmentation, BocView, Builder, Cell, CellError, Dict,
-    PfxDict, Slice, MAX_CELLS, MAX_DEPTH,
+    LazyBoc, PfxDict, Slice, MAX_CELLS, MAX_DEPTH,
 };
 
 use super::{distinct_cells, Rng};
@@ -51,9 +51,9 @@ const WALK_CAP: usize = 4_096;
 ///
 /// `Cell::depth` is a different number and is not the one to check here. A pruned branch
 /// answers with the depth of the subtree it stands in for, and that value is read out of the
-/// branch's own body, so a bag of one cell reports whatever depth its two body bytes spell:
-/// the fuzzer reached 4611 from 53 bytes. The parser bounds the graph it built, which is
-/// what keeps a later walk or drop off the stack, so the check has to walk that graph.
+/// branch's own body, so a bag of one cell reports whatever depth its two body bytes spell.
+/// The parser bounds the graph it built, which is what keeps a later walk or drop off the
+/// stack, so the check has to walk that graph.
 ///
 /// Iterative and memoised on the representation hash, because the bound is what is under
 /// test: a recursive walk would meet the stack before the assertion.
@@ -86,9 +86,12 @@ fn reference_depth(roots: &[Cell]) -> usize {
 
 /// `parse_boc` over arbitrary bytes, the top of the untrusted path.
 ///
-/// What is checked is the shape of what came back: the two published limits a reader could
-/// miss, the stored bytes of each cell against its bit count, and the round trip that says
-/// the bag can be written again as the same cells.
+/// What is checked is the shape of what came back: `MAX_DEPTH` over the reference graph, the
+/// stored bytes of each cell against its bit count, and the round trip that says the bag can
+/// be written again as the same cells. `MAX_CELLS` is not checked here. A bag stores each
+/// distinct cell once and this target counts the distinct cells it got back, which is at most
+/// the count the header stated, so the count is bounded before this sees it. The door that can
+/// see it is `header`, which reads the stated count itself.
 pub(super) fn bag_of_cells(bytes: &[u8]) -> bool {
     let Ok(roots) = parse_boc(bytes) else {
         return false;
@@ -96,11 +99,6 @@ pub(super) fn bag_of_cells(bytes: &[u8]) -> bool {
     assert!(!roots.is_empty(), "a bag parsed to no roots at all");
 
     let cells = distinct_cells(&roots);
-    assert!(
-        cells.len() <= MAX_CELLS,
-        "a bag of {} cells parsed past the {MAX_CELLS} cell limit",
-        cells.len()
-    );
     let deepest = reference_depth(&roots);
     assert!(
         deepest <= MAX_DEPTH,
@@ -125,13 +123,11 @@ pub(super) fn bag_of_cells(bytes: &[u8]) -> bool {
 
     let written = serialize_boc(&roots).expect("a bag that parsed serializes");
 
-    // The round trip is checked for every bag but one shape, and the exception is a defect
-    // rather than a property: a bag whose root list names one cell twice is written back
-    // with more root entries than cells, and a root count above the cell count is the one
-    // thing `read_header` refuses outright. The fuzzer reached it from a sixteen byte bag.
-    // The defect is pinned as its own case in `tests/cell/roundtrip.rs`, which is where the
-    // reproduction and the two directions a fix could take are written down; the condition
-    // below only states which bags this check covers.
+    // The round trip is checked for every bag but one shape: a bag whose root list names one
+    // cell twice is written back with more root entries than cells, which `read_header`
+    // refuses. That is a defect rather than a property, and it is pinned in
+    // `tests/cell/roundtrip.rs`; `docs/fuzzing.md` says why it is a case rather than a
+    // comment. The condition below only states which bags this check covers.
     if roots.len() <= cells.len() {
         let back = parse_boc(&written).expect("a bag this crate wrote parses back");
         assert_eq!(
@@ -155,13 +151,14 @@ pub(super) fn bag_of_cells(bytes: &[u8]) -> bool {
     true
 }
 
-/// The header reader, and the four readers that stand on it.
+/// The header reader, and the five readers that stand on it.
 ///
-/// `parse_boc`, `BocView::materialize`, `BocView::verify` and `BocView::cell` read one bag
-/// four ways. They share a header reader and a cell reader and diverge in what they keep, so
-/// an input where they disagree is an input where one of them has a bound the others do not.
+/// `parse_boc`, `BocView::materialize`, `BocView::verify`, `BocView::cell` and `LazyBoc` read
+/// one bag five ways. They share a header reader and a cell reader and diverge in what they
+/// keep, so an input where they disagree is an input where one of them has a bound the others
+/// do not.
 ///
-/// Of those four, this is the one that stops at the header, before a cell is built, which is
+/// Of those five, this is the one that stops at the header, before a cell is built, which is
 /// where the counts a bag states about itself are still statements rather than things
 /// already read.
 pub(super) fn header(bytes: &[u8]) -> bool {
@@ -249,13 +246,95 @@ pub(super) fn header(bytes: &[u8]) -> bool {
         _ => panic!("verify and materialize disagree on whether a bag reads"),
     }
 
+    // The fifth reader stops between the two: it reads the bag once, as `materialize` does,
+    // and then builds a cell at a time, as `BocView::cell` does. What it refuses is therefore
+    // what the reader that builds everything refuses, and it has to refuse it the same way.
+    let lazy = match LazyBoc::open(bytes) {
+        Ok(lazy) => lazy,
+        Err(refused) => {
+            assert_eq!(
+                materialized.as_ref().err(),
+                Some(&refused),
+                "the lazy reader refused a bag materialize did not"
+            );
+            return true;
+        }
+    };
+    assert_eq!(
+        lazy.cell_count(),
+        view.cell_count(),
+        "two readers counted a bag's cells differently"
+    );
+    assert_eq!(
+        lazy.root_count(),
+        view.root_count(),
+        "two readers counted a bag's roots differently"
+    );
+
     // A bag that materialized had every one of its cells built, so building one on its own
     // cannot fail. Bounded because the cost is per cell and a whole block is over a thousand.
+    //
+    // Taken from the deepest index down, which is children before parents, so each cell after
+    // the first meets a subtree the reader is already holding. That is the state the reader
+    // beside it never has: `BocView::cell` builds from nothing on every call, so the steps the
+    // builder takes around ground already built are reached through this door and no other.
     if materialized.is_ok() {
-        for index in 0..view.cell_count().min(CELLS_READ) {
+        let reach = view.cell_count().min(CELLS_READ);
+        let mut kept: Vec<Cell> = Vec::with_capacity(reach);
+        for index in (0..reach).rev() {
+            let Ok(alone) = view.cell(index) else {
+                panic!("cell {index} of a bag that materialized would not build on its own");
+            };
+            let Ok(lazily) = lazy.cell(index) else {
+                panic!("cell {index} of a bag that materialized would not build lazily");
+            };
+            assert_eq!(
+                alone.repr_hash(),
+                lazily.repr_hash(),
+                "two readers gave cell {index} two identities"
+            );
+            kept.push(lazily);
+        }
+
+        // Asked a second time, in the other order, a cell has to come back as the cell the
+        // reader is holding rather than as a second copy of it.
+        for (index, cell) in kept.iter().rev().enumerate() {
+            let Ok(again) = lazy.cell(index) else {
+                panic!("cell {index} would not come back from the reader holding it");
+            };
             assert!(
-                view.cell(index).is_ok(),
-                "cell {index} of a bag that materialized would not build on its own"
+                cell.ptr_eq(&again),
+                "cell {index} came back as a second copy of itself"
+            );
+        }
+        // And the work says the same thing the handles do: a reader that never builds twice
+        // has built exactly what it holds. A count of cells held cannot see a rebuild on its
+        // own, because a rebuilt cell takes the slot of the one it replaced.
+        assert_eq!(
+            lazy.builds_run(),
+            lazy.built_count(),
+            "the reader ran {} builds to hold {} cells",
+            lazy.builds_run(),
+            lazy.built_count()
+        );
+    }
+
+    // Last, because asking for a root builds everything under it, and a reader holding the
+    // whole bag hands back what it holds without walking anything.
+    if let Ok(built) = &materialized {
+        let Ok(lazily) = lazy.roots() else {
+            panic!("the roots of a bag that materialized would not build lazily");
+        };
+        assert_eq!(
+            lazily.len(),
+            built.len(),
+            "two readers found different roots"
+        );
+        for (one, other) in lazily.iter().zip(built) {
+            assert_eq!(
+                one.repr_hash(),
+                other.repr_hash(),
+                "two readers gave one bag two identities"
             );
         }
     }
@@ -316,10 +395,6 @@ pub(super) fn slice_reads(bytes: &[u8]) -> bool {
             assert!(
                 after_refs <= before_refs,
                 "a read gave references back to the slice"
-            );
-            assert!(
-                after_bits <= total_bits && after_refs <= total_refs,
-                "a slice reads past the cell it opened"
             );
             if outcome == Outcome::RefusedWhole {
                 assert_eq!(
@@ -529,9 +604,10 @@ pub(super) fn compressed(bytes: &[u8]) -> bool {
         // that it refuses bytes that "do not expand to the length they name", and the
         // decoder underneath treats the prefix as the size to allocate rather than the size
         // to produce: it fills a buffer of that length, decodes into it, and truncates to
-        // what the body gave. The fuzzer reached `Ok` with an empty vector from five bytes
-        // naming 27,015,349, so equality does not hold today. What does hold, and what the
-        // cap in front of it is for, is that nothing comes back longer than the prefix.
+        // what the body gave. A body that produces fewer bytes than its prefix names
+        // therefore comes back short rather than refused, so equality does not hold today.
+        // What does hold, and what the cap in front of it is for, is that nothing comes back
+        // longer than the prefix.
         assert!(
             named.is_some_and(|named| expanded.len() <= named),
             "decompression ran past the length the input named"

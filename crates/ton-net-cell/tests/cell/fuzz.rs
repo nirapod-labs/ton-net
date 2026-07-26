@@ -29,32 +29,25 @@
 //! Not that the process survived, which the test runner gives away. Each target holds the
 //! reader to the properties that make the boundary sound:
 //!
-//! - What parses stays inside the two limits a reader could miss: `MAX_CELLS`, which a
-//!   header states, and `MAX_DEPTH` over the reference graph it builds. The corpus carries a
-//!   bag one past each, so removing either check in the crate fails a target here. A cell's
-//!   stored bytes are also the ones its bit count needs. `MAX_BITS` and `MAX_REFS` are not
-//!   asserted: `bit_len` in `src/boc.rs` is a byte halved and multiplied by eight plus at
-//!   most seven, which is `MAX_BITS` at a descriptor of 255, and `Refs` in `src/cell/refs.rs`
-//!   is an enum whose widest variant holds `MAX_REFS`. Neither is a bound a reader has the
-//!   chance to get wrong.
+//! - What parses stays inside the two limits a reader could miss, each at the door that can
+//!   see it: `MAX_CELLS` against the count a header states, and `MAX_DEPTH` over the
+//!   reference graph a bag builds. The corpus carries a bag one past each, so removing either
+//!   check in the crate fails a target here. A cell's stored bytes are also the ones its bit
+//!   count needs. `MAX_BITS` and `MAX_REFS` are not asserted: `bit_len` in `src/boc.rs` is a
+//!   byte halved and multiplied by eight plus at most seven, which is `MAX_BITS` at a
+//!   descriptor of 255, and `Refs` in `src/cell/refs.rs` is an enum whose widest variant
+//!   holds `MAX_REFS`. Neither is a bound a reader has the chance to get wrong.
 //! - A header is bounded by its own input. It states at most one cell per two bytes the bag
 //!   carries, because the header reader refuses a count the remaining bytes could not hold
 //!   before it allocates for that count.
-//! - The doors agree. `parse_boc`, `BocView::materialize`, `BocView::verify` and
-//!   `BocView::cell` read the same bag through four paths, and every input has to reach the
-//!   same answer or the same error down all four.
+//! - The doors agree. `parse_boc`, `BocView::materialize`, `BocView::verify`, `BocView::cell`
+//!   and `LazyBoc` read the same bag through five paths, and every input has to reach the
+//!   same answer or the same error down all five.
 //! - What parses round trips. Serializing a parsed bag and reading it back gives the same
 //!   root representation hashes, and serializing again gives the same bytes.
 //!
-//! # Where this sits beside what was already here
-//!
-//! `src/proptests.rs` generates cell trees and goes out through the serializer, so every
-//! encoding it sees is one this crate wrote. `tests/cell/hostile.rs` mutates one captured
-//! proof and asserts that nothing panics. This adds the parts neither reaches: the whole
-//! fixture set rather than one file, header shapes written field by field rather than
-//! edited a byte at a time, a checksum repaired after a mutation so the edit reaches a cell
-//! instead of stopping at the checksum gate, read scripts driven by the input itself, and
-//! the limit, agreement and boundedness assertions above in place of a bare no-panic check.
+//! Beside this sit `src/proptests.rs`, over cell trees this crate itself wrote, and
+//! `tests/cell/hostile.rs`, over byte edits to one captured proof.
 //!
 //! # Running it
 //!
@@ -122,8 +115,9 @@ const DEFAULT_SEED: u64 = 0x5346_5546_465A_5A55;
 
 /// The fraction of a run's cases that has to get past the reader, as a divisor.
 ///
-/// Measured runs sit far above this; it is a floor under a harness that has stopped
-/// working, not a target to reach.
+/// It is a floor under a harness that has stopped working, not a target to reach. At the
+/// default seed the four bag-fed targets sit above five times it and `compressed`, the one
+/// with the least room to spare, at a little over twice.
 const REACH_DIVISOR: usize = 20;
 
 /// How many levels the shared-subtree dictionary seed carries.
@@ -141,9 +135,9 @@ const SHARED_LEVELS: usize = 32;
 
 /// A deterministic stream of fuzz decisions.
 ///
-/// `splitmix64`, which is a few lines and passes the statistical tests a mutation schedule
-/// needs. The point is reproducibility rather than randomness: a case is a function of the
-/// seed and its index, so a failure is re-run rather than hunted for again.
+/// `splitmix64`, which is a few lines. The point is reproducibility rather than randomness: a
+/// case is a function of the seed and its index, so a failure is re-run rather than hunted
+/// for again.
 pub struct Rng(u64);
 
 impl Rng {
@@ -424,10 +418,10 @@ fn shared_subtree_dictionary(levels: usize) -> Vec<u8> {
 /// The compressed forms of those bags, which is a different encoding and its own corpus.
 ///
 /// A bag of cells handed to `decompress` is refused on its first four bytes, read as a
-/// length prefix, and never reaches the decoder: over the bag corpus above, two cases in
-/// fifteen hundred got past that. The compressed corpus is the same bags compressed, so an
-/// edit lands inside a real LZ4 stream where a token, a match offset or a literal run is
-/// what changes.
+/// length prefix, and never reaches the decoder: run against the bag corpus above, this
+/// target got none of its fifteen hundred cases past that. The compressed corpus is the same
+/// bags compressed, so an edit lands inside a real LZ4 stream where a token, a match offset
+/// or a literal run is what changes.
 #[cfg(feature = "compress")]
 fn compressed_corpus() -> Vec<Vec<u8>> {
     let mut seeds: Vec<Vec<u8>> = corpus()
@@ -522,8 +516,8 @@ pub fn distinct_cells(roots: &[Cell]) -> Vec<Cell> {
 ///
 /// A byte edit inside a captured bag lands on a cell descriptor about as often as on cell
 /// data, and a changed descriptor moves every cell after it, so the bag stops reading at the
-/// first one and the edit is never read as a cell. Measured over this corpus, byte editing
-/// alone got about three cases in a hundred past `parse_boc`.
+/// first one and the edit is never read as a cell. Measured over this corpus at the default
+/// seed, byte editing alone got about five cases in a hundred past `parse_boc`.
 ///
 /// Going through the cell model instead keeps the bag readable. A subtree of a mainnet block
 /// serialized on its own is a valid bag whose root is a dictionary node, a pruned branch or
@@ -818,7 +812,7 @@ fn a_bag_that_parses_stays_inside_the_limits_it_was_read_under() {
 }
 
 #[test]
-fn every_door_onto_a_bag_reaches_the_same_answer() {
+fn a_bag_read_five_ways_reaches_the_same_answer() {
     run("header", targets::header, &corpus(), boc_case);
 }
 

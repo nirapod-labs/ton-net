@@ -140,10 +140,10 @@ jobs:
   fuzz:
     name: the decode boundary at length
     # The same targets the gate's own `cargo test` runs on every push, at a budget that
-    # takes about half an hour rather than four seconds: docs/fuzzing.md measures a quarter
-    # of a million cases per target at about seven minutes, so the million below is around
-    # thirty. Like the mutation run, the answer does not change between two commits on the
-    # same day, so it runs on the daily schedule.
+    # takes about half an hour rather than a second and a half: docs/fuzzing.md measures
+    # a quarter of a million cases per target at about seven minutes, so the million below
+    # is around thirty. Like the mutation run, the answer does not change between two
+    # commits on the same day, so it runs on the daily schedule.
     if: github.event_name == 'schedule' && github.repository == 'nirapod-labs/ton-net'
     runs-on: ubuntu-latest
     steps:
@@ -152,11 +152,9 @@ jobs:
         with:
           toolchain: stable
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
-      # Bytes a peer chose, read as values this client trusts. Not a release profile: a
-      # debug build checks arithmetic overflow, and an overflow on a length read off the
-      # wire is one of the failures this is looking for. The seed is fixed, so a case that
-      # fails here reproduces from the two numbers the log printed; docs/fuzzing.md says
-      # how.
+      # Bytes a peer chose, read as values this client trusts. The seed is fixed, so a case
+      # that fails here reproduces from the two numbers the log printed; docs/fuzzing.md
+      # says how, and says why this is not a release profile.
       - name: cell decode boundary
         env:
           TON_NET_FUZZ_ITERATIONS: 1000000

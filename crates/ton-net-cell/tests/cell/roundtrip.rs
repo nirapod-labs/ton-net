@@ -3,9 +3,7 @@
 
 //! A bag this crate writes that this crate will not read back.
 //!
-//! Found by the decode-boundary fuzzing in [`fuzz`](super::fuzz), which is what that work is
-//! for. Kept as a case rather than a comment because a defect described in prose beside the
-//! assertion that steps around it reads as design.
+//! Found by the decode-boundary fuzz targets in [`fuzz`](super::fuzz).
 
 use ton_net_cell::{parse_boc, serialize_boc, CellError};
 
