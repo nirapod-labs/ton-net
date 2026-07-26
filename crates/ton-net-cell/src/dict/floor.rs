@@ -4,13 +4,14 @@
 //! The plain dictionary's nearest-key lookups, bulk build, and prefix sub-dictionary.
 //!
 //! These sit apart from the get, set and remove of [`Dict`](super::Dict) because each reads
-//! the dictionary whole rather than walking one path: a floor or ceiling query scans in key
-//! order, a prefix carve re-roots the tree, and a bulk build is a convenience over repeated
-//! [`set`](super::Dict::set).
+//! or writes the dictionary whole rather than walking one path: a floor or ceiling query
+//! scans in key order, a prefix carve re-roots the tree, and a bulk build lays the whole
+//! tree out at once from its sorted items.
 
 use core::borrow::Borrow;
 
-use super::{key_of, reroot, Dict, DictEntry};
+use super::plain::Plain;
+use super::{build_all, key_of, reroot, Dict, DictEntry};
 use crate::builder::Builder;
 use crate::error::CellError;
 
@@ -21,6 +22,10 @@ impl Dict {
     /// the last value it was given, and the result is the one canonical dictionary for its
     /// final key set: the same tree [`set`](Dict::set) builds one entry at a time, and the
     /// same whatever order the items arrive in.
+    ///
+    /// The items are sorted by key once and the tree is laid out from the leaves up, so each
+    /// node is built with its children already final. Repeated [`set`](Dict::set) instead
+    /// rebuilds the forks it descended through, once per key stored.
     ///
     /// # Examples
     ///
@@ -36,8 +41,10 @@ impl Dict {
     ///
     /// # Errors
     ///
-    /// Returns [`CellError`] as [`set`](Dict::set) does for the first item whose key is too
-    /// short or whose label and value will not share one cell.
+    /// Returns [`CellError::Malformed`] if a key `key_bits` wide could not label a cell,
+    /// [`CellError::KeyLength`] where an item's key is too short, reported at the earliest
+    /// such item the iterator yields, or [`CellError::NoRoomForBits`] where a label and a
+    /// value will not share one cell.
     pub fn from_items<K, V>(
         key_bits: u16,
         items: impl IntoIterator<Item = (K, V)>,
@@ -46,11 +53,10 @@ impl Dict {
         K: AsRef<[u8]>,
         V: Borrow<Builder>,
     {
-        let mut dict = Self::new(key_bits)?;
-        for (key, value) in items {
-            dict.set(key.as_ref(), value.borrow())?;
-        }
-        Ok(dict)
+        // A plain node carries nothing between its label and its value, which is the `()`
+        // each item is paired with here.
+        let items = items.into_iter().map(|(key, value)| (key, (), value));
+        Self::from_root(build_all(&Plain, key_bits, items)?, key_bits)
     }
 
     /// The entry at `key`, or the next one after it in ascending key order.

@@ -29,6 +29,11 @@ never published.
 
 ### Changed
 
+- `Dict::from_items` and `AugDict::from_items` sort their items by key once and
+  build the tree from the leaves up, so each node is built with its children
+  already final. Both were a loop over `set`, which rebuilds the forks it
+  descended through, once per key stored. Neither signature changes, and the
+  tree is the same one, held to the same mainnet root hashes it already was.
 - `SessionCiphers::seal` returns `Result<Vec<u8>, FrameError>` and refuses a
   payload larger than one frame carries. The read side already refused a body
   outside that range, so the two ends now hold to the same ceiling. Nothing is
