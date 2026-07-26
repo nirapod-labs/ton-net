@@ -15,7 +15,7 @@
 //! a real bag of cells: single flipped bytes, truncations, and splices reach the deep
 //! paths that arbitrary input never does.
 
-use ton_net_cell::{parse_boc, Cell};
+use ton_net_cell::{parse_boc, serialize_boc, Builder, Cell, CellError, MAX_DEPTH};
 
 /// A real proof, the starting point every mutation works from.
 const PROOF_HEX: &str = include_str!("../fixtures/account-proof.hex");
@@ -196,4 +196,36 @@ fn what_survives_reserialization_parses_back() {
 
     // Without this the test could pass having reserialized nothing at all.
     assert!(checked > 0, "no corrupted tree survived to be reserialized");
+}
+
+/// A chain of `links` cells, each holding a reference to the next, as a serialized bag.
+fn deep_chain(links: usize) -> Vec<u8> {
+    let mut cell = Builder::new().build().expect("a leaf forms");
+    for _ in 0..links {
+        let mut builder = Builder::new();
+        builder.store_ref(cell).expect("a reference fits");
+        cell = builder.build().expect("a cell forms");
+    }
+    serialize_boc(std::slice::from_ref(&cell)).expect("a chain serializes")
+}
+
+#[test]
+fn a_bag_deeper_than_the_limit_is_refused() {
+    // The depth limit is the only thing between a bag a peer chose and a chain long enough
+    // that walking it takes the stack with it. Both sides are asserted: refusing the deep bag
+    // is what a limit that refuses everything also does, so the shallow one has to be read.
+    let at_limit = deep_chain(MAX_DEPTH);
+    assert!(
+        parse_boc(&at_limit).is_ok(),
+        "a bag at the limit is a legal bag"
+    );
+
+    let past_limit = deep_chain(MAX_DEPTH + 1);
+    assert!(
+        matches!(
+            parse_boc(&past_limit),
+            Err(CellError::TooDeep { limit: MAX_DEPTH })
+        ),
+        "a bag one link past the limit is refused"
+    );
 }
