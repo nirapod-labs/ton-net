@@ -9,11 +9,9 @@
 //! that part and pays nothing to read it again. The kept cells sit in the reader, not in the
 //! cells themselves, so a [`Cell`] stays the immutable value it is everywhere else.
 //!
-//! Reading a bag and building its cells are two costs, and only the second is per cell. The
-//! first is paid once, at [`open`](LazyBoc::open). What the reader keeps from there is the
-//! cells as they were read, never the bytes, so reading the same bag twice is not something
-//! this can do rather than something it is careful not to: the bytes are gone. That is also
-//! why a `LazyBoc` carries no lifetime and outlives the buffer it was read from.
+//! The first of those two costs is paid once, at [`open`](LazyBoc::open). What the reader
+//! keeps from there is the cells as they were read and never the bytes, so a `LazyBoc`
+//! carries no lifetime and outlives the buffer it was read from.
 
 use std::cell::RefCell;
 
@@ -35,9 +33,6 @@ pub struct LazyBoc {
 
 impl LazyBoc {
     /// Reads and checks a bag, its header and then its cells, building none of them.
-    ///
-    /// This is the whole of what a `LazyBoc` reads. It costs the bag once, and no later call
-    /// returns to the bytes.
     ///
     /// # Errors
     ///
@@ -80,6 +75,18 @@ impl LazyBoc {
         // The borrow is taken and dropped inside this call, never held across another, so it
         // cannot conflict with the borrows `cell` takes.
         self.build.borrow().count()
+    }
+
+    /// The number of cells this reader has built, counting one built twice twice.
+    ///
+    /// This is [`built_count`](LazyBoc::built_count) plus whatever work was repeated, so the
+    /// two are equal exactly when nothing has been built more than once. A rebuilt cell is
+    /// equal to the one it replaced and takes the same place, so no count of cells held says
+    /// it happened. The other thing that does is [`Cell::ptr_eq`](crate::Cell::ptr_eq), which
+    /// asks whether two handles are one cell rather than two equal ones.
+    #[must_use]
+    pub fn builds_run(&self) -> usize {
+        self.build.borrow().builds()
     }
 
     /// Builds the cell at `index` along with the subtree it reaches, keeping every one, or
@@ -193,9 +200,8 @@ mod tests {
 
     #[test]
     fn a_bag_is_read_once_and_the_bytes_are_not_kept() {
-        // The whole point of the type, asserted the only way that cannot rot: the buffer is
-        // dropped and the reader still works. A reader that went back to the bytes for each
-        // cell could not compile against this, let alone pass it.
+        // The buffer is dropped before the first read, so a reader that went back to the
+        // bytes would not compile here.
         let lazy = {
             let bag = two_cell_bag();
             LazyBoc::open(&bag).expect("the header reads")
@@ -207,8 +213,6 @@ mod tests {
 
     #[test]
     fn building_a_cell_keeps_the_subtree_it_reaches() {
-        // Building reaches a whole subtree either way, so keeping only the cell asked for
-        // would throw away work already done and pay for it again on the next call.
         let bag = two_cell_bag();
         let lazy = LazyBoc::open(&bag).expect("the header reads");
         assert_eq!(lazy.built_count(), 0, "nothing is built at open");
@@ -223,14 +227,52 @@ mod tests {
         let lazy = LazyBoc::open(&bag).expect("the header reads");
 
         lazy.cell(0).expect("builds the root");
-        let after_root = lazy.built_count();
+        let after_root = lazy.builds_run();
         assert_eq!(after_root, 4, "the root, both parents and the shared child");
 
-        // Every one of these is inside the subtree already built, so none of them is work.
-        for index in 0..lazy.cell_count() {
-            lazy.cell(index).expect("the kept cell");
+        let kept: Vec<_> = (0..lazy.cell_count())
+            .map(|index| lazy.cell(index).expect("the kept cell"))
+            .collect();
+        assert_eq!(
+            lazy.builds_run(),
+            after_root,
+            "asking for a cell already built built it again"
+        );
+        for (index, cell) in kept.iter().enumerate() {
+            assert!(
+                cell.ptr_eq(&lazy.cell(index).expect("the kept cell")),
+                "cell {index} came back as a second copy of itself"
+            );
         }
-        assert_eq!(lazy.built_count(), after_root, "a kept cell was rebuilt");
+    }
+
+    #[test]
+    fn a_cell_built_before_its_parent_is_left_where_it_is() {
+        // The other order, and the one the walk has to get right on its own: a caller reads a
+        // cell deep in the bag, then later reads something above it. The parent's walk runs
+        // over ground already built, and has to step around it rather than through it.
+        let bag = shared_child_bag();
+        let lazy = LazyBoc::open(&bag).expect("the header reads");
+
+        let deepest = lazy.cell_count() - 1;
+        let child = lazy.cell(deepest).expect("builds the deepest cell");
+        assert_eq!(lazy.builds_run(), 1, "the one cell, with nothing under it");
+
+        let root = lazy.cell(0).expect("builds the root above it");
+        assert_eq!(
+            lazy.builds_run(),
+            lazy.cell_count(),
+            "the cells above it, and not that one over again"
+        );
+        assert!(
+            child.ptr_eq(
+                root.reference(0)
+                    .expect("a parent")
+                    .reference(0)
+                    .expect("the child under it")
+            ),
+            "building the root replaced the cell that was built under it"
+        );
     }
 
     #[test]
@@ -239,7 +281,9 @@ mod tests {
         let lazy = LazyBoc::open(&bag).expect("the header reads");
         let first = lazy.cell(1).expect("builds");
         let again = lazy.cell(1).expect("the kept cell");
-        assert_eq!(first.repr_hash(), again.repr_hash());
+        // Equal is not enough: a rebuilt cell is equal to the one it replaced.
+        assert!(first.ptr_eq(&again), "the second ask rebuilt the cell");
+        assert_eq!(lazy.builds_run(), 1, "and did so without building anything");
         assert_eq!(again.data(), &[0xcd]);
     }
 
@@ -250,11 +294,17 @@ mod tests {
         let root = lazy.cell(0).expect("builds");
         let left = root.reference(0).expect("a first parent");
         let right = root.reference(1).expect("a second parent");
-        assert_eq!(
-            left.reference(0).expect("the shared child").repr_hash(),
-            right.reference(0).expect("the shared child").repr_hash()
+        assert!(
+            left.reference(0)
+                .expect("the shared child")
+                .ptr_eq(right.reference(0).expect("the shared child")),
+            "each parent got a copy of the child rather than the child"
         );
-        assert_eq!(lazy.built_count(), 4, "the child was built twice");
+        assert_eq!(
+            lazy.builds_run(),
+            4,
+            "the bag holds four cells and the walk built one of them twice"
+        );
     }
 
     #[test]

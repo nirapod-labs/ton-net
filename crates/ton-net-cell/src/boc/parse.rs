@@ -318,6 +318,13 @@ pub(super) struct Build {
     /// The walk that last reached each cell. Equal to `generation` means reached by this one.
     seen: Vec<u32>,
     generation: u32,
+    /// How many cells are held.
+    kept: usize,
+    /// How many cells have been built, which rises above `kept` only when a cell already
+    /// built is built again. That is the one thing this type exists to avoid, and nothing
+    /// else here can be asked about it: a rebuilt cell is equal to the one it replaced and
+    /// takes the same slot, so only a count of the work done says it happened.
+    builds: usize,
 }
 
 impl Build {
@@ -327,6 +334,19 @@ impl Build {
             built: vec![None; count],
             seen: vec![0; count],
             generation: 0,
+            kept: 0,
+            builds: 0,
+        }
+    }
+
+    /// Holds a freshly built cell at `position`, counting the build.
+    fn keep(&mut self, position: usize, cell: Cell) {
+        self.builds += 1;
+        if let Some(slot) = self.built.get_mut(position) {
+            if slot.is_none() {
+                self.kept += 1;
+            }
+            *slot = Some(cell);
         }
     }
 
@@ -337,7 +357,12 @@ impl Build {
 
     /// How many cells have been built and kept.
     pub(super) fn count(&self) -> usize {
-        self.built.iter().flatten().count()
+        self.kept
+    }
+
+    /// How many cells have been built, whether or not they were already built once.
+    pub(super) fn builds(&self) -> usize {
+        self.builds
     }
 
     /// Opens a walk and returns the generation it marks cells with.
@@ -423,9 +448,7 @@ pub(super) fn build_at(raw: &RawCells, state: &mut Build, index: usize) -> Resul
         if let Some(stored) = &raw_cell.stored {
             check_stored(cell.identity(), stored.of(&raw.payload)?)?;
         }
-        if let Some(slot) = state.built.get_mut(position) {
-            *slot = Some(cell);
-        }
+        state.keep(position, cell);
     }
 
     state.get(index).ok_or(CellError::BadReference)
