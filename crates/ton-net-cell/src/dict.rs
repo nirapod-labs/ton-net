@@ -14,7 +14,8 @@
 //! [`AugDict`]. A plain fork is its label and two references and nothing else; an
 //! augmented one also carries a summary of its subtree, and rebuilding it recomputes those
 //! summaries rather than copying them forward. The two differ only in what a node carries
-//! between its label and its value, so the descent, the split and the rebuild are written
+//! between its label and its value, so the descent, the split, the rebuild and the bulk
+//! build are written
 //! once over a private `Shape` seam and shared. The label codec that gives a dictionary
 //! its one canonical hash lives in the `label` submodule.
 
@@ -182,8 +183,8 @@ fn pack(bits: &[bool]) -> Vec<u8> {
 /// What a dictionary node carries between its label and its value.
 ///
 /// A plain node carries nothing there; an augmented one carries a summary of everything
-/// below it. That is the only difference between the two, so the descent, the split and
-/// the rebuild below are written once over this rather than twice.
+/// below it. That is the only difference between the two, so the descent, the split, the
+/// rebuild and the bulk build below are written once over this rather than twice.
 trait Shape {
     /// The summary a node carries, or `()` where it carries none.
     type Extra;

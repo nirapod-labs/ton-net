@@ -438,7 +438,8 @@ fn an_augmented_dictionary_is_read_but_not_rewritten() {
 
 #[test]
 fn a_dictionary_rebuilt_through_from_items_keeps_its_root_hash() {
-    // from_items is the one-call path to the same canonical tree Set builds a key at a time.
+    // from_items is the one-call path to the canonical tree, the same one Set builds a key at
+    // a time wherever Set can build it at all.
     // Feeding a mainnet dictionary its own entries has to reproduce the hash the network
     // computed, in either order, the same oracle the one-at-a-time rebuild answers to.
     let mut rebuilt = 0usize;

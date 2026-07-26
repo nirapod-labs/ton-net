@@ -707,7 +707,8 @@ mod tests {
     /// `CountSum` cannot see that: addition gives a fork the same summary whichever way round
     /// its children are read, so a build that swapped them agrees with one that did not. Every
     /// augmentation shipped with a real dictionary is free to be order-sensitive, and a bulk
-    /// build that read its children in the wrong order would corrupt one silently.
+    /// build that read its children in the wrong order would corrupt one silently. The
+    /// trait asks a summary to fold two children in order; it does not ask it to commute.
     struct CountSkew;
 
     impl Augmentation for CountSkew {
@@ -718,8 +719,8 @@ mod tests {
         }
 
         fn combine(&self, left: &u32, right: &u32) -> Result<u32, CellError> {
-            // Wrapping because a summary is folded up the whole tree and the lint floor
-            // forbids a panic on the read path.
+            // Wrapping because 31 compounds up the tree and leaves a u32 within a few
+            // levels. The value only has to differ under a swap, not mean anything.
             Ok(left.wrapping_mul(31).wrapping_add(*right))
         }
 
@@ -873,6 +874,25 @@ mod tests {
     }
 
     /// An item for each key, summarised by the count 1.
+    /// The same items, each carrying a summary of its own.
+    ///
+    /// [`counted_items`] gives every leaf the summary one, which makes a fork's two children
+    /// equal wherever the tree is balanced, and `31a + a` is the same whichever way round a
+    /// fork with equal children reads them. Under those items a build that swapped its
+    /// children is invisible at every fork of a balanced tree. Distinct summaries make the
+    /// swap show at every fork instead of only at the sizes that happen to be lopsided.
+    fn skewed_items(keys: &[u32]) -> Vec<([u8; 4], u32, Builder)> {
+        let mut value = Builder::new();
+        value.store_uint(0, 8).expect("a byte fits");
+        keys.iter()
+            .enumerate()
+            .map(|(i, key)| {
+                let extra = u32::try_from(i).expect("a small count") + 1;
+                (key.to_be_bytes(), extra, value.clone())
+            })
+            .collect()
+    }
+
     fn counted_items(keys: &[u32]) -> Vec<([u8; 4], u32, Builder)> {
         let mut value = Builder::new();
         value.store_uint(0, 8).expect("a byte fits");
@@ -949,13 +969,15 @@ mod tests {
                     "{n} keys {what}",
                 );
 
-                // Again under a summary that is not commutative, which is what makes the
-                // order a fork reads its children in observable. Under `CountSum` a build
-                // that swapped them agrees with one that did not.
+                // Again under a summary that is not commutative, over items whose leaf
+                // summaries all differ. Both are needed: `CountSum` cannot see a swapped
+                // fork at all, and `CountSkew` cannot see one whose two children carry the
+                // same summary, which is every fork of a balanced tree under `counted_items`.
+                let skewed = skewed_items(&keys);
                 let skew_bulk =
-                    AugDict::from_items(CountSkew, 32, items.clone()).expect("from_items");
+                    AugDict::from_items(CountSkew, 32, skewed.clone()).expect("from_items");
                 let mut skew_one = AugDict::new(CountSkew, 32).expect("a dictionary");
-                for (key, extra, value) in &items {
+                for (key, extra, value) in &skewed {
                     skew_one.set(key, extra, value).expect("set");
                 }
                 assert_eq!(

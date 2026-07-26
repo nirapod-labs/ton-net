@@ -36,7 +36,9 @@ never published.
   tree is the same one, held to the same mainnet root hashes it already was.
   Both now accept item sets no order of `set` builds: inserting one entry at a
   time gives the first key a label its whole width, and a value that fits beside
-  the finished tree's short label need not fit beside that one.
+  the finished tree's short label need not fit beside that one. `NoRoomForBits`
+  is now reported in sorted key order rather than the order items arrived in;
+  `KeyLength` is still reported at the earliest offending item.
 - `SessionCiphers::seal` returns `Result<Vec<u8>, FrameError>` and refuses a
   payload larger than one frame carries. The read side already refused a body
   outside that range, so the two ends now hold to the same ceiling. Nothing is

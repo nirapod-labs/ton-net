@@ -553,6 +553,43 @@ mod tests {
     }
 
     #[test]
+    fn a_bulk_build_holds_items_no_order_of_set_can_hold() {
+        // The doc comments and the changelog say a bulk build accepts item sets `set`
+        // refuses, so the claim needs a case. A key inserted alone labels a cell its whole
+        // width: 2 bits of tag, 6 for a length under a 32-bit key, and the 32 bits
+        // themselves. The finished tree gives each of these two leaves a 2-bit label
+        // instead, because they part at their last bit. So a value of 1000 bits fits every
+        // leaf of the tree that exists and fits neither leaf on the way to it.
+        let mut big = Builder::new();
+        for _ in 0..15 {
+            big.store_uint(0, 64).expect("a chunk of the value fits");
+        }
+        big.store_uint(0, 40).expect("the last chunk fits");
+        assert_eq!(big.bits_used(), 1000);
+
+        // Alternating bits, because a key that is one run of the same bit labels as a short
+        // repeat instead of spelling itself out, and would fit beside the value after all.
+        let left = 0xAAAA_AAAAu32.to_be_bytes();
+        let right = 0xAAAA_AAABu32.to_be_bytes();
+
+        let bulk = Dict::from_items(32, [(left, &big), (right, &big)]).expect("from_items");
+        assert_eq!(bulk.count().expect("count"), 2);
+
+        // Either key refused as the opening insert is what makes this no order rather than
+        // one unlucky order: whichever goes first is the one that cannot be stored.
+        for first in [left, right] {
+            let mut one_at_a_time = Dict::new(32).expect("a dictionary");
+            assert!(
+                matches!(
+                    one_at_a_time.set(&first, &big),
+                    Err(CellError::NoRoomForBits { .. })
+                ),
+                "a key inserted alone carries a full-width label, leaving no room beside it"
+            );
+        }
+    }
+
+    #[test]
     fn from_items_keeps_the_last_value_given_for_a_key() {
         let repeated = [
             (7u32.to_be_bytes(), value(1)),
