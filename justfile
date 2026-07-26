@@ -68,6 +68,13 @@ bench:
 mutants:
     cargo mutants -p ton-net-cell -p ton-net-block --timeout 120
 
+# The decode boundary under more cases than `test` runs on every push. Not a release
+# profile: a debug build checks arithmetic overflow, and an overflow on a length read off
+# the wire is one of the failures this is looking for. Slow, so it is a scheduled job in
+# CI as well. docs/fuzzing.md covers the seed and how a failing case reproduces.
+fuzz iterations="250000":
+    TON_NET_FUZZ_ITERATIONS={{ iterations }} cargo test -p ton-net-cell --all-features fuzz -- --nocapture
+
 versions-fix:
     node scripts/check-versions.mjs --fix
 
