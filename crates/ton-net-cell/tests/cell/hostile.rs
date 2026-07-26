@@ -198,7 +198,8 @@ fn what_survives_reserialization_parses_back() {
     assert!(checked > 0, "no corrupted tree survived to be reserialized");
 }
 
-/// A chain of `links` cells, each holding a reference to the next, as a serialized bag.
+/// A serialized bag holding one chain: a leaf under `links` parents, so its root has depth
+/// `links`. Both assertions below rest on that being the depth and not one either side of it.
 fn deep_chain(links: usize) -> Vec<u8> {
     let mut cell = Builder::new().build().expect("a leaf forms");
     for _ in 0..links {
