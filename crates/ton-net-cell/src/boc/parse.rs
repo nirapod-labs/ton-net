@@ -3,7 +3,8 @@
 
 //! Reading a bag's cells into a graph, once its header has been checked.
 
-use std::sync::Arc;
+use std::num::NonZeroUsize;
+use std::sync::{Arc, OnceLock};
 
 use super::{bit_len, read_header, Header, Reader, MAX_DEPTH};
 use crate::cell::{summarize, Cell, CellType, Identity, Payload, Refs, Span, MAX_BITS, MAX_REFS};
@@ -216,6 +217,230 @@ fn heights(raw: &[RawCell], count: usize) -> Result<Vec<usize>, CellError> {
     Ok(height)
 }
 
+/// The bag's cells grouped by structural height, the shortest wave first.
+///
+/// A cell's children are shorter than it is, so by the time a wave is reached every cell
+/// it holds has its children finished. That leaves the cells inside one wave independent
+/// of each other: their order within the wave is free, and so is the thread each runs on.
+///
+/// The shape of the bag decides how much of that is worth taking, with no test of what
+/// kind of bag it is. A Merkle proof is a path, so its height runs with its cell count and
+/// each wave holds about one cell. A dictionary over n entries is about log n tall, so its
+/// waves hold a large part of the bag at once.
+struct Waves {
+    /// Cell indices, ascending inside a wave, waves shortest first.
+    order: Vec<usize>,
+    /// Where each wave begins in `order`, and one entry past the tallest holding the cell
+    /// count, so wave k is `order[starts[k]..starts[k + 1]]`.
+    starts: Vec<usize>,
+}
+
+impl Waves {
+    /// Buckets the cells by height, with a counting sort over the heights.
+    fn by_height(height: &[usize]) -> Self {
+        let tallest = height.iter().copied().max().unwrap_or(0);
+        // One slot per height, and one past the tallest to close the last wave.
+        let mut starts = vec![0usize; tallest + 2];
+        for &at in height {
+            if let Some(slot) = starts.get_mut(at + 1) {
+                *slot += 1;
+            }
+        }
+        for k in 1..starts.len() {
+            let carried = starts.get(k - 1).copied().unwrap_or(0);
+            if let Some(slot) = starts.get_mut(k) {
+                *slot += carried;
+            }
+        }
+
+        // Each wave's beginning is spent as a cursor, so walking the cells in index order
+        // leaves each wave ascending and leaves `starts[k]` holding where wave k ends.
+        let mut order = vec![0usize; height.len()];
+        for (index, &at) in height.iter().enumerate() {
+            let Some(cursor) = starts.get_mut(at) else {
+                continue;
+            };
+            let slot = *cursor;
+            *cursor += 1;
+            if let Some(place) = order.get_mut(slot) {
+                *place = index;
+            }
+        }
+
+        // A wave ends where the next begins, so one shift puts the beginnings back and the
+        // count stays where it was, closing the tallest wave.
+        for k in (1..starts.len()).rev() {
+            let ended = starts.get(k - 1).copied().unwrap_or(0);
+            if let Some(slot) = starts.get_mut(k) {
+                *slot = ended;
+            }
+        }
+        if let Some(first) = starts.first_mut() {
+            *first = 0;
+        }
+
+        Self { order, starts }
+    }
+
+    /// The waves in order, shortest first.
+    fn iter(&self) -> impl Iterator<Item = &[usize]> {
+        self.starts.windows(2).filter_map(|pair| {
+            let from = pair.first().copied()?;
+            let to = pair.get(1).copied()?;
+            self.order.get(from..to)
+        })
+    }
+
+    /// One cell per wave, highest index first: the order a bag finalized in a single
+    /// descending pass runs in.
+    ///
+    /// The comparison the parity gate makes rests on this being that order and not a
+    /// rearrangement of it, so nothing but the plan differs between the two runs.
+    #[cfg(test)]
+    fn descending(count: usize) -> Self {
+        Self {
+            order: (0..count).rev().collect(),
+            starts: (0..=count).collect(),
+        }
+    }
+}
+
+/// The fewest cells a worker is handed before another thread is worth its coordination.
+///
+/// A floor rather than a calibration. It is chosen so that the work given to a thread is
+/// large next to the cost of starting one, and NET-ADR-012 forbids stating the ratio as a
+/// duration taken on one machine, so none is stated. Its second job is to keep the
+/// captured fixtures on the counted path: no bag under twice this many cells splits, and
+/// the allocation gate counts on the thread it runs on.
+const CELLS_PER_WORKER: usize = 1024;
+
+/// How many threads this machine reports, or one where it reports none or the build has
+/// no thread to spawn.
+fn parallelism() -> usize {
+    if cfg!(feature = "parallel") {
+        static CORES: OnceLock<usize> = OnceLock::new();
+        *CORES.get_or_init(|| std::thread::available_parallelism().map_or(1, NonZeroUsize::get))
+    } else {
+        1
+    }
+}
+
+/// How many threads a wave of `width` cells is split across.
+///
+/// The whole of the dispatch decision. Two numbers reach it, the wave's width and what
+/// [`parallelism`] reports, and the width is the one the bag has any say in: nothing here
+/// asks what kind of bag it is. A worker is handed a full [`CELLS_PER_WORKER`] or it is
+/// not started, so a bag shaped like a path answers one for every wave it has and runs
+/// with no coordination at all, while a bag whose waves are several workers wide answers
+/// the smaller of what the width affords and what the machine reports.
+fn workers_for(width: usize) -> usize {
+    parallelism().min(width / CELLS_PER_WORKER).max(1)
+}
+
+/// What finalizing one wave produced, against the cell index each outcome came from.
+type WaveOutcomes<T> = Vec<(usize, Result<Option<T>, CellError>)>;
+
+/// Hands a wave to several threads, or reports that it is not wide enough to be worth it.
+///
+/// The workers read the cells already held and write nothing, so what comes back is the
+/// same list of outcomes the wave would have produced here, against the index each came
+/// from.
+#[cfg(feature = "parallel")]
+fn split_across_workers<T, F>(
+    wave: &[usize],
+    held: &[Option<T>],
+    one: &F,
+    workers: usize,
+) -> Option<WaveOutcomes<T>>
+where
+    T: Send + Sync,
+    F: Fn(usize, &[Option<T>]) -> Result<Option<T>, CellError> + Sync,
+{
+    if workers < 2 {
+        return None;
+    }
+    let each = wave.len().div_ceil(workers);
+    Some(std::thread::scope(|scope| {
+        let running: Vec<_> = wave
+            .chunks(each)
+            .map(|part| {
+                scope.spawn(move || {
+                    part.iter()
+                        .map(|&index| (index, one(index, held)))
+                        .collect::<Vec<_>>()
+                })
+            })
+            .collect();
+        running
+            .into_iter()
+            .flat_map(|worker| {
+                // A worker runs what this thread would run, which returns its failures
+                // rather than unwinding. One that unwound anyway is carried on to the
+                // caller, which is what the same fault on this thread would have done.
+                worker
+                    .join()
+                    .unwrap_or_else(|unwound| std::panic::resume_unwind(unwound))
+            })
+            .collect()
+    }))
+}
+
+/// A build without the `parallel` feature keeps every wave on this thread.
+#[cfg(not(feature = "parallel"))]
+fn split_across_workers<T, F>(
+    _wave: &[usize],
+    _held: &[Option<T>],
+    _one: &F,
+    _workers: usize,
+) -> Option<WaveOutcomes<T>> {
+    None
+}
+
+/// Finalizes the cells of one wave, on this thread or across several.
+///
+/// Which happens is [`workers_for`]'s answer and is not visible in what this leaves
+/// behind: the cells of a wave depend on no other cell in it, so `one` sees the same
+/// values whichever worker calls it, and the failure that survives is picked by index
+/// rather than by arrival.
+fn run_wave<T, F>(wave: &[usize], held: &mut [Option<T>], lowest: &mut Lowest, one: &F)
+where
+    T: Send + Sync,
+    F: Fn(usize, &[Option<T>]) -> Result<Option<T>, CellError> + Sync,
+{
+    let workers = workers_for(wave.len());
+    if workers > 1 {
+        if let Some(produced) = split_across_workers(wave, held, one, workers) {
+            for (index, outcome) in produced {
+                keep(held, lowest, index, outcome);
+            }
+            return;
+        }
+    }
+    for &index in wave {
+        let outcome = one(index, held);
+        keep(held, lowest, index, outcome);
+    }
+}
+
+/// Finalizes a bag's cells wave by wave, and reports the lowest failure among them.
+///
+/// `one` finalizes a single cell over the values already held, and is the same call a
+/// pass running the cells one after another would make. Waves choose when each call
+/// happens and nothing else, which is why running them in one order or another cannot
+/// reach a caller.
+fn finalize<T, F>(count: usize, waves: &Waves, one: &F) -> (Vec<Option<T>>, Lowest)
+where
+    T: Clone + Send + Sync,
+    F: Fn(usize, &[Option<T>]) -> Result<Option<T>, CellError> + Sync,
+{
+    let mut held: Vec<Option<T>> = vec![None; count];
+    let mut lowest = Lowest::default();
+    for wave in waves.iter() {
+        run_wave(wave, &mut held, &mut lowest, one);
+    }
+    (held, lowest)
+}
+
 /// The bag's root cells, read from the positions the header names.
 fn roots<T: Clone>(built: &[Option<T>], header: &Header) -> Result<Vec<T>, CellError> {
     header
@@ -307,32 +532,38 @@ fn summarize_one(
 
 /// Reads the cells of a bag whose header has been read, and returns its roots.
 ///
-/// References point strictly forward, which [`read_raw`] refuses a bag for breaking, so a
-/// pass that runs from the highest cell index down finishes a cell before it reaches
-/// anything that references it.
+/// The cells are finalized in the waves of [`Waves::by_height`], so a cell is built after
+/// the cells it references and before anything that references it.
 pub(super) fn read_and_build(
     reader: &mut Reader<'_>,
     header: &Header,
 ) -> Result<Vec<Cell>, CellError> {
-    let count = header.count;
     // One buffer for the bag, shared by every cell built from it, in place of a copy of
     // each cell's bytes.
     let payload: Arc<[u8]> = Arc::from(reader.bytes);
     let raw = read_raw(reader, header)?;
-    heights(&raw, count)?;
+    let waves = Waves::by_height(&heights(&raw, header.count)?);
+    build_planned(&raw, &payload, &waves, header)
+}
 
-    // Position k holds cell k, so a reference is read at the index it names.
-    let mut built: Vec<Option<Cell>> = vec![None; count];
-    let mut lowest = Lowest::default();
-    for index in (0..count).rev() {
-        let Some(raw_cell) = raw.get(index) else {
-            continue;
-        };
-        let outcome = build_one(raw_cell, &payload, &built);
-        keep(&mut built, &mut lowest, index, outcome);
-    }
+/// Builds a bag's cells under a plan and returns its roots.
+///
+/// The plan chooses the order alone. Position k of the vector this fills holds cell k, so
+/// a reference is read at the index it names whichever wave built it.
+fn build_planned(
+    raw: &[RawCell],
+    payload: &Arc<[u8]>,
+    waves: &Waves,
+    header: &Header,
+) -> Result<Vec<Cell>, CellError> {
+    let one = |index: usize, built: &[Option<Cell>]| match raw.get(index) {
+        Some(raw_cell) => build_one(raw_cell, payload, built),
+        // read_raw returns one raw cell per cell the header declared, so a plan cannot
+        // name a position outside it.
+        None => Err(CellError::BadReference),
+    };
+    let (built, lowest) = finalize(header.count, waves, &one);
     lowest.into_result()?;
-
     roots(&built, header)
 }
 
@@ -369,22 +600,29 @@ pub(super) fn verify_roots(
     reader: &mut Reader<'_>,
     header: &Header,
 ) -> Result<Vec<[u8; 32]>, CellError> {
-    let count = header.count;
     // Nothing is built here, so the bag's own bytes serve and no buffer is taken.
     let bytes = reader.bytes;
     let raw = read_raw(reader, header)?;
-    heights(&raw, count)?;
+    let waves = Waves::by_height(&heights(&raw, header.count)?);
+    verify_planned(&raw, bytes, &waves, header)
+}
 
-    // Position k holds cell k, as `built` does in read_and_build.
-    let mut identities: Vec<Option<Identity>> = vec![None; count];
-    let mut lowest = Lowest::default();
-    for index in (0..count).rev() {
-        let Some(raw_cell) = raw.get(index) else {
-            continue;
-        };
-        let outcome = summarize_one(raw_cell, bytes, &identities);
-        keep(&mut identities, &mut lowest, index, outcome);
-    }
+/// Summarizes a bag's cells under a plan and returns its roots' representation hashes.
+///
+/// The identity-side counterpart of [`build_planned`], down to the plan it runs and the
+/// index each value is held at.
+fn verify_planned(
+    raw: &[RawCell],
+    bytes: &[u8],
+    waves: &Waves,
+    header: &Header,
+) -> Result<Vec<[u8; 32]>, CellError> {
+    let one = |index: usize, computed: &[Option<Identity>]| match raw.get(index) {
+        Some(raw_cell) => summarize_one(raw_cell, bytes, computed),
+        // Unreachable for the reason build_planned gives.
+        None => Err(CellError::BadReference),
+    };
+    let (identities, lowest) = finalize(header.count, waves, &one);
     lowest.into_result()?;
 
     let roots = roots(&identities, header)?;
@@ -682,4 +920,446 @@ fn check_stored(identity: &Identity, stored: &[u8]) -> Result<(), CellError> {
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{serialize_boc, serialize_boc_with, BocOptions, Builder};
+
+    /// The captured mainnet account proof, read from the fixture the hostile corpus
+    /// mutates so that the parity gate and that corpus work over one real bag.
+    const PROOF_HEX: &str = include_str!("../../tests/fixtures/account-proof.hex");
+
+    /// How many levels of forks the fan bag carries above its leaves.
+    ///
+    /// Six puts 4096 cells in the widest wave, which is four workers' worth, so the
+    /// dispatch splits it wherever the machine has the threads.
+    const FAN_DEEP: u32 = 6;
+
+    /// The refusal a cell earns by claiming a level its children do not give it.
+    const BY_LEVEL: CellError =
+        CellError::Malformed("cell level mask is not the one its children imply");
+
+    /// The refusal a cell earns by storing a hash its own contents do not produce.
+    const BY_HASH: CellError = CellError::Malformed("cell stores a hash its contents do not give");
+
+    /// A fixed-seed xorshift, so a failure reproduces exactly.
+    struct Rng(u64);
+
+    impl Rng {
+        fn next(&mut self) -> u64 {
+            self.0 ^= self.0 << 13;
+            self.0 ^= self.0 >> 7;
+            self.0 ^= self.0 << 17;
+            self.0
+        }
+
+        fn below(&mut self, bound: usize) -> usize {
+            let Ok(bound) = u64::try_from(bound) else {
+                return 0;
+            };
+            if bound == 0 {
+                return 0;
+            }
+            usize::try_from(self.next() % bound).unwrap_or(0)
+        }
+    }
+
+    /// A result taken under both plans: the waves the read path takes, then the single
+    /// descending pass.
+    type BothWays<T> = (Result<T, CellError>, Result<T, CellError>);
+
+    fn unhex(text: &str) -> Vec<u8> {
+        let hex: String = text
+            .lines()
+            .filter(|line| !line.starts_with('#'))
+            .flat_map(str::chars)
+            .filter(|c| !c.is_whitespace())
+            .collect();
+        (0..hex.len() / 2)
+            .map(|i| u8::from_str_radix(&hex[i * 2..i * 2 + 2], 16).expect("the fixture is hex"))
+            .collect()
+    }
+
+    /// A bag read to raw cells, with the bytes its cells window into.
+    struct Prepared {
+        raw: Vec<RawCell>,
+        payload: Arc<[u8]>,
+        header: Header,
+    }
+
+    /// Reads a bag as far as the pass that finalizes its cells, or reports that its bytes
+    /// never got there.
+    ///
+    /// The header, the bag's bytes and the raw cells are read once here and handed to both
+    /// plans, so the pass that finalizes is what the two runs differ in. The heights are
+    /// measured again when the wave plan is built, which is that plan being made rather
+    /// than an input the two runs share.
+    fn prepare(bytes: &[u8]) -> Option<Prepared> {
+        let mut reader = Reader { bytes, at: 0 };
+        let header = read_header(&mut reader, bytes).ok()?;
+        let payload: Arc<[u8]> = Arc::from(reader.bytes);
+        let raw = read_raw(&mut reader, &header).ok()?;
+        heights(&raw, header.count).ok()?;
+        Some(Prepared {
+            raw,
+            payload,
+            header,
+        })
+    }
+
+    impl Prepared {
+        /// The plan the read path takes.
+        fn waves(&self) -> Waves {
+            Waves::by_height(&heights(&self.raw, self.header.count).expect("the depth was held"))
+        }
+
+        /// The graph, built in waves and built in one descending pass.
+        fn built_both_ways(&self) -> BothWays<Vec<Cell>> {
+            (
+                build_planned(&self.raw, &self.payload, &self.waves(), &self.header),
+                build_planned(
+                    &self.raw,
+                    &self.payload,
+                    &Waves::descending(self.header.count),
+                    &self.header,
+                ),
+            )
+        }
+
+        /// The root hashes, verified in waves and verified in one descending pass.
+        fn verified_both_ways(&self) -> BothWays<Vec<[u8; 32]>> {
+            (
+                verify_planned(&self.raw, &self.payload, &self.waves(), &self.header),
+                verify_planned(
+                    &self.raw,
+                    &self.payload,
+                    &Waves::descending(self.header.count),
+                    &self.header,
+                ),
+            )
+        }
+    }
+
+    /// A bag of `count` cells that reference nothing, so the whole bag is one wave.
+    ///
+    /// The cells named in `by_level` claim a level mask no child gives them, and those in
+    /// `by_hash` carry a stored hash their contents do not produce. Two faults rather than
+    /// one, because a bag failing at several cells with one message would not say which
+    /// cell the reported failure came from.
+    fn one_wave_bag(count: usize, by_level: &[usize], by_hash: &[usize]) -> Vec<u8> {
+        let mut cells = Vec::new();
+        for index in 0..count {
+            let stored = by_hash.contains(&index);
+            // d1 is 32 * level_mask + 8 * exotic + reference count, and bit four says the
+            // cell carries its own hashes and depths ahead of its data.
+            let mut d1 = 0u8;
+            if by_level.contains(&index) {
+                d1 |= 0x20;
+            }
+            if stored {
+                d1 |= 0x10;
+            }
+            cells.push(d1);
+            cells.push(0x00);
+            if stored {
+                cells.extend([0xaa; 34]);
+            }
+        }
+
+        let mut bag = vec![0xb5, 0xee, 0x9c, 0x72, 0x02, 0x02];
+        let field = |value: usize| u16::try_from(value).expect("the field fits").to_be_bytes();
+        bag.extend(field(count)); // cells
+        bag.extend(field(1)); // roots
+        bag.extend(field(0)); // absent cells
+        bag.extend(field(cells.len())); // cell area
+        bag.extend(field(0)); // the root is cell zero
+        bag.extend(cells);
+        bag
+    }
+
+    /// A serialized bag shaped like a proof: one chain of `links` cells over a leaf, each
+    /// carrying a number of its own so none of them is shared with another.
+    fn path_bag(links: usize) -> Vec<u8> {
+        let mut cell = Builder::new().build().expect("a leaf forms");
+        for step in 0..links {
+            let mut builder = Builder::new();
+            builder
+                .store_uint(u64::try_from(step).expect("a step fits"), 64)
+                .expect("a word fits");
+            builder.store_ref(cell).expect("a reference fits");
+            cell = builder.build().expect("a cell forms");
+        }
+        serialize_boc(std::slice::from_ref(&cell)).expect("the path serializes")
+    }
+
+    /// A serialized bag shaped like a dictionary: a four-way fan `deep` levels of forks
+    /// tall, again with every cell numbered so none is shared.
+    /// It carries no checksum, so a flipped byte reaches the cells rather than being
+    /// refused at the header.
+    fn fan_bag(deep: u32) -> Vec<u8> {
+        let mut serial = 0u64;
+        let mut numbered = |children: &[Cell]| {
+            serial += 1;
+            let mut builder = Builder::new();
+            builder.store_uint(serial, 64).expect("a word fits");
+            for child in children {
+                builder.store_ref(child.clone()).expect("a reference fits");
+            }
+            builder.build().expect("a cell forms")
+        };
+
+        let mut level: Vec<Cell> = (0..MAX_REFS.pow(deep)).map(|_| numbered(&[])).collect();
+        while level.len() > 1 {
+            level = level.chunks(MAX_REFS).map(&mut numbered).collect();
+        }
+        serialize_boc_with(
+            &level,
+            &BocOptions {
+                index: false,
+                crc32c: false,
+            },
+        )
+        .expect("the fan serializes")
+    }
+
+    /// The plan a serialized bag finalizes under.
+    fn plan_for(bag: &[u8]) -> Waves {
+        prepare(bag)
+            .expect("the bag reaches the pass that finalizes cells")
+            .waves()
+    }
+
+    #[test]
+    fn the_wave_plan_and_a_single_pass_agree_on_corrupted_bags() {
+        // The gate NET-ADR-012 puts on this work, and it runs over corrupted bytes rather
+        // than over bags that parse: a bag with no failing cell agrees under every rule
+        // for picking which failure to report, so it cannot tell the plans apart. The
+        // fixture is the one the hostile corpus mutates, and the mutation is the same
+        // kind, single flipped bits from a fixed seed.
+        //
+        // What this corpus reaches is counted rather than assumed. Of the mutations that
+        // get as far as the finalizing pass, 54 are refused there, and every one of those
+        // fails at a single cell: a flipped bit in a proof's data changes a hash and its
+        // ancestors' hashes without refusing anything, so the cells that can be made to
+        // fail here are the few carrying a descriptor the pass reads. One failure is
+        // picked the same way by every rule, so what these bags settle is that the two
+        // plans judge the same cells and reach the same values. Choosing between failures
+        // is settled by a_wave_wide_enough_to_split_reports_the_lowest_failure, which
+        // builds its bag and plants two kinds of fault, because a bag refused at one cell
+        // cannot say which of several the rule picked.
+        let proof = unhex(PROOF_HEX);
+        let mut rng = Rng(0x1D8E_4A2B_7C36_F591);
+        let mut finalized = 0usize;
+        let mut refused = 0usize;
+
+        for _ in 0..4_000 {
+            let mut bytes = proof.clone();
+            for _ in 0..=rng.below(3) {
+                let at = rng.below(bytes.len());
+                bytes[at] ^= 1 << rng.below(8);
+            }
+            let Some(prepared) = prepare(&bytes) else {
+                continue;
+            };
+
+            let (waved, one_pass) = prepared.built_both_ways();
+            assert_eq!(
+                waved, one_pass,
+                "the plan a bag was finalized under reached a caller"
+            );
+            let (waved_hashes, one_pass_hashes) = prepared.verified_both_ways();
+            assert_eq!(
+                waved_hashes, one_pass_hashes,
+                "the plan a bag was verified under reached a caller"
+            );
+
+            finalized += 1;
+            if waved.is_err() {
+                refused += 1;
+            }
+        }
+
+        // Without these the test could pass having compared nothing that reached the pass,
+        // or nothing that failed inside it, which is the half the gate exists for. The
+        // seed is fixed and the fixture is captured, so both counts are the same on every
+        // machine and are pinned rather than bounded: a corpus that quietly stopped
+        // refusing anything would still clear a bound of one.
+        assert_eq!(
+            finalized, 3_225,
+            "the corpus reached a different set of bags"
+        );
+        assert_eq!(refused, 54, "the finalizing pass refused a different set");
+    }
+
+    #[test]
+    fn a_wave_wide_enough_to_split_reports_the_lowest_failure() {
+        // The parity above runs on a 45-cell proof, whose waves are far too narrow to be
+        // handed to a second thread. This is the same comparison at a width that is not:
+        // one wave holding the whole bag, failing at three cells for two different
+        // reasons, so which cell the reported failure came from is legible.
+        const WIDE: usize = CELLS_PER_WORKER * 4;
+
+        let plan = plan_for(&one_wave_bag(WIDE, &[], &[]));
+        assert_eq!(
+            plan.iter().count(),
+            1,
+            "cells with no references are one wave"
+        );
+        assert_eq!(
+            plan.iter().next().map(<[usize]>::len),
+            Some(WIDE),
+            "and that wave holds the whole bag"
+        );
+
+        for (by_level, by_hash, expected, ordering) in [
+            (
+                vec![3usize],
+                vec![WIDE / 2, WIDE - 1],
+                BY_LEVEL,
+                "lowest is the level fault",
+            ),
+            (
+                vec![WIDE / 2, WIDE - 1],
+                vec![3usize],
+                BY_HASH,
+                "lowest is the hash fault",
+            ),
+        ] {
+            let prepared = prepare(&one_wave_bag(WIDE, &by_level, &by_hash))
+                .expect("the bag reaches the pass that finalizes cells");
+            let (waved, one_pass) = prepared.built_both_ways();
+            assert_eq!(waved, Err(expected), "{ordering}");
+            assert_eq!(waved, one_pass, "the two plans reported different failures");
+        }
+    }
+
+    #[test]
+    fn a_split_wave_carries_its_cells_to_the_waves_above_it() {
+        // The bag above is flat, so nothing there reads what a split wave produced. This
+        // one is a fan whose leaves fill a wave wide enough to split while the forks above
+        // them are built from what that wave left behind, and it is corrupted rather than
+        // read clean: a level bit set in a cell descriptor is a fault the finalizing pass
+        // finds, and every ancestor of that cell is then a cell the pass declines to
+        // judge.
+        let clean = fan_bag(FAN_DEEP);
+        let widest = plan_for(&clean)
+            .iter()
+            .map(<[usize]>::len)
+            .max()
+            .expect("the fan has waves");
+        assert!(
+            workers_for(widest) == parallelism().min(4),
+            "the leaves of this fan are a wave the dispatch splits as far as the machine \
+             allows, up to four ways"
+        );
+
+        let mut compared = 0usize;
+        let mut refused = 0usize;
+        for at in (0..clean.len()).step_by(1009) {
+            let mut bytes = clean.clone();
+            // Bit five of a descriptor byte is the low bit of a cell's level mask, so this
+            // lands a fault on a cell wherever it lands on one of those.
+            bytes[at] ^= 0x20;
+            let Some(prepared) = prepare(&bytes) else {
+                continue;
+            };
+            let (waved, one_pass) = prepared.built_both_ways();
+            assert_eq!(
+                waved, one_pass,
+                "the plan a fan was finalized under reached a caller"
+            );
+            compared += 1;
+            if waved == Err(BY_LEVEL) {
+                refused += 1;
+            }
+        }
+
+        assert!(compared > 0, "no flip reached the finalizing pass");
+        assert!(refused > 0, "no flip landed on a cell descriptor");
+
+        // The bag read clean is the floor under the comparison above rather than the gate:
+        // a bag with no failing cell agrees under every rule for choosing which failure to
+        // report. What it does settle is that a split wave produced the same cells.
+        let prepared = prepare(&clean).expect("the fan reaches the finalizing pass");
+        let (waved, one_pass) = prepared.built_both_ways();
+        assert_eq!(waved, one_pass, "the two plans built different graphs");
+        assert_eq!(
+            waved.expect("the fan builds"),
+            parse_boc(&clean).expect("the fan parses"),
+            "the read path built something its own plan does not agree with"
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "parallel")]
+    fn a_wave_is_split_only_where_each_worker_gets_a_full_share() {
+        // What the width gate answers, stated against the machine rather than against a
+        // number this machine happened to produce.
+        assert_eq!(workers_for(0), 1, "an empty wave stays here");
+        assert_eq!(
+            workers_for(CELLS_PER_WORKER * 2 - 1),
+            1,
+            "and one a share short"
+        );
+        assert_eq!(
+            workers_for(CELLS_PER_WORKER * 4),
+            parallelism().min(4),
+            "four workers' worth is split as far as the machine goes, up to four"
+        );
+    }
+
+    #[test]
+    fn the_shape_of_a_bag_decides_how_wide_its_waves_are() {
+        // The claim the width gate rests on, counted rather than timed: NET-ADR-012 holds
+        // a performance claim in this crate to a count, and this is the count. A path and
+        // a fan go through one planner with nothing in it that asks which they are.
+        const LINKS: usize = 512;
+
+        let path = plan_for(&path_bag(LINKS));
+        assert_eq!(
+            path.iter().count(),
+            LINKS + 1,
+            "a path of n cells finalizes in n waves"
+        );
+        assert_eq!(
+            path.iter().filter(|wave| wave.len() > 1).count(),
+            0,
+            "and no wave of it holds more than one cell"
+        );
+        assert_eq!(
+            path.iter()
+                .filter(|wave| workers_for(wave.len()) > 1)
+                .count(),
+            0,
+            "so no wave of a path is split across threads, whatever the machine has"
+        );
+
+        let fan = plan_for(&fan_bag(FAN_DEEP));
+        let cells: usize = fan.iter().map(<[usize]>::len).sum();
+        assert_eq!(
+            cells,
+            (0..=FAN_DEEP).map(|k| MAX_REFS.pow(k)).sum::<usize>()
+        );
+        assert_eq!(
+            fan.iter().count(),
+            FAN_DEEP as usize + 1,
+            "a four-way fan of the same cell count finalizes in a handful of waves"
+        );
+        let widest = fan
+            .iter()
+            .map(<[usize]>::len)
+            .max()
+            .expect("the fan has waves");
+        assert_eq!(
+            widest,
+            MAX_REFS.pow(FAN_DEEP),
+            "the widest wave is the leaves"
+        );
+        assert!(
+            widest * 4 > cells * 3,
+            "which is more than three quarters of the bag in one wave"
+        );
+    }
 }

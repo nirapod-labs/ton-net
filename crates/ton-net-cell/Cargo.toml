@@ -27,6 +27,13 @@ json = ["dep:serde_json"]
 # LZ4 compression of a serialized bag of cells, opt-in so the default build stays free
 # of lz4_flex (admitted by NET-ADR-010).
 compress = ["dep:lz4_flex"]
+# Splitting a wide finalization wave across the standard library's scoped threads. It
+# admits no dependency, and it is off by default for two reasons rather than for weight:
+# the spawn is compiled only when it is on, so a build for a target whose threads do not
+# run carries none, and a caller running several parses beside each other should not find
+# this one starting threads underneath it. The waves themselves are on either way; this
+# chooses what runs them.
+parallel = []
 
 [dependencies]
 # The representation hash is SHA-256, on the single copy NET-ADR-004 fixes.
