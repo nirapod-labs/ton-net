@@ -266,9 +266,24 @@ impl<'a> Slice<'a> {
     ///
     /// Returns [`CellError::NotEnoughBits`] if the slice has fewer than `n` bytes left.
     pub fn load_bytes(&mut self, n: usize) -> Result<Vec<u8>, CellError> {
+        let mut out = Vec::new();
+        self.load_bytes_into(n, &mut out)?;
+        Ok(out)
+    }
+
+    /// Reads `n` whole bytes onto the end of `into`.
+    ///
+    /// The destination belongs to the caller, so a reader taking several runs fills one
+    /// buffer rather than a fresh vector per run. The length is checked before anything is
+    /// written, so a slice too short leaves `into` as it was.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CellError::NotEnoughBits`] if the slice has fewer than `n` bytes left.
+    pub fn load_bytes_into(&mut self, n: usize, into: &mut Vec<u8>) -> Result<(), CellError> {
         // A byte count whose bit count does not fit a usize asks for more than any cell
         // holds. Without this the multiplication wraps to a small number, the length
-        // check below passes on the wrapped value, and the allocation that follows is
+        // check below passes on the wrapped value, and the reservation that follows is
         // made against the unwrapped one.
         let requested = n.checked_mul(8).ok_or(CellError::NotEnoughBits {
             requested: usize::MAX,
@@ -276,15 +291,15 @@ impl<'a> Slice<'a> {
         })?;
         let start = self.advance(requested)?;
         let data = self.cell.data();
-        let mut out = Vec::with_capacity(n);
+        into.reserve(n);
         for byte in 0..n {
             let mut v = 0u8;
             for i in 0..8 {
                 v = (v << 1) | u8::from(bit_at(data, start + byte * 8 + i));
             }
-            out.push(v);
+            into.push(v);
         }
-        Ok(out)
+        Ok(())
     }
 
     /// Takes the next reference.
@@ -598,6 +613,33 @@ mod tests {
     fn reads_bytes() {
         let roots = parse_boc(&ONE_CELL).unwrap();
         assert_eq!(roots[0].parse().load_bytes(1).unwrap(), vec![0xab]);
+    }
+
+    #[test]
+    fn a_byte_run_read_into_a_buffer_lands_after_what_it_holds_and_a_short_read_writes_nothing() {
+        let roots = parse_boc(&FOUR_BYTES).unwrap();
+        let mut slice = roots[0].parse();
+        let mut buffer = vec![0x11];
+        slice.load_bytes_into(2, &mut buffer).unwrap();
+        assert_eq!(
+            buffer,
+            vec![0x11, 0x89, 0xab],
+            "the run lands after the 0x11"
+        );
+
+        // The length is checked before anything is written, so a run the slice cannot
+        // supply leaves the buffer holding what it held.
+        assert!(slice.load_bytes_into(3, &mut buffer).is_err());
+        assert_eq!(
+            buffer,
+            vec![0x11, 0x89, 0xab],
+            "the refused run wrote nothing"
+        );
+
+        // The refused run did not move the cursor either, so the rest still reads.
+        slice.load_bytes_into(2, &mut buffer).unwrap();
+        assert_eq!(buffer, vec![0x11, 0x89, 0xab, 0xcd, 0xef]);
+        assert!(slice.is_empty());
     }
 
     #[test]

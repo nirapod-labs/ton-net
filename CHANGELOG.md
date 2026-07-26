@@ -26,6 +26,14 @@ never published.
   field into the type that field has, instead of returning a `u64` for the
   caller to narrow.
 - `&Dict` implements `IntoIterator`.
+- `Slice::load_bytes_into` and `Slice::load_snake_into` read onto the end of a
+  buffer the caller owns. `load_bytes` and `load_snake` now go through them and
+  are unchanged. A snake spans a chain of cells, and the returning form read each
+  cell into a vector of its own before copying it into the result, where the
+  destination form writes straight onto the caller's buffer. `load_bytes_into`
+  checks the length before it writes anything, so a run the slice is too short to
+  supply leaves the buffer as it was; a snake that fails partway along its chain
+  leaves on the buffer what it had already read.
 
 ### Changed
 
