@@ -27,7 +27,7 @@ use proptest::prelude::*;
 
 use crate::{
     boc::{bit_len, parse_boc, serialize_boc},
-    cell::{Cell, CellType},
+    cell::{Cell, CellType, Refs},
 };
 
 /// The largest data payload a cell can hold, in bytes.
@@ -41,7 +41,11 @@ const MAX_DATA_BYTES: usize = 127;
 /// something untrue about a tree that does not exist. Exotic handling is pinned by
 /// example in `tests/hostile.rs`, where the point is rejection rather than round-trip.
 fn ordinary(data: Vec<u8>, bits: u16, refs: Vec<Cell>) -> Cell {
-    Cell::from_parts(data, bits, refs, CellType::Ordinary, 0).unwrap()
+    let mut held = Refs::None;
+    for child in refs {
+        held.push(child).unwrap();
+    }
+    Cell::from_parts(data, bits, held, CellType::Ordinary, 0).unwrap()
 }
 
 /// Data bytes together with the bit count they represent.

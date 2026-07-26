@@ -12,7 +12,7 @@
 //! computed once, at the end, from what was stored. There is no way to set a hash, and
 //! no way to reach the constructor that would let one disagree with its contents.
 
-use crate::cell::{Cell, CellType, MAX_BITS, MAX_REFS};
+use crate::cell::{Cell, CellType, Refs, MAX_BITS, MAX_REFS};
 use crate::dict::Dict;
 use crate::error::CellError;
 use crate::slice::Slice;
@@ -45,7 +45,7 @@ pub struct Builder {
     /// zero while building; [`build`](Builder::build) writes the completion tag.
     data: Vec<u8>,
     bits: u16,
-    refs: Vec<Cell>,
+    refs: Refs,
 }
 
 impl Builder {
@@ -55,7 +55,7 @@ impl Builder {
         Self {
             data: Vec::new(),
             bits: 0,
-            refs: Vec::new(),
+            refs: Refs::None,
         }
     }
 
@@ -74,13 +74,13 @@ impl Builder {
     /// How many references have been stored.
     #[must_use]
     pub fn refs_used(&self) -> usize {
-        self.refs.len()
+        self.refs.as_slice().len()
     }
 
     /// How many more references fit.
     #[must_use]
     pub fn refs_left(&self) -> usize {
-        MAX_REFS - self.refs.len()
+        MAX_REFS - self.refs.as_slice().len()
     }
 
     /// Whether this many bits and references would still fit.
@@ -342,10 +342,10 @@ impl Builder {
     ///
     /// Returns [`CellError::NoRoomForRefs`] if the cell already holds [`MAX_REFS`].
     pub fn store_ref(&mut self, cell: Cell) -> Result<&mut Self, CellError> {
-        if self.refs.len() >= MAX_REFS {
+        if self.refs.as_slice().len() >= MAX_REFS {
             return Err(CellError::NoRoomForRefs { limit: MAX_REFS });
         }
-        self.refs.push(cell);
+        self.refs.push(cell)?;
         Ok(self)
     }
 
@@ -359,7 +359,7 @@ impl Builder {
     pub fn store_maybe_ref(&mut self, cell: Option<Cell>) -> Result<&mut Self, CellError> {
         match cell {
             Some(cell) => {
-                if self.refs.len() >= MAX_REFS {
+                if self.refs.as_slice().len() >= MAX_REFS {
                     return Err(CellError::NoRoomForRefs { limit: MAX_REFS });
                 }
                 self.room_for(1)?;
@@ -416,13 +416,13 @@ impl Builder {
     /// As the stores it performs.
     pub fn store_builder(&mut self, other: &Self) -> Result<&mut Self, CellError> {
         self.room_for(other.bits)?;
-        if other.refs.len() > self.refs_left() {
+        if other.refs.as_slice().len() > self.refs_left() {
             return Err(CellError::NoRoomForRefs { limit: MAX_REFS });
         }
         for index in 0..other.bits {
             self.store_bit(other.bit_at(index))?;
         }
-        for cell in &other.refs {
+        for cell in other.refs.as_slice() {
             self.store_ref(cell.clone())?;
         }
         Ok(self)
@@ -451,6 +451,7 @@ impl Builder {
     pub fn build(self) -> Result<Cell, CellError> {
         let mask = self
             .refs
+            .as_slice()
             .iter()
             .fold(0u8, |mask, child| mask | child.level_mask());
         self.finish(CellType::Ordinary, mask)

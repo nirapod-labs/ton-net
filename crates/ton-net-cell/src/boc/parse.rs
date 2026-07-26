@@ -4,7 +4,7 @@
 //! Reading a bag's cells into a graph, once its header has been checked.
 
 use super::{bit_len, read_header, Header, Reader, MAX_DEPTH};
-use crate::cell::{summarize, Cell, CellType, Identity, MAX_BITS, MAX_REFS};
+use crate::cell::{summarize, Cell, CellType, Identity, Refs, MAX_BITS, MAX_REFS};
 use crate::error::CellError;
 
 /// A cell as read from the bag, with its references still as indices.
@@ -166,12 +166,12 @@ pub(super) fn read_and_build(
     // Built in the same descending order. Position k in `built` holds cell `count-1-k`.
     let mut built: Vec<Cell> = Vec::with_capacity(count);
     for raw_cell in raw.iter().rev() {
-        let mut refs = Vec::with_capacity(raw_cell.refs.len());
+        let mut refs = Refs::None;
         for &target in &raw_cell.refs {
             let child = built
                 .get(count - 1 - target)
                 .ok_or(CellError::BadReference)?;
-            refs.push(child.clone());
+            refs.push(child.clone())?;
         }
         let cell = Cell::from_parts(
             raw_cell.data.clone(),
@@ -361,14 +361,14 @@ pub(super) fn build_at(raw: &RawCells, state: &mut Build, index: usize) -> Resul
 
     for position in order.into_iter().rev() {
         let raw_cell = raw.cells.get(position).ok_or(CellError::BadReference)?;
-        let mut refs = Vec::with_capacity(raw_cell.refs.len());
+        let mut refs = Refs::None;
         for &target in &raw_cell.refs {
             let child = state
                 .built
                 .get(target)
                 .and_then(Option::as_ref)
                 .ok_or(CellError::BadReference)?;
-            refs.push(child.clone());
+            refs.push(child.clone())?;
         }
         let cell = Cell::from_parts(
             raw_cell.data.clone(),

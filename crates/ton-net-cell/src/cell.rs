@@ -18,6 +18,7 @@ mod dump;
 mod exotic;
 mod hash;
 mod level;
+mod refs;
 
 #[cfg(feature = "json")]
 pub mod json;
@@ -27,6 +28,7 @@ pub use exotic::CellType;
 use hash::compute;
 pub use hash::Identity;
 use level::{bits_descriptor, hash_index, level_of, refs_descriptor};
+pub use refs::Refs;
 
 /// The most data bits a cell may hold.
 pub const MAX_BITS: u16 = 1023;
@@ -66,7 +68,7 @@ pub struct Cell {
 struct Inner {
     data: Vec<u8>,
     bits: u16,
-    refs: Vec<Cell>,
+    refs: Refs,
     cell_type: CellType,
     /// The cell's level mask, hashes and depths, computed once when it was built.
     identity: Identity,
@@ -83,7 +85,7 @@ impl Cell {
     pub(crate) fn from_parts(
         data: Vec<u8>,
         bits: u16,
-        refs: Vec<Self>,
+        refs: Refs,
         cell_type: CellType,
         level_mask: u8,
     ) -> Result<Self, CellError> {
@@ -92,11 +94,11 @@ impl Cell {
         // reference costs an allocation to look at.
         let unfilled = Identity::NONE;
         let mut children = [&unfilled; MAX_REFS];
-        for (slot, child) in children.iter_mut().zip(&refs) {
+        for (slot, child) in children.iter_mut().zip(refs.as_slice()) {
             *slot = child.identity();
         }
         let children = children
-            .get(..refs.len())
+            .get(..refs.as_slice().len())
             .ok_or(CellError::Malformed("cell has more than four references"))?;
         let identity = summarize(&data, bits, children, cell_type, level_mask)?;
         Ok(Self {
@@ -129,13 +131,13 @@ impl Cell {
     /// The cell's references, at most four.
     #[must_use]
     pub fn refs(&self) -> &[Self] {
-        &self.inner.refs
+        self.inner.refs.as_slice()
     }
 
     /// The reference at `index`, or `None` if the cell has no such reference.
     #[must_use]
     pub fn reference(&self, index: usize) -> Option<&Self> {
-        self.inner.refs.get(index)
+        self.inner.refs.as_slice().get(index)
     }
 
     /// The cell's kind.
@@ -298,7 +300,7 @@ impl Cell {
     pub(crate) fn stored_descriptors(&self) -> (u8, u8) {
         (
             refs_descriptor(
-                self.inner.refs.len(),
+                self.inner.refs.as_slice().len(),
                 self.is_exotic(),
                 self.inner.identity.level_mask(),
                 3,
@@ -380,7 +382,7 @@ impl fmt::Debug for Cell {
         f.debug_struct("Cell")
             .field("cell_type", &self.inner.cell_type)
             .field("bits", &self.inner.bits)
-            .field("refs", &self.inner.refs.len())
+            .field("refs", &self.inner.refs.as_slice().len())
             .field("level_mask", &self.inner.identity.level_mask())
             .field("hash", &hex(self.hash()))
             .finish()
