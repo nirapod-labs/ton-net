@@ -3,19 +3,41 @@
 
 //! Reading a bag's cells into a graph, once its header has been checked.
 
+use std::sync::Arc;
+
 use super::{bit_len, read_header, Header, Reader, MAX_DEPTH};
-use crate::cell::{summarize, Cell, CellType, Summary, MAX_BITS, MAX_REFS};
+use crate::cell::{summarize, Cell, CellType, Identity, Payload, Refs, Span, MAX_BITS, MAX_REFS};
 use crate::error::CellError;
 
-/// A cell as read from the bag, with its references still as indices.
+/// A cell as read from the bag, with its references still as indices and its bytes still
+/// in the bag.
+///
+/// The data and the stored hashes are where they were rather than copied out. A bag is one
+/// run of bytes and every cell's contents are already inside it, so a read that copies them
+/// out pays an allocation and a copy per cell for bytes it is holding either way.
 struct RawCell {
-    data: Vec<u8>,
+    data: Span,
     bits: u16,
-    refs: Vec<usize>,
+    /// Where each reference points, as a position among the bag's cells.
+    ///
+    /// Inline, because a vector here is an allocation per cell for at most four small
+    /// numbers, and a bag is bounded well inside what they fit in.
+    refs: [u32; MAX_REFS],
+    ref_count: u8,
     cell_type: CellType,
     level_mask: u8,
-    /// The hashes and depths the cell carried ahead of its data, when it carried them.
-    stored: Option<Vec<u8>>,
+    /// Where the hashes and depths the cell carried ahead of its data sit, when it carried them.
+    stored: Option<Span>,
+}
+
+impl RawCell {
+    /// The positions this cell references, in order.
+    fn refs(&self) -> &[u32] {
+        // `ref_count` is held to MAX_REFS when the cell is read, so the fallback is
+        // unreachable; taking it would build a cell with fewer references than it declared,
+        // which hashes to a different identity.
+        self.refs.get(..usize::from(self.ref_count)).unwrap_or(&[])
+    }
 }
 
 /// Parses a bag of cells and returns its root cells.
@@ -79,20 +101,24 @@ fn read_raw(reader: &mut Reader<'_>, header: &Header) -> Result<Vec<RawCell>, Ce
         // the cell's own contents give, so a bag that describes itself wrongly is refused.
         let stored = if d1 & 16 != 0 {
             let per_level = level_mask.count_ones() as usize + 1;
-            Some(reader.take(per_level * (32 + 2))?.to_vec())
+            let at = reader.consumed();
+            let taken = reader.take(per_level * (32 + 2))?;
+            Some(Span::new(at, taken.len())?)
         } else {
             None
         };
 
-        let data = reader.take(usize::from((d2 >> 1) + (d2 & 1)))?.to_vec();
-        let bits = bit_len(d2, &data)?;
+        let at = reader.consumed();
+        let data = reader.take(usize::from((d2 >> 1) + (d2 & 1)))?;
+        let span = Span::new(at, data.len())?;
+        let bits = bit_len(d2, data)?;
         if bits > MAX_BITS {
             return Err(CellError::Malformed("cell holds more than 1023 bits"));
         }
-        let cell_type = classify(exotic, &data, level_mask, ref_count)?;
+        let cell_type = classify(exotic, data, level_mask, ref_count)?;
 
-        let mut refs = Vec::with_capacity(ref_count);
-        for _ in 0..ref_count {
+        let mut refs = [0u32; MAX_REFS];
+        for slot in refs.get_mut(..ref_count).ok_or(CellError::BadReference)? {
             #[allow(
                 clippy::cast_possible_truncation,
                 reason = "ref_size is at most 4, so this is under 2^32"
@@ -102,13 +128,18 @@ fn read_raw(reader: &mut Reader<'_>, header: &Header) -> Result<Vec<RawCell>, Ce
             if target >= count || target <= index {
                 return Err(CellError::BadReference);
             }
-            refs.push(target);
+            *slot = u32::try_from(target).map_err(|_| CellError::BadReference)?;
         }
 
         raw.push(RawCell {
-            data,
+            data: span,
             bits,
             refs,
+            #[allow(
+                clippy::cast_possible_truncation,
+                reason = "held to MAX_REFS above, so this is at most four"
+            )]
+            ref_count: ref_count as u8,
             cell_type,
             level_mask,
             stored,
@@ -126,7 +157,8 @@ fn check_depths(raw: &[RawCell], count: usize) -> Result<(), CellError> {
     let mut depth: Vec<usize> = Vec::with_capacity(count);
     for raw_cell in raw.iter().rev() {
         let mut deepest = 0usize;
-        for &target in &raw_cell.refs {
+        for &target in raw_cell.refs() {
+            let target = target as usize;
             deepest = deepest.max(depth.get(count - 1 - target).copied().unwrap_or(0) + 1);
         }
         if deepest > MAX_DEPTH {
@@ -160,29 +192,31 @@ pub(super) fn read_and_build(
     header: &Header,
 ) -> Result<Vec<Cell>, CellError> {
     let count = header.count;
+    // One buffer for the bag, shared by every cell built from it, in place of a copy of
+    // each cell's bytes.
+    let payload: Arc<[u8]> = Arc::from(reader.bytes);
     let raw = read_raw(reader, header)?;
     check_depths(&raw, count)?;
 
     // Built in the same descending order. Position k in `built` holds cell `count-1-k`.
     let mut built: Vec<Cell> = Vec::with_capacity(count);
     for raw_cell in raw.iter().rev() {
-        let mut refs = Vec::with_capacity(raw_cell.refs.len());
-        for &target in &raw_cell.refs {
+        let mut refs = Refs::None;
+        for &target in raw_cell.refs() {
             let child = built
-                .get(count - 1 - target)
+                .get(count - 1 - target as usize)
                 .ok_or(CellError::BadReference)?;
-            refs.push(child.clone());
+            refs.push(child.clone())?;
         }
         let cell = Cell::from_parts(
-            raw_cell.data.clone(),
+            Payload::window(&payload, raw_cell.data)?,
             raw_cell.bits,
             refs,
             raw_cell.cell_type,
             raw_cell.level_mask,
         )?;
         if let Some(stored) = &raw_cell.stored {
-            let (hashes, depths) = cell.stored();
-            check_stored(hashes, depths, stored)?;
+            check_stored(cell.identity(), stored.of(&payload)?)?;
         }
         built.push(cell);
     }
@@ -205,34 +239,44 @@ pub(super) fn verify_roots(
     header: &Header,
 ) -> Result<Vec<[u8; 32]>, CellError> {
     let count = header.count;
+    // Nothing is built here, so the bag's own bytes serve and no buffer is taken.
+    let bytes = reader.bytes;
     let raw = read_raw(reader, header)?;
     check_depths(&raw, count)?;
 
-    // Position k in `summaries` holds cell `count-1-k`, as `built` does in read_and_build.
-    let mut summaries: Vec<Summary> = Vec::with_capacity(count);
+    // Position k in `identities` holds cell `count-1-k`, as `built` does in read_and_build.
+    let mut identities: Vec<Identity> = Vec::with_capacity(count);
     for raw_cell in raw.iter().rev() {
-        let mut children = Vec::with_capacity(raw_cell.refs.len());
-        for &target in &raw_cell.refs {
-            let child = summaries
-                .get(count - 1 - target)
+        // The children are borrowed out of the identities already kept, so a cell costs no
+        // allocation to look at. The borrows end with the block, which is what lets the
+        // identity this produces be pushed onto the same vector.
+        let identity = {
+            let unfilled = Identity::NONE;
+            let mut children = [&unfilled; MAX_REFS];
+            for (slot, &target) in children.iter_mut().zip(raw_cell.refs()) {
+                *slot = identities
+                    .get(count - 1 - target as usize)
+                    .ok_or(CellError::BadReference)?;
+            }
+            let children = children
+                .get(..raw_cell.refs().len())
                 .ok_or(CellError::BadReference)?;
-            children.push(child.clone());
-        }
-        let summary = summarize(
-            &raw_cell.data,
-            raw_cell.bits,
-            &children,
-            raw_cell.cell_type,
-            raw_cell.level_mask,
-        )?;
+            summarize(
+                raw_cell.data.of(bytes)?,
+                raw_cell.bits,
+                children,
+                raw_cell.cell_type,
+                raw_cell.level_mask,
+            )?
+        };
         if let Some(stored) = &raw_cell.stored {
-            check_stored(summary.hashes(), summary.depths(), stored)?;
+            check_stored(&identity, stored.of(bytes)?)?;
         }
-        summaries.push(summary);
+        identities.push(identity);
     }
 
-    let roots = roots(&summaries, header, count)?;
-    Ok(roots.iter().map(Summary::repr_hash).collect())
+    let roots = roots(&identities, header, count)?;
+    Ok(roots.iter().map(|identity| *identity.repr_hash()).collect())
 }
 
 /// A bag's cells as they were read, before any of them is built.
@@ -242,6 +286,9 @@ pub(super) fn verify_roots(
 /// after cell without going back to the bytes.
 pub(super) struct RawCells {
     cells: Vec<RawCell>,
+    /// The bag the spans above are windows on, kept because the cells built from it point
+    /// into it.
+    payload: Arc<[u8]>,
 }
 
 impl RawCells {
@@ -257,9 +304,10 @@ impl RawCells {
 ///
 /// As [`read_and_build`], for the cells it reads.
 pub(super) fn read_cells(reader: &mut Reader<'_>, header: &Header) -> Result<RawCells, CellError> {
+    let payload: Arc<[u8]> = Arc::from(reader.bytes);
     let cells = read_raw(reader, header)?;
     check_depths(&cells, header.count)?;
-    Ok(RawCells { cells })
+    Ok(RawCells { cells, payload })
 }
 
 /// The cells built from a bag so far, and the scratch a repeated build reuses.
@@ -371,33 +419,37 @@ pub(super) fn build_at(raw: &RawCells, state: &mut Build, index: usize) -> Resul
             _ => continue,
         }
         order.push(position);
-        for &target in &raw.cells.get(position).ok_or(CellError::BadReference)?.refs {
-            stack.push(target);
+        for &target in raw
+            .cells
+            .get(position)
+            .ok_or(CellError::BadReference)?
+            .refs()
+        {
+            stack.push(target as usize);
         }
     }
     order.sort_unstable();
 
     for position in order.into_iter().rev() {
         let raw_cell = raw.cells.get(position).ok_or(CellError::BadReference)?;
-        let mut refs = Vec::with_capacity(raw_cell.refs.len());
-        for &target in &raw_cell.refs {
+        let mut refs = Refs::None;
+        for &target in raw_cell.refs() {
             let child = state
                 .built
-                .get(target)
+                .get(target as usize)
                 .and_then(Option::as_ref)
                 .ok_or(CellError::BadReference)?;
-            refs.push(child.clone());
+            refs.push(child.clone())?;
         }
         let cell = Cell::from_parts(
-            raw_cell.data.clone(),
+            Payload::window(&raw.payload, raw_cell.data)?,
             raw_cell.bits,
             refs,
             raw_cell.cell_type,
             raw_cell.level_mask,
         )?;
         if let Some(stored) = &raw_cell.stored {
-            let (hashes, depths) = cell.stored();
-            check_stored(hashes, depths, stored)?;
+            check_stored(cell.identity(), stored.of(&raw.payload)?)?;
         }
         state.keep(position, cell);
     }
@@ -502,23 +554,27 @@ fn classify(
 /// The stored copies are never used: the cell's identity comes from its own contents
 /// either way. What they are good for is disagreement, which means the sender computed
 /// something this crate did not, and there is no reading of that worth continuing from.
-/// It takes the computed hashes and depths rather than a cell, so the graph-building read
-/// and the summary-only read can both reach it.
-fn check_stored(hashes: &[[u8; 32]], depths: &[u16], stored: &[u8]) -> Result<(), CellError> {
-    if stored.len() != hashes.len() * 32 + depths.len() * 2 {
+/// It takes the computed identity rather than a cell, so the graph-building read and the
+/// identity-only read can both reach it.
+fn check_stored(identity: &Identity, stored: &[u8]) -> Result<(), CellError> {
+    let count = identity.count();
+    if stored.len() != count * 34 {
         return Err(CellError::Malformed(
             "cell stores a different number of hashes than its level mask allows",
         ));
     }
-    for (index, hash) in hashes.iter().enumerate() {
+    let missing = || CellError::Malformed("cell has fewer hashes than its level mask calls for");
+    for index in 0..count {
+        let hash = identity.hash(index).ok_or_else(missing)?;
         if stored.get(index * 32..index * 32 + 32) != Some(&hash[..]) {
             return Err(CellError::Malformed(
                 "cell stores a hash its contents do not give",
             ));
         }
     }
-    let base = hashes.len() * 32;
-    for (index, depth) in depths.iter().enumerate() {
+    let base = count * 32;
+    for index in 0..count {
+        let depth = identity.depth(index).ok_or_else(missing)?;
         let at = base + index * 2;
         if stored.get(at..at + 2) != Some(&depth.to_be_bytes()[..]) {
             return Err(CellError::Malformed(

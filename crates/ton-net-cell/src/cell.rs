@@ -18,17 +18,19 @@ mod dump;
 mod exotic;
 mod hash;
 mod level;
-mod metadata;
+mod payload;
+mod refs;
 
 #[cfg(feature = "json")]
 pub mod json;
 
 pub use exotic::CellType;
-pub use metadata::{Metadata, RefMetadata};
 
 use hash::compute;
-pub use hash::Summary;
+pub use hash::Identity;
 use level::{bits_descriptor, hash_index, level_of, refs_descriptor};
+pub use payload::{Payload, Span};
+pub use refs::Refs;
 
 /// The most data bits a cell may hold.
 pub const MAX_BITS: u16 = 1023;
@@ -66,15 +68,12 @@ pub struct Cell {
 }
 
 struct Inner {
-    data: Vec<u8>,
+    data: Payload,
     bits: u16,
-    refs: Vec<Cell>,
+    refs: Refs,
     cell_type: CellType,
-    level_mask: u8,
-    /// One hash per level the mask makes significant, lowest level first.
-    hashes: Vec<[u8; 32]>,
-    /// The depth beside each hash.
-    depths: Vec<u16>,
+    /// The cell's level mask, hashes and depths, computed once when it was built.
+    identity: Identity,
 }
 
 impl Cell {
@@ -86,24 +85,31 @@ impl Cell {
     /// hashes and depths its level mask claims, or if the level mask is not the one the
     /// cell's kind and children imply.
     pub(crate) fn from_parts(
-        data: Vec<u8>,
+        data: Payload,
         bits: u16,
-        refs: Vec<Self>,
+        refs: Refs,
         cell_type: CellType,
         level_mask: u8,
     ) -> Result<Self, CellError> {
-        let summaries: Vec<Summary> = refs.iter().map(Summary::of).collect();
-        let (hashes, depths) =
-            summarize(&data, bits, &summaries, cell_type, level_mask)?.into_parts();
+        // Borrowed rather than copied. A child already holds everything its parent hashes
+        // over, and a cell has at most four of them, so the slots sit on the stack and no
+        // reference costs an allocation to look at.
+        let unfilled = Identity::NONE;
+        let mut children = [&unfilled; MAX_REFS];
+        for (slot, child) in children.iter_mut().zip(refs.as_slice()) {
+            *slot = child.identity();
+        }
+        let children = children
+            .get(..refs.as_slice().len())
+            .ok_or(CellError::Malformed("cell has more than four references"))?;
+        let identity = summarize(data.as_slice(), bits, children, cell_type, level_mask)?;
         Ok(Self {
             inner: Arc::new(Inner {
                 data,
                 bits,
                 refs,
                 cell_type,
-                level_mask,
-                hashes,
-                depths,
+                identity,
             }),
         })
     }
@@ -115,7 +121,7 @@ impl Cell {
     /// is the form the representation hash is taken over.
     #[must_use]
     pub fn data(&self) -> &[u8] {
-        &self.inner.data
+        self.inner.data.as_slice()
     }
 
     /// The number of data bits the cell holds, at most 1023.
@@ -127,13 +133,13 @@ impl Cell {
     /// The cell's references, at most four.
     #[must_use]
     pub fn refs(&self) -> &[Self] {
-        &self.inner.refs
+        self.inner.refs.as_slice()
     }
 
     /// The reference at `index`, or `None` if the cell has no such reference.
     #[must_use]
     pub fn reference(&self, index: usize) -> Option<&Self> {
-        self.inner.refs.get(index)
+        self.inner.refs.as_slice().get(index)
     }
 
     /// The cell's kind.
@@ -155,29 +161,23 @@ impl Cell {
     /// children's.
     #[must_use]
     pub fn level_mask(&self) -> u8 {
-        self.inner.level_mask
+        self.inner.identity.level_mask()
     }
 
-    /// The cell's stored identity: its significant hashes and depths, its level mask, and
-    /// the same for each reference one level down.
+    /// The cell's identity: the hashes and depths it computed when it was built.
     ///
-    /// This reads back the values the cell computed when it was built, so it costs a copy
-    /// rather than a rehash. It is what a lazy or streaming bag reader consults to know a
-    /// subtree's identity before it has built the subtree.
+    /// This reads back stored values, so it costs nothing rather than a rehash, and it is
+    /// what a lazy or streaming bag reader consults to know a subtree's identity before it
+    /// has built the subtree. A reference's identity is the same call on the reference.
     #[must_use]
-    pub fn metadata(&self) -> Metadata {
-        metadata::of(self)
-    }
-
-    /// The hashes and depths this cell computed, in the order a bag of cells stores them.
-    pub(crate) fn stored(&self) -> (&[[u8; 32]], &[u16]) {
-        (&self.inner.hashes, &self.inner.depths)
+    pub fn identity(&self) -> &Identity {
+        &self.inner.identity
     }
 
     /// The cell's level: the highest level its mask marks, or zero for an empty mask.
     #[must_use]
     pub fn level(&self) -> u8 {
-        level_of(self.inner.level_mask)
+        level_of(self.inner.identity.level_mask())
     }
 
     /// The cell's representation hash at level zero, which is its identity.
@@ -209,19 +209,8 @@ impl Cell {
     ///
     /// Levels above the cell's own answer with its topmost hash.
     #[must_use]
-    // A cell is built with at least one hash and the index is clamped to the last, so
-    // this cannot be out of range. It is indexed rather than reached through `get`
-    // because the alternative is a fallback value, and the only value available is a
-    // zero hash: a cell that answered with one would compare equal to every other cell
-    // that failed the same way, which is a worse outcome than the panic being avoided.
-    #[expect(
-        clippy::indexing_slicing,
-        reason = "clamped to the last hash, and a cell always has one"
-    )]
     pub fn hash_at(&self, level: u8) -> &[u8; 32] {
-        let index = hash_index(self.inner.level_mask, level);
-        let last = self.inner.hashes.len().saturating_sub(1);
-        &self.inner.hashes[index.min(last)]
+        self.inner.identity.hash_at(level)
     }
 
     /// The depth of the tree under this cell at level zero.
@@ -233,11 +222,7 @@ impl Cell {
     /// The depth of the tree under this cell at `level`.
     #[must_use]
     pub fn depth_at(&self, level: u8) -> u16 {
-        let index = hash_index(self.inner.level_mask, level);
-        let last = self.inner.depths.len().saturating_sub(1);
-        // A depth is stored alongside every hash, so this is in range for the same
-        // reason [`Cell::hash_at`] is, and zero is a depth a leaf really has.
-        self.inner.depths.get(index.min(last)).copied().unwrap_or(0)
+        self.inner.identity.depth_at(level)
     }
 
     /// Whether this handle and `other` are the same cell in memory, not merely equal ones.
@@ -329,9 +314,9 @@ impl Cell {
     pub(crate) fn stored_descriptors(&self) -> (u8, u8) {
         (
             refs_descriptor(
-                self.inner.refs.len(),
+                self.inner.refs.as_slice().len(),
                 self.is_exotic(),
-                self.inner.level_mask,
+                self.inner.identity.level_mask(),
                 3,
             ),
             bits_descriptor(self.inner.bits),
@@ -339,12 +324,12 @@ impl Cell {
     }
 }
 
-/// Computes a cell's identity from its parts and its children's summaries.
+/// Computes a cell's identity from its parts and its children's identities.
 ///
 /// This is the hashing [`Cell::from_parts`] does, split out so a bag can be hash-verified
-/// without building its cells: a reader keeps a summary per cell and feeds each cell's
-/// children's summaries back through here. The level mask is checked against the children
-/// exactly as when a cell is built, so a summary is never computed over a mask the children
+/// without building its cells: a reader keeps an [`Identity`] per cell and feeds each cell's
+/// children's identities back through here. The level mask is checked against the children
+/// exactly as when a cell is built, so an identity is never computed over a mask the children
 /// do not justify.
 ///
 /// # Errors
@@ -354,18 +339,17 @@ impl Cell {
 pub fn summarize(
     data: &[u8],
     bits: u16,
-    refs: &[Summary],
+    refs: &[&Identity],
     cell_type: CellType,
     mask: u8,
-) -> Result<Summary, CellError> {
+) -> Result<Identity, CellError> {
     let children_mask = refs.iter().fold(0u8, |acc, child| acc | child.level_mask());
     if mask != implied_mask(cell_type, children_mask, mask) {
         return Err(CellError::Malformed(
             "cell level mask is not the one its children imply",
         ));
     }
-    let (hashes, depths) = compute(data, bits, refs, cell_type, mask)?;
-    Ok(Summary::from_parts(mask, hashes, depths))
+    compute(data, bits, refs, cell_type, mask)
 }
 
 /// The level mask a cell must carry, given its kind and the union of its children's masks.
@@ -412,8 +396,8 @@ impl fmt::Debug for Cell {
         f.debug_struct("Cell")
             .field("cell_type", &self.inner.cell_type)
             .field("bits", &self.inner.bits)
-            .field("refs", &self.inner.refs.len())
-            .field("level_mask", &self.inner.level_mask)
+            .field("refs", &self.inner.refs.as_slice().len())
+            .field("level_mask", &self.inner.identity.level_mask())
             .field("hash", &hex(self.hash()))
             .finish()
     }
@@ -464,21 +448,74 @@ mod tests {
     }
 
     #[test]
-    fn metadata_reports_the_stored_identity() {
+    fn identity_reports_what_the_cell_computed() {
         let child = cell_of(0xCD);
         let mut builder = Builder::new();
         builder.store_uint(0xAB, 8).expect("a byte fits");
         builder.store_ref(child.clone()).expect("a ref fits");
         let parent = builder.build().expect("well formed");
 
-        let meta = parent.metadata();
-        assert_eq!(meta.level_mask, parent.level_mask());
-        assert_eq!(meta.hashes.first(), Some(parent.hash()));
-        assert_eq!(meta.depths.first(), Some(&parent.depth()));
+        let identity = parent.identity();
+        assert_eq!(identity.level_mask(), parent.level_mask());
+        assert_eq!(
+            identity.count(),
+            1,
+            "a cell with an empty mask has one hash"
+        );
+        assert_eq!(identity.hash(0), Some(parent.hash()));
+        assert_eq!(identity.depth(0), Some(parent.depth()));
+        assert_eq!(identity.hash(1), None, "and no more");
 
-        let reference = meta.refs.first().expect("one reference");
-        assert_eq!(reference.level_mask, child.level_mask());
-        assert_eq!(reference.hashes.first(), Some(child.hash()));
-        assert_eq!(reference.depths.first(), Some(&child.depth()));
+        let reference = child.identity();
+        assert_eq!(reference.level_mask(), child.level_mask());
+        assert_eq!(reference.hash(0), Some(child.hash()));
+        assert_eq!(reference.depth(0), Some(child.depth()));
+    }
+
+    /// The layout, asserted exactly.
+    ///
+    /// Every part of a cell that used to cost an allocation of its own is a field of a fixed
+    /// size here. One is still a pointer to a second allocation, `Identity`'s hashes above
+    /// the lowest, which only a cell with a level mask has: a pruned branch, and the cells
+    /// above it the mask still reaches once each Merkle cell between them has shifted it down a
+    /// level. A field that grows back into a vector, or one that stops fitting
+    /// beside a hash, shows up here rather than in a memory profile a year later.
+    ///
+    /// This is the layout, not the allocation count; a boxed field keeps the size and adds
+    /// the allocation. `tests/allocations.rs` counts.
+    ///
+    /// The sizes are the ones a 64-bit target gives; a narrower one has its own.
+    #[test]
+    #[cfg(target_pointer_width = "64")]
+    fn a_cells_parts_stay_inline_and_stay_that_way() {
+        assert_eq!(size_of::<Cell>(), 8, "a cell is a pointer");
+        assert_eq!(
+            size_of::<Payload>(),
+            24,
+            "a buffer shared with the bag, and a window on it"
+        );
+        assert_eq!(
+            size_of::<Refs>(),
+            40,
+            "four references and the tag that counts them"
+        );
+        assert_eq!(
+            size_of::<Identity>(),
+            48,
+            "a hash, its depth, the level mask, and a pointer to the levels above"
+        );
+        assert_eq!(
+            size_of::<Inner>(),
+            120,
+            "all of it, in the one allocation a cell costs"
+        );
+    }
+
+    #[test]
+    fn a_cell_with_an_empty_mask_carries_one_hash_and_no_more() {
+        let cell = cell_of(0xAB);
+        assert_eq!(cell.level_mask(), 0);
+        assert_eq!(cell.identity().count(), 1);
+        assert_eq!(cell.identity().hash(1), None, "and pays for no others");
     }
 }
