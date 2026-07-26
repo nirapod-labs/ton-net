@@ -130,6 +130,7 @@ work:
 - [Wire format](docs/protocol/wire-format.md): the TL codec, the ADNL framing, and the liteserver messages.
 - [Threat model](docs/security/threat-model.md): the adversary, and what each check defends.
 - [Conformance](docs/conformance.md): how correctness is held to facts the network already computed.
+- [Fuzzing](docs/fuzzing.md): the targets on the decode boundary, and how to run them.
 - [Versioning](docs/versions.md) and the [release process](docs/release-process.md).
 
 ## License

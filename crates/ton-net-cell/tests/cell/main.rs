@@ -9,8 +9,10 @@
 //! collapses that to one target (NET-ADR-009).
 
 mod augmented;
+mod fuzz;
 mod hashing;
 mod hostile;
 mod mainnet_boc;
 mod merkle;
+mod roundtrip;
 mod whole_block;
