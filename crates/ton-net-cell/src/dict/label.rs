@@ -201,10 +201,12 @@ impl BitRun for Label {
 /// Somewhere a label being read is written to.
 ///
 /// A [`Label`] is what a reader passes wherever it can, held inline and refilled per level.
-/// The prefix dictionary's `insert` and `remove_from` pass a `Vec<bool>` instead, and are
-/// the two that do: each rebuilds its fork with the label after its own recursive call has
-/// returned, so neither can share a buffer a child would have overwritten, and neither may
-/// hold a label in a frame whose depth a peer chooses.
+/// The prefix dictionary's `insert` and `remove_from` pass a `Vec<bool>` instead: each
+/// rebuilds its fork with the label after its own recursive call has returned, so neither
+/// can share a buffer a child would have overwritten, and neither may hold a label in a
+/// frame whose depth a peer chooses. Both sinks read a label back the same, which
+/// `every_label_this_writes_reads_back_as_itself` holds them to, because a label that came
+/// back differently in one of them would put a different edge on a rebuilt node.
 pub(super) trait LabelSink {
     /// Drops whatever the sink held, so a refill spells only what it just read.
     fn reset(&mut self);
