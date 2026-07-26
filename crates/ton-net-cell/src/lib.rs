@@ -99,7 +99,7 @@ pub use boc::{
 pub use builder::Builder;
 #[cfg(feature = "json")]
 pub use cell::json;
-pub use cell::{Cell, CellType, Metadata, RefMetadata, MAX_BITS, MAX_REFS};
+pub use cell::{Cell, CellType, Identity, MAX_BITS, MAX_REFS};
 pub use dict::{
     AugDict, AugDictIter, AugEntry, AugItem, AugNode, Augmentation, Dict, DictEntry, DictIter,
     ForkExtra, Lookup, PfxDict, PfxDictIter, PfxMatch, Traverse,

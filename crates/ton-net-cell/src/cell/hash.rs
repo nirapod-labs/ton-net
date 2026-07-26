@@ -1,123 +1,173 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileCopyrightText: 2026 Nirapod Labs
 
-//! Computing a cell's representation hashes and depths, the values that are its identity.
+//! A cell's identity: its representation hashes and depths, and the rules that compute them.
 
 use sha2::{Digest, Sha256};
 
 use super::{bits_descriptor, hash_index, level_of, refs_descriptor, CellType};
 use crate::error::CellError;
 
-/// A child's stored identity, enough to hash its parent without holding the child cell.
+/// The most representation hashes a cell can have: one per level a three-bit mask marks,
+/// and one besides.
+const MAX_HASHES: usize = 4;
+
+/// A cell's identity: one representation hash and depth per level its mask makes significant.
 ///
-/// A parent's hash is taken over its children's hashes and depths, one per level, so those
-/// values are all a parent needs from a child. Carrying them as a summary rather than a whole
-/// cell is what lets a bag be hash-verified without building its graph: the reader keeps a
-/// summary per cell, tens of bytes, in place of a cell, hundreds.
-#[derive(Clone)]
-pub struct Summary {
-    /// The cell's level mask.
-    level_mask: u8,
-    /// One hash per significant level, lowest first.
-    hashes: Vec<[u8; 32]>,
-    /// The depth beside each hash.
-    depths: Vec<u16>,
-}
-
-impl Summary {
-    /// A summary from parts already computed, as [`summarize`](super::summarize) returns.
-    pub fn from_parts(level_mask: u8, hashes: Vec<[u8; 32]>, depths: Vec<u16>) -> Self {
-        Self {
-            level_mask,
-            hashes,
-            depths,
-        }
-    }
-
-    /// The summarised cell's significant hashes, lowest level first.
-    pub fn hashes(&self) -> &[[u8; 32]] {
-        &self.hashes
-    }
-
-    /// The depth beside each hash.
-    pub fn depths(&self) -> &[u16] {
-        &self.depths
-    }
-
-    /// The identity of the summarised cell itself: its hash at its own level.
-    pub fn repr_hash(&self) -> [u8; 32] {
-        self.hash_at(level_of(self.level_mask))
-    }
-
-    /// Consumes the summary, returning its hashes and depths for a cell to hold.
-    pub fn into_parts(self) -> (Vec<[u8; 32]>, Vec<u16>) {
-        (self.hashes, self.depths)
-    }
-
-    /// The summarised cell's hash at `level`, clamped to its topmost, as [`Cell::hash_at`](super::Cell::hash_at).
-    fn hash_at(&self, level: u8) -> [u8; 32] {
-        self.as_view().hash_at(level)
-    }
-
-    /// Borrows this summary's identity, for a parent about to hash itself over it.
-    pub fn as_view(&self) -> SummaryRef<'_> {
-        SummaryRef::new(self.level_mask, &self.hashes, &self.depths)
-    }
-}
-
-/// A summarised cell's identity, borrowed from wherever it already sits.
+/// This is what a parent hashes itself over, what a proof reproduces, and what a bag of cells
+/// records beside a cell it carries. It is the whole of a cell's identity and none of its
+/// contents, which is what lets a bag be hash-verified without building its graph: a reader
+/// keeps one of these per cell, tens of bytes, in place of a cell, hundreds.
 ///
-/// Hashing a parent reads three things from each of its references: the level mask, the
-/// hashes and the depths. All three are already held by the child, so the parent borrows
-/// them. Copying them out into an owned [`Summary`] first costs two allocations for every
-/// reference of every cell, and building a bag is the one place in this crate where that is
-/// measurable.
-#[derive(Clone, Copy)]
-pub struct SummaryRef<'a> {
+/// The hashes run lowest significant level first, [`count`](Identity::count) of them, reached
+/// by position with [`hash`](Identity::hash) or by level with [`hash_at`](Identity::hash_at).
+/// An ordinary cell has exactly one; only a proof's cells have more.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Identity {
+    /// The cell's level mask, which fixes how many hashes it has and which answers for a level.
     level_mask: u8,
-    hashes: &'a [[u8; 32]],
-    depths: &'a [u16],
-}
-
-impl<'a> SummaryRef<'a> {
-    /// What a reference slot holds before a child is put in it.
+    /// The hash at the lowest significant level, which every cell has.
+    hash0: [u8; 32],
+    /// The depth beside it.
+    depth0: u16,
+    /// Everything above the lowest level, held apart and boxed.
     ///
-    /// A caller passes only the slots it filled, so nothing ever hashes over this.
+    /// A cell with an empty mask has one hash and no more, and outside a proof that is every
+    /// cell in a bag. Keeping the rest here costs those cells a pointer instead of the space
+    /// for three hashes they will never have.
+    extra: Option<Box<Extra>>,
+}
+
+/// The hashes and depths above the lowest, for a cell significant at more than one level.
+///
+/// Slots past the cell's own count stay zero, so two identities of the same shape hold the
+/// same bytes and equality means what it says.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct Extra {
+    hashes: [[u8; 32]; MAX_HASHES - 1],
+    depths: [u16; MAX_HASHES - 1],
+}
+
+impl Identity {
+    /// The identity a reference slot holds before a child is put in it.
+    ///
+    /// A caller passes only the slots it filled, so nothing is ever hashed over this.
     pub(crate) const NONE: Self = Self {
         level_mask: 0,
-        hashes: &[],
-        depths: &[],
+        hash0: [0u8; 32],
+        depth0: 0,
+        extra: None,
     };
 
-    /// Borrows an identity from the parts a cell or a summary already holds.
-    pub(crate) fn new(level_mask: u8, hashes: &'a [[u8; 32]], depths: &'a [u16]) -> Self {
-        Self {
-            level_mask,
-            hashes,
-            depths,
+    /// Room for the hashes a mask calls for, with none of them computed yet.
+    ///
+    /// The count comes from the mask alone, so the space is taken once rather than grown, and
+    /// a mask marking more levels than the cell model defines is refused here rather than
+    /// silently truncated.
+    fn blank(level_mask: u8) -> Result<Self, CellError> {
+        let count = level_mask.count_ones() as usize + 1;
+        if count > MAX_HASHES {
+            return Err(CellError::Malformed(
+                "cell level mask marks more levels than the cell model has",
+            ));
         }
+        Ok(Self {
+            level_mask,
+            hash0: [0u8; 32],
+            depth0: 0,
+            extra: (count > 1).then(|| {
+                Box::new(Extra {
+                    hashes: [[0u8; 32]; MAX_HASHES - 1],
+                    depths: [0u16; MAX_HASHES - 1],
+                })
+            }),
+        })
     }
 
-    /// The summarised cell's level mask.
+    /// Records the hash and depth for the level at `index`, counting from the lowest.
+    fn set(&mut self, index: usize, hash: [u8; 32], depth: u16) -> Result<(), CellError> {
+        let past_the_end =
+            || CellError::Malformed("cell has more hashes than its level mask allows");
+        if index == 0 {
+            self.hash0 = hash;
+            self.depth0 = depth;
+            return Ok(());
+        }
+        let extra = self.extra.as_mut().ok_or_else(past_the_end)?;
+        *extra.hashes.get_mut(index - 1).ok_or_else(past_the_end)? = hash;
+        *extra.depths.get_mut(index - 1).ok_or_else(past_the_end)? = depth;
+        Ok(())
+    }
+
+    /// The cell's level mask, a three-bit value.
+    #[must_use]
     pub fn level_mask(&self) -> u8 {
         self.level_mask
     }
 
-    /// The hash at `level`, clamped to the topmost this cell has, as [`Cell::hash_at`](super::Cell::hash_at).
-    fn hash_at(&self, level: u8) -> [u8; 32] {
-        let index = hash_index(self.level_mask, level);
-        let last = self.hashes.len().saturating_sub(1);
-        self.hashes
-            .get(index.min(last))
-            .copied()
-            .unwrap_or([0u8; 32])
+    /// How many hashes and depths the cell has, one per level its mask makes significant.
+    ///
+    /// This is one more than the mask's set bits, so it is one for an ordinary cell and at
+    /// most four for any cell.
+    #[must_use]
+    pub fn count(&self) -> usize {
+        self.level_mask.count_ones() as usize + 1
     }
 
-    /// The depth at `level`, clamped to the topmost this cell has, as [`Cell::depth_at`](super::Cell::depth_at).
-    fn depth_at(&self, level: u8) -> u16 {
+    /// The hash at `index`, counting from the lowest significant level, or `None` past the end.
+    #[must_use]
+    pub fn hash(&self, index: usize) -> Option<&[u8; 32]> {
+        match index {
+            0 => Some(&self.hash0),
+            _ if index >= self.count() => None,
+            _ => self
+                .extra
+                .as_ref()
+                .and_then(|extra| extra.hashes.get(index - 1)),
+        }
+    }
+
+    /// The depth beside the hash at `index`, or `None` past the end.
+    #[must_use]
+    pub fn depth(&self, index: usize) -> Option<u16> {
+        match index {
+            0 => Some(self.depth0),
+            _ if index >= self.count() => None,
+            _ => self
+                .extra
+                .as_ref()
+                .and_then(|extra| extra.depths.get(index - 1).copied()),
+        }
+    }
+
+    /// The hash for `level`, with levels above the cell's own answering with its topmost.
+    ///
+    /// The fallback is the cell's lowest hash rather than a zero hash. A cell that answered
+    /// with zeros would compare equal to every other cell that failed the same way, which is
+    /// worse than answering with a hash the cell really has.
+    #[must_use]
+    pub fn hash_at(&self, level: u8) -> &[u8; 32] {
         let index = hash_index(self.level_mask, level);
-        let last = self.depths.len().saturating_sub(1);
-        self.depths.get(index.min(last)).copied().unwrap_or(0)
+        self.hash(index.min(self.count().saturating_sub(1)))
+            .unwrap_or(&self.hash0)
+    }
+
+    /// The depth for `level`, clamped to the cell's topmost as [`hash_at`](Identity::hash_at) is.
+    #[must_use]
+    pub fn depth_at(&self, level: u8) -> u16 {
+        let index = hash_index(self.level_mask, level);
+        self.depth(index.min(self.count().saturating_sub(1)))
+            .unwrap_or(self.depth0)
+    }
+
+    /// The cell's own identity: its hash at its own level.
+    ///
+    /// This is the value two cells are the same cell by. It differs from the level-zero hash
+    /// exactly where it must: a pruned branch's level-zero hash belongs to the subtree it
+    /// replaced, and some other cell may legitimately answer with the same one.
+    #[must_use]
+    pub fn repr_hash(&self) -> &[u8; 32] {
+        self.hash_at(level_of(self.level_mask))
     }
 }
 
@@ -158,73 +208,83 @@ fn read_depth(data: &[u8], at: usize) -> Result<u16, CellError> {
 pub(super) fn compute(
     data: &[u8],
     bits: u16,
-    refs: &[SummaryRef<'_>],
+    refs: &[&Identity],
     cell_type: CellType,
     mask: u8,
-) -> Result<(Vec<[u8; 32]>, Vec<u16>), CellError> {
+) -> Result<Identity, CellError> {
+    let mut identity = Identity::blank(mask)?;
     let level = level_of(mask);
     let exotic = cell_type != CellType::Ordinary;
     let stored = mask.count_ones() as usize;
-
-    let mut hashes = Vec::with_capacity(stored + 1);
-    let mut depths = Vec::with_capacity(stored + 1);
+    let mut written = 0usize;
 
     if cell_type == CellType::PrunedBranch {
         // Below its own level a pruned branch is the subtree it replaced.
         for index in 0..stored {
-            hashes.push(read_hash(data, 2 + 32 * index)?);
-            depths.push(read_depth(data, 2 + 32 * stored + 2 * index)?);
+            let hash = read_hash(data, 2 + 32 * index)?;
+            let depth = read_depth(data, 2 + 32 * stored + 2 * index)?;
+            identity.set(index, hash, depth)?;
         }
         // At its own level it is only a cell, hashed as it stands.
         let (d1, d2) = (refs_descriptor(0, true, mask, level), bits_descriptor(bits));
         let mut sum = Sha256::new();
         sum.update([d1, d2]);
         sum.update(data);
-        hashes.push(sum.finalize().into());
-        depths.push(0);
-        return Ok((hashes, depths));
+        identity.set(stored, sum.finalize().into(), 0)?;
+        written = stored + 1;
+    } else {
+        let child_level_shift = u8::from(cell_type.is_merkle());
+        for this_level in 0..=level {
+            // Only a level that opens a new hash index produces a hash.
+            if hash_index(mask, this_level) != written {
+                continue;
+            }
+            let child_level = this_level + child_level_shift;
+            let (d1, d2) = (
+                refs_descriptor(refs.len(), exotic, mask, this_level),
+                bits_descriptor(bits),
+            );
+
+            // The representation goes into the hash a piece at a time rather than into a buffer
+            // that is then hashed. The bytes are the same either way, and this is the innermost
+            // loop of the crate: gathering them first costs an allocation and a copy of the
+            // cell's data and of every child's hash, per level, per cell.
+            let mut sum = Sha256::new();
+            sum.update([d1, d2]);
+            match written
+                .checked_sub(1)
+                .and_then(|below| identity.hash(below))
+            {
+                // The lowest hash is taken over the cell's data.
+                None => sum.update(data),
+                // A higher hash is taken over the hash below it.
+                Some(previous) => sum.update(previous),
+            }
+
+            // Every child's depth precedes every child's hash, so the depths are fed here and
+            // the hashes below rather than in one pass over the references.
+            let mut depth = 0u16;
+            for child in refs {
+                let child_depth = child.depth_at(child_level);
+                depth = depth.max(child_depth.saturating_add(1));
+                sum.update(child_depth.to_be_bytes());
+            }
+            for child in refs {
+                sum.update(child.hash_at(child_level));
+            }
+
+            identity.set(written, sum.finalize().into(), depth)?;
+            written += 1;
+        }
     }
 
-    let child_level_shift = u8::from(cell_type.is_merkle());
-    for this_level in 0..=level {
-        // Only a level that opens a new hash index produces a hash.
-        if hash_index(mask, this_level) != hashes.len() {
-            continue;
-        }
-        let child_level = this_level + child_level_shift;
-        let (d1, d2) = (
-            refs_descriptor(refs.len(), exotic, mask, this_level),
-            bits_descriptor(bits),
-        );
-
-        // The representation goes into the hash a piece at a time rather than into a buffer
-        // that is then hashed. The bytes are the same either way, and this is the innermost
-        // loop of the crate: gathering them first costs an allocation and a copy of the
-        // cell's data and of every child's hash, per level, per cell.
-        let mut sum = Sha256::new();
-        sum.update([d1, d2]);
-        match hashes.last() {
-            // The lowest hash is taken over the cell's data.
-            None => sum.update(data),
-            // A higher hash is taken over the hash below it.
-            Some(previous) => sum.update(previous),
-        }
-
-        // Every child's depth precedes every child's hash, so the depths are fed here and
-        // the hashes below rather than in one pass over the references.
-        let mut depth = 0u16;
-        for child in refs {
-            let child_depth = child.depth_at(child_level);
-            depth = depth.max(child_depth.saturating_add(1));
-            sum.update(child_depth.to_be_bytes());
-        }
-        for child in refs {
-            sum.update(child.hash_at(child_level));
-        }
-
-        hashes.push(sum.finalize().into());
-        depths.push(depth);
+    // Every slot the mask calls for has to have been written. A slot left blank would leave
+    // the cell answering with a zero hash, which is the one wrong answer that looks like an
+    // identity, so it is refused here rather than returned.
+    if written != identity.count() {
+        return Err(CellError::Malformed(
+            "cell has fewer hashes than its level mask calls for",
+        ));
     }
-
-    Ok((hashes, depths))
+    Ok(identity)
 }

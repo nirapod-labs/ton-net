@@ -4,7 +4,7 @@
 //! Reading a bag's cells into a graph, once its header has been checked.
 
 use super::{bit_len, read_header, Header, Reader, MAX_DEPTH};
-use crate::cell::{summarize, Cell, CellType, Summary, SummaryRef, MAX_BITS, MAX_REFS};
+use crate::cell::{summarize, Cell, CellType, Identity, MAX_BITS, MAX_REFS};
 use crate::error::CellError;
 
 /// A cell as read from the bag, with its references still as indices.
@@ -181,8 +181,7 @@ pub(super) fn read_and_build(
             raw_cell.level_mask,
         )?;
         if let Some(stored) = &raw_cell.stored {
-            let (hashes, depths) = cell.stored();
-            check_stored(hashes, depths, stored)?;
+            check_stored(cell.identity(), stored)?;
         }
         built.push(cell);
     }
@@ -208,19 +207,19 @@ pub(super) fn verify_roots(
     let raw = read_raw(reader, header)?;
     check_depths(&raw, count)?;
 
-    // Position k in `summaries` holds cell `count-1-k`, as `built` does in read_and_build.
-    let mut summaries: Vec<Summary> = Vec::with_capacity(count);
+    // Position k in `identities` holds cell `count-1-k`, as `built` does in read_and_build.
+    let mut identities: Vec<Identity> = Vec::with_capacity(count);
     for raw_cell in raw.iter().rev() {
-        // The children are borrowed out of the summaries already kept, so a cell costs no
+        // The children are borrowed out of the identities already kept, so a cell costs no
         // allocation to look at. The borrows end with the block, which is what lets the
-        // summary this produces be pushed onto the same vector.
-        let summary = {
-            let mut children = [SummaryRef::NONE; MAX_REFS];
+        // identity this produces be pushed onto the same vector.
+        let identity = {
+            let unfilled = Identity::NONE;
+            let mut children = [&unfilled; MAX_REFS];
             for (slot, &target) in children.iter_mut().zip(&raw_cell.refs) {
-                *slot = summaries
+                *slot = identities
                     .get(count - 1 - target)
-                    .ok_or(CellError::BadReference)?
-                    .as_view();
+                    .ok_or(CellError::BadReference)?;
             }
             let children = children
                 .get(..raw_cell.refs.len())
@@ -234,13 +233,13 @@ pub(super) fn verify_roots(
             )?
         };
         if let Some(stored) = &raw_cell.stored {
-            check_stored(summary.hashes(), summary.depths(), stored)?;
+            check_stored(&identity, stored)?;
         }
-        summaries.push(summary);
+        identities.push(identity);
     }
 
-    let roots = roots(&summaries, header, count)?;
-    Ok(roots.iter().map(Summary::repr_hash).collect())
+    let roots = roots(&identities, header, count)?;
+    Ok(roots.iter().map(|identity| *identity.repr_hash()).collect())
 }
 
 /// A bag's cells as they were read, before any of them is built.
@@ -379,8 +378,7 @@ pub(super) fn build_at(raw: &RawCells, state: &mut Build, index: usize) -> Resul
             raw_cell.level_mask,
         )?;
         if let Some(stored) = &raw_cell.stored {
-            let (hashes, depths) = cell.stored();
-            check_stored(hashes, depths, stored)?;
+            check_stored(cell.identity(), stored)?;
         }
         if let Some(slot) = state.built.get_mut(position) {
             *slot = Some(cell);
@@ -487,23 +485,27 @@ fn classify(
 /// The stored copies are never used: the cell's identity comes from its own contents
 /// either way. What they are good for is disagreement, which means the sender computed
 /// something this crate did not, and there is no reading of that worth continuing from.
-/// It takes the computed hashes and depths rather than a cell, so the graph-building read
-/// and the summary-only read can both reach it.
-fn check_stored(hashes: &[[u8; 32]], depths: &[u16], stored: &[u8]) -> Result<(), CellError> {
-    if stored.len() != hashes.len() * 32 + depths.len() * 2 {
+/// It takes the computed identity rather than a cell, so the graph-building read and the
+/// identity-only read can both reach it.
+fn check_stored(identity: &Identity, stored: &[u8]) -> Result<(), CellError> {
+    let count = identity.count();
+    if stored.len() != count * 34 {
         return Err(CellError::Malformed(
             "cell stores a different number of hashes than its level mask allows",
         ));
     }
-    for (index, hash) in hashes.iter().enumerate() {
+    let missing = || CellError::Malformed("cell has fewer hashes than its level mask calls for");
+    for index in 0..count {
+        let hash = identity.hash(index).ok_or_else(missing)?;
         if stored.get(index * 32..index * 32 + 32) != Some(&hash[..]) {
             return Err(CellError::Malformed(
                 "cell stores a hash its contents do not give",
             ));
         }
     }
-    let base = hashes.len() * 32;
-    for (index, depth) in depths.iter().enumerate() {
+    let base = count * 32;
+    for index in 0..count {
+        let depth = identity.depth(index).ok_or_else(missing)?;
         let at = base + index * 2;
         if stored.get(at..at + 2) != Some(&depth.to_be_bytes()[..]) {
             return Err(CellError::Malformed(

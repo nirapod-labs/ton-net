@@ -131,7 +131,7 @@ fn every_pruned_branch_is_long_enough_to_read() {
 }
 
 #[test]
-fn metadata_matches_the_hashes_the_engine_computed() {
+fn identity_matches_the_hashes_the_engine_computed() {
     let roots = parse_boc(&proof()).expect("the captured proof parses");
 
     // The proof holds every cell kind, so this walks ordinary cells, both Merkle kinds,
@@ -139,19 +139,28 @@ fn metadata_matches_the_hashes_the_engine_computed() {
     // carry more than one hash. For each, the reported identity must be the identity the
     // cell computed for itself, and each reference's must be that reference's own.
     for cell in all_cells(&roots) {
-        let meta = cell.metadata();
-        assert_eq!(meta.level_mask, cell.level_mask());
-        assert_eq!(meta.hashes.len(), meta.depths.len());
-        assert_eq!(meta.hashes.first(), Some(cell.hash()));
-        assert_eq!(meta.hashes.last(), Some(cell.repr_hash()));
-        assert_eq!(meta.depths.first(), Some(&cell.depth()));
+        let identity = cell.identity();
+        assert_eq!(identity.level_mask(), cell.level_mask());
+        assert_eq!(
+            identity.count(),
+            cell.level_mask().count_ones() as usize + 1,
+            "one hash per marked level and one besides"
+        );
+        assert_eq!(identity.hash(0), Some(cell.hash()));
+        assert_eq!(identity.hash(identity.count() - 1), Some(cell.repr_hash()));
+        assert_eq!(identity.depth(0), Some(cell.depth()));
+        assert_eq!(identity.hash(identity.count()), None, "and no more");
+        assert_eq!(identity.depth(identity.count()), None);
 
-        assert_eq!(meta.refs.len(), cell.refs().len());
-        for (reference, child) in meta.refs.iter().zip(cell.refs()) {
-            assert_eq!(reference.level_mask, child.level_mask());
-            assert_eq!(reference.hashes.first(), Some(child.hash()));
-            assert_eq!(reference.hashes.last(), Some(child.repr_hash()));
-            assert_eq!(reference.depths.first(), Some(&child.depth()));
+        for child in cell.refs() {
+            let reference = child.identity();
+            assert_eq!(reference.level_mask(), child.level_mask());
+            assert_eq!(reference.hash(0), Some(child.hash()));
+            assert_eq!(
+                reference.hash(reference.count() - 1),
+                Some(child.repr_hash())
+            );
+            assert_eq!(reference.depth(0), Some(child.depth()));
         }
     }
 }
