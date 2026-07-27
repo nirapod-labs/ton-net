@@ -23,7 +23,7 @@ pub mod compress;
 
 pub use large::{serialize_boc_chunks, serialize_boc_chunks_with, BocChunks};
 pub use lazy::LazyBoc;
-pub use parse::parse_boc;
+pub use parse::{parse_boc, parse_boc_with};
 pub use serialize::{file_hash, serialize_boc, serialize_boc_with, BocOptions};
 pub use view::BocView;
 
@@ -52,6 +52,86 @@ pub const MAX_CELLS: usize = 1 << 17;
 /// Bounding the depth keeps a deep graph from overflowing the stack when the cells are
 /// later walked or dropped.
 pub const MAX_DEPTH: usize = 1024;
+
+/// What a caller allows one parse to take, where that is narrower than the crate's own
+/// bounds.
+///
+/// Every field here tightens and none of them widens. A parse under the default admits
+/// exactly the bags [`parse_boc`] admits and refuses exactly the ones it refuses, and a
+/// value asking for more than the crate allows gets the crate's figure rather than its own.
+/// So no options value reachable through this type, by any route including writing the field
+/// directly, produces a parse that takes more than a parse with no options at all. The
+/// `#[non_exhaustive]` marker is part of that: it is what removes the struct-literal route,
+/// leaving [`default`](ParseOptions::default) as the only way in from another crate.
+///
+/// That is narrower than it will stay. A raise is not expressible here, and `NET-ADR-012`
+/// bounds one by a byte budget the parse spends.
+///
+/// [`MAX_DEPTH`] is absent by decision rather than by omission. It is a stack-safety bound
+/// and not a memory one, so no budget a caller sets changes what it protects, and nothing
+/// here moves it in either direction.
+///
+/// One bound sits outside this type: a compressed bag is expanded before it is parsed, under
+/// a cap of its own that no option reaches.
+///
+/// # Examples
+///
+/// ```
+/// use ton_net_cell::{parse_boc_with, CellError, ParseOptions, MAX_CELLS};
+///
+/// // Nothing this type can be asked for takes more than the default takes.
+/// let wide = ParseOptions::default().with_max_cells(usize::MAX);
+/// assert_eq!(wide.max_cells, MAX_CELLS);
+///
+/// let bytes = [0xb5, 0xee, 0x9c, 0x72, 0x01, 0x01, 0x01, 0x01, 0x00, 0x03, 0x00,
+///              0x00, 0x02, 0xab];
+/// let strict = ParseOptions::default().with_max_cells(0);
+/// assert_eq!(
+///     parse_boc_with(&bytes, &strict),
+///     Err(CellError::TooManyCells { limit: 0 })
+/// );
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct ParseOptions {
+    /// The most cells a bag may declare and still be read.
+    ///
+    /// Held to [`MAX_CELLS`] wherever it is read, so writing this field directly tightens
+    /// on the same terms as [`with_max_cells`](ParseOptions::with_max_cells) and cannot
+    /// widen.
+    pub max_cells: usize,
+}
+
+impl Default for ParseOptions {
+    /// The bounds [`parse_boc`] reads under, which are the crate's own.
+    fn default() -> Self {
+        Self {
+            max_cells: MAX_CELLS,
+        }
+    }
+}
+
+impl ParseOptions {
+    /// Holds a parse to at most `cells`, or leaves the ceiling alone if it is already
+    /// lower.
+    ///
+    /// Takes the stricter of the two rather than the named one, which is what makes the
+    /// order of several calls not matter and a raise not expressible.
+    #[must_use]
+    pub fn with_max_cells(mut self, cells: usize) -> Self {
+        self.max_cells = self.max_cells.min(cells);
+        self
+    }
+
+    /// The cell ceiling a parse under these options holds a bag to.
+    ///
+    /// The clamp lives here, at the one place the figure is enforced, rather than only in
+    /// the setter, because [`max_cells`](ParseOptions::max_cells) is public and a caller
+    /// can write it without passing through one.
+    pub(crate) fn cell_ceiling(self) -> usize {
+        self.max_cells.min(MAX_CELLS)
+    }
+}
 
 /// The CRC-32C (Castagnoli) checksum a bag of cells may carry, reflected form.
 /// The CRC-32C state before any bytes, so a running checksum can be built one chunk at a

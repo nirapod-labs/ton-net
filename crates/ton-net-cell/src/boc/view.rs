@@ -13,7 +13,7 @@
 //! returns only the roots' hashes, keeping a summary per cell rather than a cell, so a bag
 //! too large to hold as a graph can still be verified and its identity read.
 
-use super::{read_and_build, read_header, Header, Reader};
+use super::{read_and_build, read_header, Header, ParseOptions, Reader};
 use crate::cell::Cell;
 use crate::error::CellError;
 
@@ -42,8 +42,21 @@ impl<'a> BocView<'a> {
     ///
     /// As [`parse_boc`](super::parse_boc), for the header it reads.
     pub fn open(bytes: &'a [u8]) -> Result<Self, CellError> {
+        Self::open_with(bytes, &ParseOptions::default())
+    }
+
+    /// Opens a view onto a bag under bounds the caller has narrowed.
+    ///
+    /// This is [`open`](BocView::open) with the crate's own bounds tightened, and it reads
+    /// the same header under the same rules, so it refuses a ceiling on the same bytes
+    /// [`parse_boc_with`](super::parse_boc_with) does.
+    ///
+    /// # Errors
+    ///
+    /// As [`parse_boc_with`](super::parse_boc_with), for the header it reads.
+    pub fn open_with(bytes: &'a [u8], options: &ParseOptions) -> Result<Self, CellError> {
         let mut reader = Reader { bytes, at: 0 };
-        let header = read_header(&mut reader, bytes)?;
+        let header = read_header(&mut reader, bytes, *options)?;
         Ok(Self { bytes, header })
     }
 
