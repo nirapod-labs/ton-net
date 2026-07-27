@@ -32,14 +32,19 @@
 //! children and letting go of the last handle on a chain lets go of the next, and so do the
 //! per-reference walks `NET-ADR-012` already names, `render`, `prune_cell` and `graft`.
 //!
-//! Three facts about the margin, which a reader should have before trusting the budgets. A
-//! default thread is 2 MiB in Rust and 8 MiB for a process's first. Against that the worst
-//! of these clears by six and a half times in release and by a fifth in debug, so a debug
-//! build at the limit is inside a default thread and not far inside it. An embedder that
-//! hands this crate a thread smaller than the default is outside everything measured here,
-//! and the dictionary walks would abort on one of half a megabyte in either profile. And
-//! the failure has no soft form: a stack that runs out aborts, so `forbid(unsafe_code)`,
-//! the denied panicking helpers and a `Result` are all out of the path.
+//! [`measure`] prints what it derives as well, because leaving the arithmetic to the prose
+//! is the same failure one step along. Against a default thread, which is 2 MiB in Rust and
+//! 8 MiB for a process's first, the worst of these scenarios clears by 6.40 times in release
+//! and by 1.20 in debug. So a debug build at the limit is inside a default thread and not
+//! far inside it.
+//!
+//! An embedder handing this crate a smaller thread than the default is outside everything
+//! measured here. On half a megabyte the dictionary walks abort in debug and all of them
+//! come back in release; release does not give way until a quarter of a megabyte, where
+//! validating and walking the dictionary go and its fork summaries still come back.
+//!
+//! The failure has no soft form: a stack that runs out aborts, so `forbid(unsafe_code)`, the
+//! denied panicking helpers and a `Result` are all out of the path.
 //!
 //! The budgets are stated with room over the measurements rather than against them, so a
 //! frame that grows a little is not a failing test, while a cost that grew with the depth by
@@ -63,11 +68,13 @@ const FORKS: usize = MAX_BITS as usize;
 
 /// Every scenario, and the stack each is held to.
 ///
-/// Each budget is between one and two thirds and two times the debug figure above, which is
-/// room enough that a frame growing a little does not fail and tight enough that halving the
-/// budget does: each was checked to abort at half, which is what says the number holds
-/// something. Anything tighter would fail on a host whose pages are a different size rather
-/// than on a regression, since the measurement can only resolve to a page.
+/// Each budget is between 1.68 and 1.89 times the debug figure above, which [`measure`]
+/// prints so it is not arithmetic anyone has to redo. That is room enough that a frame
+/// growing a little does not fail and tight enough that halving the budget does: each was
+/// checked to abort at half in debug, which is what says the number holds something. A
+/// release build clears every budget by six times or better, so it is the debug figure each
+/// of these is set against. Anything tighter would fail on a host whose pages are a different
+/// size rather than on a regression, since the measurement can only resolve to a page.
 ///
 /// Reading a bag is the exception and cannot be graded that way. Its figure is the page
 /// floor rather than a cost, so halving it changes nothing;
@@ -161,7 +168,7 @@ fn deep_bag() -> Vec<u8> {
 ///
 /// A fixture is built out here and moved in, never built inside. Building one parses a bag
 /// and releases it, which is one of the scenarios, and doing that on the measured thread
-/// would put the deepest cost in this file underneath every other reading.
+/// would put a 416 KiB floor under every other reading.
 fn spawn(scenario: &str, stack: usize) {
     let name = scenario.to_owned();
     match scenario {
@@ -267,13 +274,18 @@ fn on_a_stack_of(name: &str, stack: usize, body: impl FnOnce() + Send + 'static)
 /// The gate, and the child half of [`measure`].
 ///
 /// A stack that runs out aborts rather than unwinding, so a scenario cannot be bisected
-/// inside the process running it. This test is the one process per attempt: with
-/// `TON_NET_STACK_SCENARIO` set it runs that scenario on the stack `TON_NET_STACK_KIB` asks
-/// for, and its exit status is the answer. With neither set it runs every scenario on its
-/// budget, which is what the gate does.
+/// inside the process running it. This test is the one process per attempt: under
+/// `TON_NET_STACK_HARNESS` it runs the one scenario it is asked for on the stack it is given
+/// and its exit status is the answer. Without it, it runs every scenario on its budget, which
+/// is what the gate does.
+///
+/// The switch is a variable of the harness's own rather than the scenario name, so that a
+/// scenario left set in a shell narrows the harness and cannot quietly narrow the gate to one
+/// walk while still reporting a pass.
 #[test]
 fn every_walk_stays_inside_its_stack_budget() {
-    if let Ok(scenario) = std::env::var("TON_NET_STACK_SCENARIO") {
+    if std::env::var_os("TON_NET_STACK_HARNESS").is_some() {
+        let scenario = std::env::var("TON_NET_STACK_SCENARIO").expect("a scenario to run");
         let kib: usize = std::env::var("TON_NET_STACK_KIB")
             .expect("a stack to try")
             .parse()
@@ -289,9 +301,10 @@ fn every_walk_stays_inside_its_stack_budget() {
 
 /// The plain dictionary's walk, held apart because it is the one that does not recurse.
 ///
-/// It runs on the stack the flat bag read is held to, over a tree the recursive walks above
-/// want fifty times that for, which is the whole difference between an explicit stack and
-/// the machine's.
+/// It runs on the stack the flat bag read is held to, over the same tree the recursive walks
+/// above want between thirty-eight and fifty-four times that for in debug, and eight to ten
+/// in release. That spread is the whole difference between an explicit stack and the
+/// machine's.
 #[test]
 fn the_iterative_dictionary_walk_is_flat_in_depth() {
     spawn("plain", 32 << 10);
@@ -318,11 +331,19 @@ fn parsing_a_bag_costs_the_same_stack_at_any_depth() {
     }
 }
 
-/// Bisects the stack each scenario comes back on and prints the table.
+/// What a default thread is in Rust, which every multiple below is against.
+const DEFAULT_THREAD: usize = 2 << 10;
+
+/// Bisects the stack each scenario comes back on and prints both tables.
 ///
 /// Ignored by default because it spawns on the order of a hundred processes. It is the
 /// source of every figure in this file: a number in a comment that nobody can rerun is a
 /// number that goes stale without failing anything.
+///
+/// It prints what it derives as well as what it measured, because leaving the arithmetic to
+/// the prose is the same failure one step along. The margin against a default thread and the
+/// room a budget has over its figure both went into a comment by hand once and both were
+/// wrong there.
 #[test]
 #[ignore = "a measuring harness, run by hand when a figure needs retaking"]
 fn measure() {
@@ -332,26 +353,59 @@ fn measure() {
     const PAGE: usize = 16;
 
     let exe = std::env::current_exe().expect("this test binary");
-    println!("| scenario | smallest stack it came back on |");
-    println!("|---|---:|");
-    for (scenario, _) in SCENARIOS {
+    let comes_back = |scenario: &str, kib: usize| {
+        Command::new(&exe)
+            .args(["--exact", "stack::every_walk_stays_inside_its_stack_budget"])
+            .env("TON_NET_STACK_HARNESS", "1")
+            .env("TON_NET_STACK_SCENARIO", scenario)
+            .env("TON_NET_STACK_KIB", kib.to_string())
+            .output()
+            .expect("the child runs")
+            .status
+            .success()
+    };
+
+    let mut measured = Vec::new();
+    for (scenario, budget) in SCENARIOS {
         let (mut low, mut high) = (PAGE, 4 << 10);
+        let mut ever_failed = false;
         while high - low > PAGE {
             let mid = low.midpoint(high) / PAGE * PAGE;
-            let ok = Command::new(&exe)
-                .args(["--exact", "stack::every_walk_stays_inside_its_stack_budget"])
-                .env("TON_NET_STACK_SCENARIO", scenario)
-                .env("TON_NET_STACK_KIB", mid.to_string())
-                .output()
-                .expect("the child runs")
-                .status
-                .success();
-            if ok {
+            if comes_back(scenario, mid) {
                 high = mid;
             } else {
                 low = mid;
+                ever_failed = true;
             }
         }
-        println!("| {scenario} | {high} KiB |");
+        measured.push((*scenario, high, ever_failed, budget >> 10));
+    }
+
+    println!("| scenario | smallest stack it came back on |");
+    println!("|---|---:|");
+    for (scenario, smallest, _, _) in &measured {
+        println!("| {scenario} | {smallest} KiB |");
+    }
+
+    println!();
+    println!("| scenario | largest that aborts | of a default thread | budget over figure |");
+    println!("|---|---:|---:|---:|");
+    for (scenario, smallest, ever_failed, budget) in &measured {
+        let aborts = if *ever_failed {
+            format!("{} KiB", smallest - PAGE)
+        } else {
+            // Nothing tried was small enough to fail, so this scenario has no threshold to
+            // report and its figure is the platform's floor rather than a cost.
+            "none tried".to_owned()
+        };
+        #[allow(
+            clippy::cast_precision_loss,
+            reason = "every one of these is a count of KiB under a few thousand, so all three are exact in an f64"
+        )]
+        let (of_default, over_figure) = (
+            DEFAULT_THREAD as f64 / *smallest as f64,
+            *budget as f64 / *smallest as f64,
+        );
+        println!("| {scenario} | {aborts} | {of_default:.2}x | {over_figure:.2}x |");
     }
 }
