@@ -344,7 +344,7 @@ fn a_cell_built_on_its_own_is_refused_for_the_cell_that_failed() {
 
 /// A serialized bag holding one chain: a leaf under `links` parents, so its root has depth
 /// `links`. Both assertions below rest on that being the depth and not one either side of it.
-fn deep_chain(links: usize) -> Vec<u8> {
+pub fn deep_chain(links: usize) -> Vec<u8> {
     let mut cell = Builder::new().build().expect("a leaf forms");
     for _ in 0..links {
         let mut builder = Builder::new();
@@ -356,9 +356,12 @@ fn deep_chain(links: usize) -> Vec<u8> {
 
 #[test]
 fn a_bag_deeper_than_the_limit_is_refused() {
-    // The depth limit is the only thing between a bag a peer chose and a chain long enough
-    // that walking it takes the stack with it. Both sides are asserted: refusing the deep bag
-    // is what a limit that refuses everything also does, so the shallow one has to be read.
+    // The depth limit is the only thing between a bag a peer chose and a chain long enough to
+    // take the stack with it. Not while it is read: parsing costs the same at any depth, and
+    // `stack.rs` holds it to that. While it is released, because a cell holds its children and
+    // letting go of the last handle on a chain lets go of the next. Both sides are asserted:
+    // refusing the deep bag is what a limit that refuses everything also does, so the shallow
+    // one has to be read.
     let at_limit = deep_chain(MAX_DEPTH);
     assert!(
         parse_boc(&at_limit).is_ok(),
