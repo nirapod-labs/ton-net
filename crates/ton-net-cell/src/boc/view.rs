@@ -48,9 +48,8 @@ impl<'a> BocView<'a> {
     /// Opens a view onto a bag under bounds the caller has narrowed.
     ///
     /// This is [`open`](BocView::open) with the crate's own bounds tightened, and it reads
-    /// the same header under the same rules. A ceiling this refuses is a ceiling
-    /// [`parse_boc_with`](super::parse_boc_with) refuses on the same bytes: the bound is
-    /// applied where the header is read, which is one place for all three doors into a bag.
+    /// the same header under the same rules, so it refuses a ceiling on the same bytes
+    /// [`parse_boc_with`](super::parse_boc_with) does.
     ///
     /// # Errors
     ///

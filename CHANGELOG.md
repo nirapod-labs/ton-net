@@ -15,6 +15,13 @@ never published.
 
 ### Added
 
+- `ParseOptions`, with `parse_boc_with`, `BocView::open_with` and
+  `LazyBoc::open_with` beside the existing three. It carries the cell ceiling a
+  parse holds a bag to, and it can only lower it: the figure is read through a
+  minimum with `MAX_CELLS`, so no value of the type widens what a parse takes.
+  The bound is applied where the header is read, which is the one place all
+  three readers reach.
+
 - `AugDict`, TON's `HashmapAug n X Y`, with get, set, remove and iteration. Every
   node carries a summary of the subtree below it, and a fork's is the combination
   of its two children's. What a summary means comes from the caller, through the

@@ -525,8 +525,19 @@ Gates on the work this record decides, none of which runs today:
 ## Since acceptance
 
 Decisions 3 and 4 have since been built, and what was built differs from what this record
-anticipated in three places worth naming. Decisions 1 and 2 are untouched: no parse options
-and no storage seam exist.
+anticipated in three places worth naming. Decision 2 is untouched: no storage seam exists.
+
+**Decision 1 is half built: the tightening half, without the budget.** `ParseOptions` is in
+the `boc.rs` trunk with `parse_boc_with` beside `parse_boc`, and `open_with` beside `open` on
+both `BocView` and `LazyBoc`. It carries the cell ceiling and nothing else, and it can only
+lower it. What this record calls the part that matters, a bound denominated in bytes and
+debited as the parse takes them, is not built, and neither is the raise that record admits
+only underneath one. So the ordering this record fixes is intact rather than discharged: a
+raise cannot land before the budget it has to be bounded by.
+
+The ceiling is applied at `read_header`, which has three non-test call sites, one for each
+way into a bag. That is `NET-ADR-009`'s rule about a bound holding on every path rather than
+anything this record asked for, and it is what the shipped gate tests.
 
 **Decision 3 is built, and the gate did not land where this record put it.** The lowest
 failing index now wins in the three passes that judge cells: the `finalize` call in each of

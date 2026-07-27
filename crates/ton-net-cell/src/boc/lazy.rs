@@ -44,9 +44,8 @@ impl LazyBoc {
 
     /// Reads and checks a bag under bounds the caller has narrowed, building none of it.
     ///
-    /// This is [`open`](LazyBoc::open) with the crate's own bounds tightened. It refuses a
-    /// bag on the same terms the other two doors do, because all three reach the ceiling
-    /// through the header rather than each carrying one.
+    /// This is [`open`](LazyBoc::open) with the crate's own bounds tightened, on the same
+    /// terms as [`parse_boc_with`](super::parse_boc_with).
     ///
     /// # Errors
     ///

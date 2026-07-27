@@ -6,7 +6,7 @@
 //! `NET-ADR-012` puts two properties on this work and they pull against each other. The
 //! default has to be today's behaviour exactly, admitting every bag the crate admitted
 //! before and refusing every one it refused. And an option has to reach far enough to
-//! actually refuse something, or the whole surface is a value nothing reads.
+//! refuse something, or the whole surface is a value nothing reads.
 //!
 //! A test for the first alone passes on a crate that ignores its options. A test for the
 //! second alone passes on a crate whose default has quietly moved. Both are here, and the
@@ -14,11 +14,12 @@
 //!
 //! The third property is the one a caller's safety rests on: a bag comes from a liteserver
 //! and the ceiling in front of it is the reason a declared count cannot be believed. The
-//! bound is applied where the header is read, and `read_header` has three call sites in the
-//! library, one for each way in: `parse_boc_with`, `BocView::open_with` and
+//! bound is applied where the header is read, and `read_header` has three non-test call
+//! sites, one for each way in: `parse_boc_with`, `BocView::open_with` and
 //! `LazyBoc::open_with`. So what is tested is that those three refuse the same bytes, rather
-//! than that each of them refuses something. A ceiling dropped from any one of them would
-//! pass the second property and fail this one.
+//! than that each of them refuses something. Dropping the ceiling from the view door or the
+//! lazy door is caught here and nowhere else; dropping it from the parse door is caught here
+//! and by the second property too, since that one reads through the same call.
 
 use ton_net_cell::{
     parse_boc, parse_boc_with, BocView, Cell, CellError, LazyBoc, ParseOptions, MAX_CELLS,
@@ -42,8 +43,9 @@ fn unhex(text: &str) -> Vec<u8> {
         .collect()
 }
 
-/// The same stream the hostile corpus mutates with, so the bags below are the bags that
-/// corpus already reaches rather than a second population with its own coverage question.
+/// The generator and seed the wave parity gate uses in `src/boc/parse.rs`, so the bags below
+/// are that corpus rather than a second population with its own coverage question. That is
+/// what lets the counts here be reconciled against its own further down.
 struct Rng(u64);
 
 impl Rng {
@@ -89,7 +91,8 @@ fn the_default_options_admit_and_refuse_exactly_what_no_options_do() {
     // parse. A bag that reads cleanly agrees under any pair of doors that both work at all,
     // so it cannot tell a default that has moved from one that has not. What can are the
     // bags that fail, and the comparison includes which error they failed with.
-    // Asserted before the comparison, and load-bearing rather than decorative. Both sides
+    //
+    // The assertion below is made before the comparison, and load-bearing rather than decorative. Both sides
     // below read the same default, so a default that had quietly moved would still make
     // them agree, and every line after this one would pass on a crate whose bounds had
     // changed. This is the line that says which figure the default is.
@@ -180,7 +183,9 @@ fn every_door_into_a_bag_refuses_the_same_bytes_at_the_same_ceiling() {
     // `NET-ADR-009` says a bound is defined once and cannot hold on one path and lapse on
     // another. There are three ways into a bag and each would be a place for the ceiling to
     // go missing, so what is asserted is that all three agree, not that each refuses
-    // something. Removing the ceiling from any one of them fails this and nothing else.
+    // something. Removing it from the view or the lazy door fails this and nothing else;
+    // removing it from the parse door fails the lowered-ceiling case as well, because that
+    // case reads through the same call.
     let proof = unhex(PROOF_HEX);
     let tight = ParseOptions::default().with_max_cells(10);
     let loose = ParseOptions::default();

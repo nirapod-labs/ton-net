@@ -60,12 +60,12 @@ pub const MAX_DEPTH: usize = 1024;
 /// exactly the bags [`parse_boc`] admits and refuses exactly the ones it refuses, and a
 /// value asking for more than the crate allows gets the crate's figure rather than its own.
 /// So no options value reachable through this type, by any route including writing the field
-/// directly, produces a parse that takes more than a parse with no options at all.
+/// directly, produces a parse that takes more than a parse with no options at all. The
+/// `#[non_exhaustive]` marker is part of that: it is what removes the struct-literal route,
+/// leaving [`default`](ParseOptions::default) as the only way in from another crate.
 ///
-/// That is narrower than it will stay. Raising a bound is a different act from tightening
-/// one, and one this type does not yet offer: a raise has to be bounded by a budget the
-/// parse spends, so that a caller naming a huge ceiling gets a refusal rather than a process
-/// that allocates until it dies (`NET-ADR-012`).
+/// That is narrower than it will stay. A raise is not expressible here, and `NET-ADR-012`
+/// bounds one by a byte budget the parse spends.
 ///
 /// [`MAX_DEPTH`] is absent by decision rather than by omission. It is a stack-safety bound
 /// and not a memory one, so no budget a caller sets changes what it protects, and nothing
@@ -77,7 +77,7 @@ pub const MAX_DEPTH: usize = 1024;
 /// # Examples
 ///
 /// ```
-/// use ton_net_cell::{parse_boc_with, ParseOptions, MAX_CELLS};
+/// use ton_net_cell::{parse_boc_with, CellError, ParseOptions, MAX_CELLS};
 ///
 /// // Nothing this type can be asked for takes more than the default takes.
 /// let wide = ParseOptions::default().with_max_cells(usize::MAX);
@@ -86,7 +86,10 @@ pub const MAX_DEPTH: usize = 1024;
 /// let bytes = [0xb5, 0xee, 0x9c, 0x72, 0x01, 0x01, 0x01, 0x01, 0x00, 0x03, 0x00,
 ///              0x00, 0x02, 0xab];
 /// let strict = ParseOptions::default().with_max_cells(0);
-/// assert!(parse_boc_with(&bytes, &strict).is_err());
+/// assert_eq!(
+///     parse_boc_with(&bytes, &strict),
+///     Err(CellError::TooManyCells { limit: 0 })
+/// );
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
@@ -120,7 +123,7 @@ impl ParseOptions {
         self
     }
 
-    /// The cell ceiling a parse under these options actually holds a bag to.
+    /// The cell ceiling a parse under these options holds a bag to.
     ///
     /// The clamp lives here, at the one place the figure is read, rather than only in the
     /// setter, because [`max_cells`](ParseOptions::max_cells) is public and a caller can
