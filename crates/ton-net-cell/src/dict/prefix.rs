@@ -388,11 +388,11 @@ fn leaf_cell(key: &[bool], remaining: u16, value: &Builder) -> Result<Cell, Cell
 /// count, so it cannot run away.
 ///
 /// The label is held on the heap rather than inline, which is why this one still allocates
-/// at each level whose label is not empty. A fork here is rebuilt with its label after the recursive call returns, so a
-/// buffer shared down the descent would have been overwritten by the child by the time the
-/// parent wanted it, and an inline label per frame is stack whose size the depth decides and
-/// the depth is the peer's. Each level that recurses rebuilds a cell on the way back up
-/// anyway, so the label is not what a write costs here.
+/// at each level whose label is not empty. A fork here is rebuilt with its label after the
+/// recursive call returns, so a buffer shared down the descent would have been overwritten
+/// by the child by the time the parent wanted it, and an inline label per frame is stack
+/// whose size the depth decides and the depth is the peer's. Each level that recurses
+/// rebuilds a cell on the way back up anyway, so the label is not what a write costs here.
 fn insert(node: &Cell, remaining: u16, key: &[bool], value: &Builder) -> Result<Cell, CellError> {
     if node.is_exotic() {
         return Err(CellError::Pruned);

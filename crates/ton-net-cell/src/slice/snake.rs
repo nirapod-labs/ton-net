@@ -28,9 +28,7 @@ impl Slice<'_> {
 
     /// Reads a snake string onto the end of `into`.
     ///
-    /// The chain is what makes the destination worth passing: a snake spans as many cells as
-    /// it needs, and each of them lands on the buffer the caller already holds, so a caller
-    /// reading several of them lands them all on one rather than on one buffer apiece.
+    /// A snake spans as many cells as it needs and each of them lands on the end of `into`.
     /// [`load_snake`](Slice::load_snake) is this with a fresh vector for a destination.
     ///
     /// # Errors

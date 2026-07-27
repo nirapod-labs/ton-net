@@ -208,7 +208,7 @@ impl BitRun for Label {
 /// `every_label_this_writes_reads_back_as_itself` holds them to, because a label that came
 /// back differently in one of them would put a different edge on a rebuilt node.
 pub(super) trait LabelSink {
-    /// Drops whatever the sink held, so a refill spells only what it just read.
+    /// Drops whatever the sink held, so a refill spells only what it last read.
     fn reset(&mut self);
 
     /// Makes room for `count` more bits. The count comes off a header [`read_run`] has
