@@ -17,7 +17,8 @@
 //! between its label and its value, so the descent, the split, the rebuild and the bulk
 //! build are written
 //! once over a private `Shape` seam and shared. The label codec that gives a dictionary
-//! its one canonical hash lives in the `label` submodule.
+//! its one canonical hash lives in the `label` submodule, beside the inline run a walk
+//! reads each label into.
 
 use core::borrow::Borrow;
 
@@ -45,7 +46,7 @@ pub type ForkExtra<E> = (Vec<bool>, E);
 
 #[cfg(test)]
 use label::bounded_width;
-use label::{read_label, store_label};
+use label::{read_label_into, skip_label, store_label, BitRun, Label};
 
 /// How a lookup ended.
 ///
@@ -168,16 +169,26 @@ fn rest(key: &[bool], at: usize) -> &[bool] {
 }
 
 /// Packs key bits into bytes, most significant bit of the first byte first.
-fn pack(bits: &[bool]) -> Vec<u8> {
+fn pack<R: BitRun + ?Sized>(bits: &R) -> Vec<u8> {
     let mut out = vec![0u8; bits.len().div_ceil(8)];
-    for (index, bit) in bits.iter().enumerate() {
-        if *bit {
+    for index in 0..bits.len() {
+        if bits.bit(index) {
             if let Some(byte) = out.get_mut(index / 8) {
                 *byte |= 1 << (7 - (index % 8));
             }
         }
     }
     out
+}
+
+/// Appends every bit of `run` to `into`.
+///
+/// This is where an inline label meets a key prefix a recursive walk carries on the heap.
+fn extend_bits<R: BitRun + ?Sized>(into: &mut Vec<bool>, run: &R) {
+    into.reserve(run.len());
+    for index in 0..run.len() {
+        into.push(run.bit(index));
+    }
 }
 
 /// What a dictionary node carries between its label and its value.
@@ -233,9 +244,12 @@ fn leaf<S: Shape>(
 }
 
 /// One fork on the path down, kept so the path can be rebuilt from the bottom up.
+///
+/// The label is held inline, so a path of a hundred forks is one vector that grows rather
+/// than a hundred vectors of a few bits each.
 struct Step {
     node: Cell,
-    label: Vec<bool>,
+    label: Label,
     remaining: u16,
     branch: usize,
 }
@@ -243,12 +257,9 @@ struct Step {
 impl Step {
     /// The key bits still to spend at either of this fork's children.
     fn below(&self) -> u16 {
-        #[allow(
-            clippy::cast_possible_truncation,
-            reason = "read_label bounds label.len() to at most remaining, and a fork is only recorded where the label is shorter still, so this fits a u16"
-        )]
-        let spent = self.label.len() as u16;
-        self.remaining - spent - 1
+        // A label is read under `remaining`, and a fork is only recorded where the label is
+        // shorter still, so this does not underflow.
+        self.remaining - self.label.width() - 1
     }
 
     /// Rebuilds this fork with `child` in place of the branch the walk took.
@@ -306,6 +317,9 @@ fn lookup<S: Shape>(
     let mut node = root.clone();
     let mut remaining = key_bits;
     let mut consumed = 0usize;
+    // One label, refilled at each level. The walk is a loop, so a descent over a key of any
+    // width costs the allocator nothing for the labels it reads on the way down.
+    let mut label = Label::new();
 
     loop {
         // A proof replaces the branches it does not cover with pruned placeholders, which
@@ -315,7 +329,7 @@ fn lookup<S: Shape>(
         }
 
         let mut slice = node.parse();
-        let label = read_label(&mut slice, remaining)?;
+        read_label_into(&mut slice, remaining, &mut label)?;
         // The label is the run of bits every key below this edge shares. A key that
         // disagrees with it has no entry below, and because the label is part of what the
         // root hash covers, that is evidence rather than an absence of evidence.
@@ -323,12 +337,7 @@ fn lookup<S: Shape>(
             return Ok(Lookup::Absent);
         }
         consumed += label.len();
-        #[allow(
-            clippy::cast_possible_truncation,
-            reason = "read_label bounds label.len() to at most its `max` argument (here `remaining`), and remaining is a u16, so this fits"
-        )]
-        let spent = label.len() as u16;
-        remaining -= spent;
+        remaining -= label.width();
 
         if remaining == 0 {
             let extra = shape.read_extra(&mut slice)?;
@@ -354,7 +363,7 @@ fn lookup<S: Shape>(
 struct Walk {
     path: Vec<Step>,
     node: Cell,
-    label: Vec<bool>,
+    label: Label,
     /// The key bits still to spend at [`node`](Walk::node).
     remaining: u16,
     /// The key bits spent above it, so `consumed + remaining` is the key width.
@@ -383,6 +392,7 @@ fn descend<S: Shape>(
     let mut node = root;
     let mut remaining = key_bits;
     let mut consumed = 0usize;
+    let mut label = Label::new();
 
     loop {
         // A pruned branch holds a hash, not a node. A change that fell inside one would
@@ -392,7 +402,7 @@ fn descend<S: Shape>(
         }
 
         let mut slice = node.parse();
-        let label = read_label(&mut slice, remaining)?;
+        read_label_into(&mut slice, remaining, &mut label)?;
         let len = label.len();
         let diverged = diverges(&label, rest(bits, consumed));
 
@@ -410,29 +420,28 @@ fn descend<S: Shape>(
         shape.check_fork(&mut slice)?;
         let branch = usize::from(bits.get(consumed + len).copied().unwrap_or(false));
         let child = node.reference(branch).ok_or(NO_BRANCH)?.clone();
+        let spent = label.width();
         path.push(Step {
             node,
-            label,
+            label: label.clone(),
             remaining,
             branch,
         });
         node = child;
         consumed += len + 1;
-        #[allow(
-            clippy::cast_possible_truncation,
-            reason = "read_label bounds len to at most remaining, and the check above returned unless len < remaining, so this fits a u16"
-        )]
-        let spent = len as u16;
         remaining -= spent + 1;
     }
 }
 
 /// The first position where `label` and the key part company, if they do.
-fn diverges(label: &[bool], key: &[bool]) -> Option<usize> {
-    label
-        .iter()
-        .zip(key.iter())
-        .position(|(left, right)| left != right)
+///
+/// Only the run the two share is compared, so a key that runs out inside the label has not
+/// parted from it.
+fn diverges<R: BitRun + ?Sized>(label: &R, key: &[bool]) -> Option<usize> {
+    (0..label.len()).find(|index| match key.get(*index) {
+        Some(bit) => *bit != label.bit(*index),
+        None => false,
+    })
 }
 
 /// Splits `node` at `at`, where its label and the key part company.
@@ -443,7 +452,7 @@ fn diverges(label: &[bool], key: &[bool]) -> Option<usize> {
 fn split<S: Shape>(
     shape: &S,
     node: &Cell,
-    label: &[bool],
+    label: &Label,
     at: usize,
     remaining: u16,
     key: &[bool],
@@ -451,14 +460,14 @@ fn split<S: Shape>(
 ) -> Result<Cell, CellError> {
     #[allow(
         clippy::cast_possible_truncation,
-        reason = "at is where diverges() found label and key part company, so at < label.len(), and read_label bounds label.len() to at most remaining; remaining is a u16, so this fits"
+        reason = "at is where diverges() found label and key part company, so at < label.len(), and a label is read under at most `remaining`; remaining is a u16, so this fits"
     )]
     let below = remaining - at as u16 - 1;
 
     let mut kept = Builder::new();
-    store_label(&mut kept, rest(label, at + 1), below)?;
+    store_label(&mut kept, &label.tail(at + 1), below)?;
     let mut slice = node.parse();
-    read_label(&mut slice, remaining)?;
+    skip_label(&mut slice, remaining)?;
     kept.store_slice(slice)?;
     let kept = kept.build()?;
 
@@ -466,14 +475,14 @@ fn split<S: Shape>(
 
     // The old node's label decides which side it lands on: the bit they disagree on is
     // its bit, so the new leaf takes the other branch.
-    let (left, right) = if label.get(at).copied().unwrap_or(false) {
+    let (left, right) = if label.bit(at) {
         (fresh, kept)
     } else {
         (kept, fresh)
     };
 
     let mut fork = Builder::new();
-    store_label(&mut fork, label.get(..at).unwrap_or(&[]), remaining)?;
+    store_label(&mut fork, &label.head(at), remaining)?;
     let extra = shape.fork_extra(&left, &right, below)?;
     shape.write_extra(&extra, &mut fork)?;
     fork.store_ref(left)?;
@@ -489,9 +498,11 @@ fn collapse(parent: &Step) -> Result<Cell, CellError> {
     }
 
     let mut label = parent.label.clone();
-    label.push(parent.branch == 0);
+    label.push(parent.branch == 0)?;
     let mut slice = sibling.parse();
-    label.extend_from_slice(&read_label(&mut slice, parent.below())?);
+    let mut below = Label::new();
+    read_label_into(&mut slice, parent.below(), &mut below)?;
+    label.extend(&below)?;
 
     let mut merged = Builder::new();
     store_label(&mut merged, &label, parent.remaining)?;
@@ -636,6 +647,7 @@ fn reroot(root: &Cell, key_bits: u16, want: &[bool]) -> Result<Option<Cell>, Cel
     let mut node = root.clone();
     let mut remaining = key_bits;
     let mut matched = 0usize;
+    let mut label = Label::new();
 
     loop {
         if node.is_exotic() {
@@ -649,7 +661,7 @@ fn reroot(root: &Cell, key_bits: u16, want: &[bool]) -> Result<Option<Cell>, Cel
         }
 
         let mut slice = node.parse();
-        let label = read_label(&mut slice, remaining)?;
+        read_label_into(&mut slice, remaining, &mut label)?;
         let len = label.len();
         if diverges(&label, ahead).is_some() {
             return Ok(None);
@@ -661,11 +673,11 @@ fn reroot(root: &Cell, key_bits: u16, want: &[bool]) -> Result<Option<Cell>, Cel
             // store_slice takes both the bits and the references still ahead of the cursor.
             #[allow(
                 clippy::cast_possible_truncation,
-                reason = "ahead.len() <= len and read_label bounds len to at most remaining, a u16, so ahead.len() fits a u16 and remaining - it does not underflow"
+                reason = "ahead.len() <= len and a label is read under at most remaining, a u16, so ahead.len() fits a u16 and remaining - it does not underflow"
             )]
             let new_max = remaining - ahead.len() as u16;
             let mut fresh = Builder::new();
-            store_label(&mut fresh, rest(&label, ahead.len()), new_max)?;
+            store_label(&mut fresh, &label.tail(ahead.len()), new_max)?;
             fresh.store_slice(slice)?;
             return Ok(Some(fresh.build()?));
         }
@@ -679,18 +691,16 @@ fn reroot(root: &Cell, key_bits: u16, want: &[bool]) -> Result<Option<Cell>, Cel
         let branch = usize::from(rest(want, matched).first().copied().unwrap_or(false));
         matched += 1;
         node = node.reference(branch).ok_or(NO_BRANCH)?.clone();
-        #[allow(
-            clippy::cast_possible_truncation,
-            reason = "the len == remaining case returned above, so len < remaining <= u16::MAX and len fits a u16 with room for the branch bit"
-        )]
-        let spent = len as u16;
-        remaining -= spent + 1;
+        remaining -= label.width() + 1;
     }
 }
 
 /// A node a walk has still to visit: the node, the key bits spelled out above it, and the
 /// bits still to spend at it.
-type Pending = (Cell, Vec<bool>, u16);
+///
+/// The prefix is inline, so the stack a walk carries is one vector that grows rather than a
+/// vector of key bits per node waiting on it.
+type Pending = (Cell, Label, u16);
 
 /// What a walk's next step found: the key, the summary its leaf carries, and the value.
 type Stepped<E> = Option<(Vec<u8>, E, DictEntry)>;
@@ -700,16 +710,17 @@ fn walk_step<S: Shape>(
     shape: &S,
     stack: &mut Vec<Pending>,
 ) -> Result<Stepped<S::Extra>, CellError> {
+    let mut label = Label::new();
     while let Some((node, prefix, remaining)) = stack.pop() {
         if node.is_exotic() {
             return Err(CellError::Pruned);
         }
 
         let mut slice = node.parse();
-        let label = read_label(&mut slice, remaining)?;
+        read_label_into(&mut slice, remaining, &mut label)?;
         let len = label.len();
         let mut key = prefix;
-        key.extend_from_slice(&label);
+        key.extend(&label)?;
 
         if len == usize::from(remaining) {
             let extra = shape.read_extra(&mut slice)?;
@@ -726,15 +737,11 @@ fn walk_step<S: Shape>(
 
         // The right branch goes on first so the left one comes off first, which is what
         // puts the keys in ascending order.
-        #[allow(
-            clippy::cast_possible_truncation,
-            reason = "read_label bounds len to at most remaining, and the check above returned unless len < remaining, so this fits a u16"
-        )]
-        let below = remaining - len as u16 - 1;
+        let below = remaining - label.width() - 1;
         for branch in [1usize, 0usize] {
             let child = node.reference(branch).ok_or(NO_BRANCH)?.clone();
             let mut key = key.clone();
-            key.push(branch == 1);
+            key.push(branch == 1)?;
             stack.push((child, key, below));
         }
     }
@@ -753,42 +760,49 @@ fn collect_fork_extras<S: Shape>(
 ) -> Result<Vec<ForkExtra<S::Extra>>, CellError> {
     let mut out = Vec::new();
     if let Some(root) = root {
-        collect_forks(shape, root, key_bits, Vec::new(), &mut out)?;
+        let mut label = Label::new();
+        collect_forks(shape, root, key_bits, Vec::new(), &mut label, &mut out)?;
     }
     Ok(out)
 }
 
 /// Descends `node`, pushing each fork's summary onto `out`. `prefix` is the key bits above
-/// it.
+/// it and `label` is a buffer the whole descent shares.
+///
+/// The buffer is borrowed rather than held per frame because this recurses and its depth is
+/// the cell graph's, which a peer chose. One of them in each frame would be stack a peer
+/// sizes; one pointer is not. Sharing is safe under a rule this walk keeps, and so do the
+/// three others that borrow a buffer, [`validate_node`], [`traverse_node`] and the prefix
+/// dictionary's own `validate_node`: what a node takes from its label it takes before either
+/// recursive call, and it does not read the label again after one returns.
 fn collect_forks<S: Shape>(
     shape: &S,
     node: &Cell,
     remaining: u16,
     prefix: Vec<bool>,
+    label: &mut Label,
     out: &mut Vec<(Vec<bool>, S::Extra)>,
 ) -> Result<(), CellError> {
     if node.is_exotic() {
         return Ok(());
     }
     let mut slice = node.parse();
-    let label = read_label(&mut slice, remaining)?;
+    read_label_into(&mut slice, remaining, label)?;
     let len = label.len();
     let mut here = prefix;
-    here.extend_from_slice(&label);
+    extend_bits(&mut here, &*label);
     if len < usize::from(remaining) {
         out.push((here.clone(), shape.read_extra(&mut slice)?));
-        #[allow(
-            clippy::cast_possible_truncation,
-            reason = "read_label bounds len to at most remaining, and this branch runs only when len < remaining, so len fits a u16"
-        )]
-        let below = remaining - len as u16 - 1;
+        // This branch runs only where the label is shorter than what was left to spend, so
+        // the subtraction does not underflow.
+        let below = remaining - label.width() - 1;
         let left = node.reference(0).ok_or(NO_BRANCH)?;
         let right = node.reference(1).ok_or(NO_BRANCH)?;
         let mut left_prefix = here.clone();
         left_prefix.push(false);
-        collect_forks(shape, left, below, left_prefix, out)?;
+        collect_forks(shape, left, below, left_prefix, label, out)?;
         here.push(true);
-        collect_forks(shape, right, below, here, out)?;
+        collect_forks(shape, right, below, here, label, out)?;
     }
     Ok(())
 }
@@ -802,26 +816,36 @@ fn collect_forks<S: Shape>(
 fn validate_tree<S: Shape>(shape: &S, root: Option<&Cell>, key_bits: u16) -> Result<(), CellError> {
     match root {
         None => Ok(()),
-        Some(root) => validate_node(shape, root, key_bits),
+        Some(root) => {
+            let mut label = Label::new();
+            validate_node(shape, root, key_bits, &mut label)
+        }
     }
 }
 
-/// Checks `node` and everything visible below it.
-fn validate_node<S: Shape>(shape: &S, node: &Cell, remaining: u16) -> Result<(), CellError> {
+/// Checks `node` and everything visible below it. `label` is a buffer the whole descent
+/// shares.
+///
+/// The buffer is borrowed for the reason [`collect_forks`] gives: this recurses to a depth
+/// a peer chose, and a node has finished with its label before it descends.
+fn validate_node<S: Shape>(
+    shape: &S,
+    node: &Cell,
+    remaining: u16,
+    label: &mut Label,
+) -> Result<(), CellError> {
     if node.is_exotic() {
         return Ok(());
     }
     let mut slice = node.parse();
-    let label = read_label(&mut slice, remaining)?;
+    read_label_into(&mut slice, remaining, label)?;
     let len = label.len();
     if len == usize::from(remaining) {
         return Ok(());
     }
-    #[allow(
-        clippy::cast_possible_truncation,
-        reason = "read_label bounds len to at most remaining, and this runs only when len < remaining, so len fits a u16"
-    )]
-    let below = remaining - len as u16 - 1;
+    // The equal case returned above, so the label is shorter than what was left to spend
+    // and the subtraction does not underflow.
+    let below = remaining - label.width() - 1;
     let left = node.reference(0).ok_or(NO_BRANCH)?;
     let right = node.reference(1).ok_or(NO_BRANCH)?;
 
@@ -829,7 +853,7 @@ fn validate_node<S: Shape>(shape: &S, node: &Cell, remaining: u16) -> Result<(),
     // skipped; the visible child is still walked.
     if !left.is_exotic() && !right.is_exotic() {
         let mut fork = Builder::new();
-        store_label(&mut fork, &label, remaining)?;
+        store_label(&mut fork, &*label, remaining)?;
         let extra = shape.fork_extra(left, right, below)?;
         shape.write_extra(&extra, &mut fork)?;
         fork.store_ref(left.clone())?;
@@ -841,8 +865,8 @@ fn validate_node<S: Shape>(shape: &S, node: &Cell, remaining: u16) -> Result<(),
         }
     }
 
-    validate_node(shape, left, below)?;
-    validate_node(shape, right, below)
+    validate_node(shape, left, below, label)?;
+    validate_node(shape, right, below, label)
 }
 
 /// Walks the tree in ascending key order, offering each node to `visit` and letting its
@@ -864,19 +888,25 @@ where
     F: FnMut(AugNode<'_, S::Extra>) -> Traverse,
 {
     if let Some(root) = root {
-        traverse_node(shape, root, key_bits, Vec::new(), visit)?;
+        let mut label = Label::new();
+        traverse_node(shape, root, key_bits, Vec::new(), &mut label, visit)?;
     }
     Ok(())
 }
 
 /// Descends `node`, offering it and everything visited below it. `prefix` is the key bits
-/// spelled out above it. Returns whether the walk was asked to stop, so a [`Traverse::Stop`]
-/// unwinds the whole descent rather than only the branch it came up in.
+/// spelled out above it and `label` is a buffer the whole descent shares.
+/// Returns whether the walk was asked to stop, so a [`Traverse::Stop`] unwinds the whole
+/// descent rather than only the branch it came up in.
+///
+/// The buffer is borrowed for the reason [`collect_forks`] gives: this recurses to a depth
+/// a peer chose, and a node has finished with its label before it descends.
 fn traverse_node<S, F>(
     shape: &S,
     node: &Cell,
     remaining: u16,
     prefix: Vec<bool>,
+    label: &mut Label,
     visit: &mut F,
 ) -> Result<bool, CellError>
 where
@@ -887,10 +917,11 @@ where
         return Err(CellError::Pruned);
     }
     let mut slice = node.parse();
-    let label = read_label(&mut slice, remaining)?;
+    read_label_into(&mut slice, remaining, label)?;
     let len = label.len();
+    let width = label.width();
     let mut here = prefix;
-    here.extend_from_slice(&label);
+    extend_bits(&mut here, &*label);
 
     if len == usize::from(remaining) {
         let extra = shape.read_extra(&mut slice)?;
@@ -899,7 +930,7 @@ where
             cell: node.clone(),
             bit_offset,
         };
-        let key = pack(&here);
+        let key = pack(here.as_slice());
         return Ok(visit(AugNode::Leaf {
             key: &key,
             extra: &extra,
@@ -920,21 +951,19 @@ where
         Traverse::Continue => {}
     }
 
-    #[allow(
-        clippy::cast_possible_truncation,
-        reason = "read_label bounds len to at most remaining, and this branch runs only when len < remaining, so len fits a u16"
-    )]
-    let below = remaining - len as u16 - 1;
+    // The equal case returned at the leaf above, so the label is shorter than what was left
+    // to spend and the subtraction does not underflow.
+    let below = remaining - width - 1;
     let left = node.reference(0).ok_or(NO_BRANCH)?;
     let right = node.reference(1).ok_or(NO_BRANCH)?;
 
     let mut left_prefix = here.clone();
     left_prefix.push(false);
-    if traverse_node(shape, left, below, left_prefix, &mut *visit)? {
+    if traverse_node(shape, left, below, left_prefix, label, &mut *visit)? {
         return Ok(true);
     }
     here.push(true);
-    traverse_node(shape, right, below, here, visit)
+    traverse_node(shape, right, below, here, label, visit)
 }
 
 #[cfg(test)]
@@ -996,7 +1025,7 @@ mod tests {
         // four bits. Mainnet writes the first. Choosing another parses back the same
         // and hashes differently.
         let mut builder = Builder::new();
-        store_label(&mut builder, &[false], 1).unwrap();
+        store_label(&mut builder, [false].as_slice(), 1).unwrap();
         assert_eq!(builder.bits_used(), 4);
         let cell = builder.build().unwrap();
         let mut slice = cell.parse();
@@ -1005,24 +1034,27 @@ mod tests {
         // With room for a longer label the explicit form wins: 2 + 9 + 200 beats 402.
         let long = [true, false].repeat(100);
         let mut builder = Builder::new();
-        store_label(&mut builder, &long, 256).unwrap();
+        store_label(&mut builder, long.as_slice(), 256).unwrap();
         assert_eq!(builder.bits_used(), 2 + 9 + 200);
         assert_eq!(builder.build().unwrap().parse().load_uint(2).unwrap(), 0b10);
 
         // A run of one repeated bit is spelled out once: 2 + 1 + 9 beats both.
         let mut builder = Builder::new();
-        store_label(&mut builder, &[true; 200], 256).unwrap();
+        store_label(&mut builder, [true; 200].as_slice(), 256).unwrap();
         assert_eq!(builder.bits_used(), 12);
         assert_eq!(builder.build().unwrap().parse().load_uint(2).unwrap(), 0b11);
 
         // An empty label is the two bits that say so.
         let mut builder = Builder::new();
-        store_label(&mut builder, &[], 256).unwrap();
+        store_label(&mut builder, [].as_slice(), 256).unwrap();
         assert_eq!(builder.bits_used(), 2);
     }
 
     #[test]
     fn every_label_this_writes_reads_back_as_itself() {
+        // Read into both sinks, because the two are what the loops and the recursions
+        // respectively hold their labels in, and a label that read back differently in one
+        // of them would put a different edge on a rebuilt node.
         for (label, max) in [
             (vec![], 0u16),
             (vec![], 256),
@@ -1033,9 +1065,21 @@ mod tests {
             ([true, false].repeat(100), 256),
         ] {
             let mut builder = Builder::new();
-            store_label(&mut builder, &label, max).unwrap();
+            store_label(&mut builder, label.as_slice(), max).unwrap();
             let cell = builder.build().unwrap();
-            assert_eq!(read_label(&mut cell.parse(), max).unwrap(), label);
+
+            let mut inline = Label::new();
+            read_label_into(&mut cell.parse(), max, &mut inline).unwrap();
+            assert_eq!(
+                (0..inline.len())
+                    .map(|index| inline.bit(index))
+                    .collect::<Vec<bool>>(),
+                label
+            );
+
+            let mut heap: Vec<bool> = vec![true; 7];
+            read_label_into(&mut cell.parse(), max, &mut heap).unwrap();
+            assert_eq!(heap, label, "the heap sink kept what it already held");
         }
     }
 
@@ -1043,7 +1087,7 @@ mod tests {
     fn a_label_longer_than_the_key_it_labels_is_refused() {
         let mut builder = Builder::new();
         assert_eq!(
-            store_label(&mut builder, &[true; 9], 8),
+            store_label(&mut builder, [true; 9].as_slice(), 8),
             Err(CellError::LabelTooLong)
         );
     }

@@ -26,6 +26,14 @@ never published.
   field into the type that field has, instead of returning a `u64` for the
   caller to narrow.
 - `&Dict` implements `IntoIterator`.
+- `Slice::load_bytes_into` and `Slice::load_snake_into` read onto the end of a
+  buffer the caller owns. `load_bytes` and `load_snake` now go through them and
+  are unchanged. A snake spans a chain of cells, and the returning form read each
+  cell into a vector of its own before copying it into the result, where the
+  destination form writes straight onto the caller's buffer. `load_bytes_into`
+  checks the length before it writes anything, so a run the slice is too short to
+  supply leaves the buffer as it was; a snake that fails partway along its chain
+  leaves on the buffer what it had already read.
 
 ### Changed
 
@@ -39,6 +47,16 @@ never published.
   the finished tree's short label need not fit beside that one. `NoRoomForBits`
   is now reported in sorted key order rather than the order items arrived in;
   `KeyLength` is still reported at the earliest offending item.
+- A dictionary descent holds its edge labels inline rather than in a vector per
+  level. A lookup now costs at most one allocation, the run of key bits it
+  spreads the caller's key into, whatever the depth; before, it cost one for each
+  label on the way down that was not empty, which on a sparse tree is one per
+  level. A walk costs the key vector it hands back per entry, where it copied the
+  key prefix onto the heap once per node besides. A `Dict` set and remove cost
+  what rebuilding the forks they descended through costs, and no more down a
+  path whose every edge carries a label than down one whose edges carry none. No
+  signature changes and the trees are the ones the mainnet root hashes already
+  held them to.
 - `SessionCiphers::seal` returns `Result<Vec<u8>, FrameError>` and refuses a
   payload larger than one frame carries. The read side already refused a body
   outside that range, so the two ends now hold to the same ceiling. Nothing is

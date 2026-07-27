@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileCopyrightText: 2026 Nirapod Labs
 
-//! What reading a bag of cells costs the allocator.
+//! What reading a bag of cells, and walking a dictionary, cost the allocator.
 //!
 //! Wall-clock timing on the machine this was written on swings by tens of percent between
 //! runs of identical code, which is enough to hide a real regression and enough to invent
@@ -27,6 +27,17 @@
 //! `CELLS_PER_WORKER`, and neither fixture carries that many cells in total, so no wave of
 //! either leaves this thread and none of these counts goes anywhere it would not be seen.
 //!
+//! A dictionary is measured the same way against a different quantity. A descent reads one edge
+//! label per level, so the question there is whether a lookup costs the allocator anything per
+//! level. It does not: a lookup is one call, the vector the caller's key bytes are spread into,
+//! whether the tree is four forks deep or ten. A walk is one call for each entry, the key vector
+//! it hands back, and a few besides for the stack it carries.
+//!
+//! A write is counted against the forks it rebuilds rather than the levels it reads. A set and a
+//! remove over ten forks ask thirty-seven times each, and ask exactly the same on a tree of that
+//! depth whose forks carry no label between them, which is the property held below: a write costs
+//! what its forks cost to rebuild, and the labels read on the way cost nothing.
+//!
 //! Counting them at all means installing a global allocator, and a global allocator means
 //! `unsafe`. That is why this is a test binary and not the library: the library forbids
 //! unsafe code and goes on forbidding it, and a test binary is a crate of its own.
@@ -34,7 +45,7 @@
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::Cell;
 
-use ton_net_cell::{parse_boc, serialize_boc, BocView, Builder};
+use ton_net_cell::{parse_boc, serialize_boc, BocView, Builder, Dict, Lookup};
 
 thread_local! {
     /// Calls to the allocator on this thread since the count was last cleared.
@@ -84,14 +95,14 @@ fn calls_to_allocate<T>(body: impl FnOnce() -> T) -> (T, usize) {
     (value, counted)
 }
 
-/// Headroom over what a read costs beyond its cells, which is a buffer for the bag and a few
-/// vectors sized once.
+/// Headroom over what a workload costs beyond the thing its cost is counted against.
 ///
-/// Measured at eight, which the read path accounts for one at a time: the bag's buffer, the
-/// header's root list, the raw cells, the heights, the two vectors the wave plan is held in,
-/// the slots the cells are built into, and the roots. The bounds below are stated with room
-/// over that rather than against it, so that a vector growing one step differently is not a
-/// failing test, while anything per cell still is.
+/// For a bag read, measured at eight, which the read path accounts for one at a time: the bag's
+/// buffer, the header's root list, the raw cells, the heights, the two vectors the wave plan is
+/// held in, the slots the cells are built into, and the roots. For a dictionary walk it is the
+/// stack the walk carries as it descends, measured at four. The bounds below are stated with
+/// room over both rather than against either, so that a vector growing one step differently is
+/// not a failing test, while anything per cell or per entry still is.
 const SLACK: usize = 16;
 
 /// The captured mainnet account proof, hex encoded.
@@ -220,4 +231,187 @@ fn a_second_read_of_the_same_bag_costs_the_same() {
     let (_, first) = calls_to_allocate(|| parse_boc(&bag).expect("parses"));
     let (_, second) = calls_to_allocate(|| parse_boc(&bag).expect("parses"));
     assert_eq!(first, second, "reading a bag is not allowed to vary");
+}
+
+/// A 256-bit key whose `forks` significant bits sit at every other position, counting the
+/// value `index` out over them.
+///
+/// The shape matters. A dictionary over keys counting up in the usual way is dense at the
+/// bottom, and a dense fork shares no bits with its sibling, so its label is empty. An empty
+/// label asks the allocator for nothing whichever way it is held, a vector that reserves
+/// nothing and takes nothing having no reason to, so that shape shows almost none of what a
+/// label costs.
+/// Spreading the significant bits with a zero between each gives every fork on the path a
+/// label of one bit and the leaf a label of the zeros that are left, so a tree `forks` deep
+/// reads `forks + 1` labels on the way to a leaf.
+fn spread_key(index: u32, forks: usize) -> [u8; 32] {
+    let mut key = [0u8; 32];
+    for bit in 0..forks {
+        if (index >> (forks - 1 - bit)) & 1 == 1 {
+            let at = 2 * bit + 1;
+            key[at / 8] |= 1 << (7 - (at % 8));
+        }
+    }
+    key
+}
+
+/// Every key of a tree `forks` deep, and the dictionary holding them.
+fn spread_dict(forks: usize) -> (Dict, Vec<[u8; 32]>) {
+    let keys: Vec<[u8; 32]> = (0..1u32 << forks).map(|i| spread_key(i, forks)).collect();
+    let mut value = Builder::new();
+    value.store_uint(0xdead_beef, 32).expect("a value fits");
+    let dict = Dict::from_items(256, keys.iter().map(|key| (*key, &value))).expect("builds");
+    (dict, keys)
+}
+
+#[test]
+fn a_dictionary_lookup_costs_one_allocation_however_deep_the_tree() {
+    // The one call is the vector the caller's key bytes are spread into, which a lookup makes
+    // once. The labels a descent reads on the way down are held inline and cost nothing, and
+    // that is what the three depths are here to show: a label held on the heap would put the
+    // depth into this number, and the deepest tree here is six forks deeper than the
+    // shallowest.
+    for forks in [4usize, 8, 10] {
+        let (dict, keys) = spread_dict(forks);
+        let key = keys
+            .get(keys.len() / 2)
+            .copied()
+            .expect("a key in the middle");
+
+        let (found, asked) = calls_to_allocate(|| dict.get(&key).expect("the lookup runs"));
+        assert!(matches!(found, Lookup::Found(_)), "the key was stored");
+        assert_eq!(
+            asked, 1,
+            "a lookup down {forks} forks asked the allocator {asked} times"
+        );
+
+        // A key that is not there but walks the same edges, so it has to cost the same: it
+        // agrees with a stored key down every fork and parts from it inside the leaf's own
+        // label. The bit it adds sits at an even position, which no spread key ever sets.
+        let mut absent = key;
+        let at = 2 * forks;
+        absent[at / 8] |= 1 << (7 - (at % 8));
+        let (missed, asked) = calls_to_allocate(|| dict.get(&absent).expect("the lookup runs"));
+        assert_eq!(missed, Lookup::Absent);
+        assert_eq!(
+            asked, 1,
+            "a lookup that finds nothing down {forks} forks asked the allocator {asked} times"
+        );
+    }
+}
+
+/// A 256-bit key whose `forks` significant bits sit at the top, counting the value `index`
+/// out over them.
+///
+/// The counterpart to [`spread_key`] and the control for it. Consecutive significant bits leave
+/// every fork on the path sharing nothing with its sibling, so every interior label is empty and
+/// only the leaf carries one, where the spread shape gives every edge a label. A path down this
+/// tree passes the same number of forks as one down the spread tree of the same depth, which is
+/// what makes what the two cost comparable.
+fn dense_key(index: u32, forks: usize) -> [u8; 32] {
+    let mut key = [0u8; 32];
+    for bit in 0..forks {
+        if (index >> (forks - 1 - bit)) & 1 == 1 {
+            key[bit / 8] |= 1 << (7 - (bit % 8));
+        }
+    }
+    key
+}
+
+/// Every key of a dense tree `forks` deep, and the dictionary holding them.
+fn dense_dict(forks: usize) -> (Dict, Vec<[u8; 32]>) {
+    let keys: Vec<[u8; 32]> = (0..1u32 << forks).map(|i| dense_key(i, forks)).collect();
+    let mut value = Builder::new();
+    value.store_uint(0xdead_beef, 32).expect("a value fits");
+    let dict = Dict::from_items(256, keys.iter().map(|key| (*key, &value))).expect("builds");
+    (dict, keys)
+}
+
+/// A middle key of a tree, and a value to store under it.
+fn a_key_and_a_value(keys: &[[u8; 32]]) -> ([u8; 32], Builder) {
+    let mut value = Builder::new();
+    value.store_uint(0x0c0f_fee0, 32).expect("a value fits");
+    (
+        keys.get(keys.len() / 2)
+            .copied()
+            .expect("a key in the middle"),
+        value,
+    )
+}
+
+#[test]
+fn a_write_costs_its_forks_and_nothing_for_the_labels_along_the_way() {
+    // A set and a remove rebuild every fork they descended through, so what they cost is per
+    // fork, and a label they read on the way is not allowed to add to it. The two trees here
+    // are the same depth and differ in their labels: the spread tree carries one at every
+    // edge, the dense tree only at its leaves. A label read back onto the heap would cost a
+    // call at each edge the one has and the other does not, so the two counts would part by
+    // the depth rather than agreeing exactly.
+    const FORKS: usize = 10;
+    // The shallower tree the growth below is read against, and what a rebuilt fork is allowed
+    // to cost: a handful of calls, held to four, and nothing per label.
+    const SHALLOW: usize = 4;
+    const PER_FORK: usize = 4;
+
+    let (spread, spread_keys) = spread_dict(FORKS);
+    let (dense, dense_keys) = dense_dict(FORKS);
+
+    let cost = |dict: &Dict, keys: &[[u8; 32]]| -> (usize, usize) {
+        let (key, value) = a_key_and_a_value(keys);
+        let mut writing = dict.clone();
+        let ((), set) = calls_to_allocate(|| writing.set(&key, &value).expect("sets"));
+        let mut removing = dict.clone();
+        let (_, removed) = calls_to_allocate(|| removing.remove(&key).expect("removes"));
+        (set, removed)
+    };
+
+    let (spread_set, spread_remove) = cost(&spread, &spread_keys);
+    let (dense_set, dense_remove) = cost(&dense, &dense_keys);
+    assert_eq!(
+        spread_set, dense_set,
+        "a set over {FORKS} forks asked {spread_set} times where every edge carries a label \
+         and {dense_set} where only the leaf does"
+    );
+    assert_eq!(
+        spread_remove, dense_remove,
+        "a remove over {FORKS} forks asked {spread_remove} times where every edge carries a \
+         label and {dense_remove} where only the leaf does"
+    );
+
+    // The same read the other way round: what a write costs has to grow with the forks it
+    // rebuilds and with nothing else, so six more forks may cost at most twenty-four more. A
+    // vector taken at every level would add one for each of the six on top of that, whether
+    // or not the level carried a label, which the two counts above agreeing would not catch.
+    let (shallow, shallow_keys) = spread_dict(SHALLOW);
+    let (shallow_set, shallow_remove) = cost(&shallow, &shallow_keys);
+    let allowed = (FORKS - SHALLOW) * PER_FORK;
+    assert!(
+        spread_set - shallow_set <= allowed,
+        "a set cost {shallow_set} over {SHALLOW} forks and {spread_set} over {FORKS}, which is \
+         more than {PER_FORK} calls for each fork the deeper one rebuilds"
+    );
+    assert!(
+        spread_remove - shallow_remove <= allowed,
+        "a remove cost {shallow_remove} over {SHALLOW} forks and {spread_remove} over {FORKS}, \
+         which is more than {PER_FORK} calls for each fork the deeper one rebuilds"
+    );
+}
+
+#[test]
+fn walking_a_dictionary_costs_one_allocation_for_each_key_it_hands_back() {
+    // A walk carries the key bits spelled out above each node it has still to visit, and it
+    // holds them inline, so what it costs is the key vector it hands the caller per entry and
+    // nothing besides. The tree is the deep-labelled shape again: every node on it carries a
+    // label, so a walk that read those onto the heap would cost several calls an entry rather
+    // than one.
+    const FORKS: usize = 10;
+    let (dict, keys) = spread_dict(FORKS);
+
+    let (walked, asked) = calls_to_allocate(|| dict.iter().count());
+    assert_eq!(walked, keys.len(), "the walk reached every key");
+    assert!(
+        asked <= walked + SLACK,
+        "walking {walked} entries asked the allocator {asked} times, which is more than the \
+         key each one hands back"
+    );
 }

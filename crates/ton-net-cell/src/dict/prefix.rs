@@ -28,8 +28,10 @@
 //! `PfxHashmap` edge; the `PfxHashmapE` wrapper, the maybe bit that says whether there is a
 //! root at all, is the caller's, exactly as [`Dict`](crate::Dict) leaves `HashmapE`'s bit.
 
-use super::label::{read_label, store_label};
-use super::{check_key_bits, diverges, key_bit, pack, rest, DictEntry, Lookup, NO_BRANCH};
+use super::label::{read_label_into, skip_label, store_label, Label};
+use super::{
+    check_key_bits, diverges, extend_bits, key_bit, pack, rest, DictEntry, Lookup, NO_BRANCH,
+};
 use crate::builder::Builder;
 use crate::cell::Cell;
 use crate::error::CellError;
@@ -133,12 +135,15 @@ impl PfxDict {
         let mut node = root;
         let mut remaining = self.key_bits;
         let mut consumed = 0usize;
+        // One label, refilled at each level; the walk is a loop, so the descent allocates
+        // nothing for the labels it reads on the way down.
+        let mut label = Label::new();
         loop {
             if node.is_exotic() {
                 return Ok(Lookup::Pruned);
             }
             let mut slice = node.parse();
-            let label = read_label(&mut slice, remaining)?;
+            read_label_into(&mut slice, remaining, &mut label)?;
             let ahead = rest(&bits, consumed);
             if diverges(&label, ahead).is_some() || ahead.len() < label.len() {
                 // The key parts from this edge, or ends inside it. Either way it is not the
@@ -147,7 +152,7 @@ impl PfxDict {
             }
             consumed += label.len();
             let is_fork = slice.load_bit()?;
-            let below = remaining - label_width(&label);
+            let below = remaining - label.width();
 
             if !is_fork {
                 if consumed == bits.len() {
@@ -196,19 +201,20 @@ impl PfxDict {
         let mut node = root;
         let mut remaining = self.key_bits;
         let mut consumed = 0usize;
+        let mut label = Label::new();
         loop {
             if node.is_exotic() {
                 return Err(CellError::Pruned);
             }
             let mut slice = node.parse();
-            let label = read_label(&mut slice, remaining)?;
+            read_label_into(&mut slice, remaining, &mut label)?;
             let ahead = rest(&bits, consumed);
             if diverges(&label, ahead).is_some() || ahead.len() < label.len() {
                 return Ok(None);
             }
             consumed += label.len();
             let is_fork = slice.load_bit()?;
-            let below = remaining - label_width(&label);
+            let below = remaining - label.width();
 
             if !is_fork {
                 let bit_offset = usize::from(node.bit_len()) - slice.remaining_bits();
@@ -308,7 +314,10 @@ impl PfxDict {
     pub fn validate(&self) -> Result<(), CellError> {
         match &self.root {
             None => Ok(()),
-            Some(root) => validate_node(root, self.key_bits),
+            Some(root) => {
+                let mut label = Label::new();
+                validate_node(root, self.key_bits, &mut label)
+            }
         }
     }
 
@@ -320,7 +329,7 @@ impl PfxDict {
             stack: self
                 .root
                 .clone()
-                .map(|root| vec![(root, Vec::new(), self.key_bits)])
+                .map(|root| vec![(root, Label::new(), self.key_bits)])
                 .unwrap_or_default(),
             done: false,
         }
@@ -351,12 +360,12 @@ fn pfx_key_of(key: &[u8], key_len: u16, max: u16) -> Result<Vec<bool>, CellError
     Ok((0..usize::from(key_len)).map(|i| key_bit(key, i)).collect())
 }
 
-/// A label's length as a key-width count. `read_label` bounds it to at most the width it was
-/// read under, so it fits a `u16`.
+/// A label's length as a key-width count. `read_run` refuses a length past the width the
+/// label is read under, and that width is a `u16`, so the length fits one.
 fn label_width(label: &[bool]) -> u16 {
     #[allow(
         clippy::cast_possible_truncation,
-        reason = "read_label bounds a label to at most its `max` argument, a u16"
+        reason = "a label is read under at most its `max` argument, a u16"
     )]
     let width = label.len() as u16;
     width
@@ -377,14 +386,22 @@ fn leaf_cell(key: &[bool], remaining: u16, value: &Builder) -> Result<Cell, Cell
 /// A recursion, not a loop, because it rebuilds the one path it changes from the bottom up;
 /// its depth is at most the key width, which [`check_key_bits`] holds under a cell's bit
 /// count, so it cannot run away.
+///
+/// The label is held on the heap rather than inline, which is why this one still allocates
+/// at each level whose label is not empty. A fork here is rebuilt with its label after the
+/// recursive call returns, so a buffer shared down the descent would have been overwritten
+/// by the child by the time the parent wanted it, and an inline label per frame is stack
+/// whose size the depth decides and the depth is the peer's. Each level that recurses
+/// rebuilds a cell on the way back up anyway, so the label is not what a write costs here.
 fn insert(node: &Cell, remaining: u16, key: &[bool], value: &Builder) -> Result<Cell, CellError> {
     if node.is_exotic() {
         return Err(CellError::Pruned);
     }
     let mut slice = node.parse();
-    let label = read_label(&mut slice, remaining)?;
+    let mut label: Vec<bool> = Vec::new();
+    read_label_into(&mut slice, remaining, &mut label)?;
 
-    if let Some(at) = diverges(&label, key) {
+    if let Some(at) = diverges(label.as_slice(), key) {
         // The key and this edge's label part company at `at`, where each still has a bit, so
         // a fork over their common prefix takes the old edge on one side and the new key on
         // the other.
@@ -405,7 +422,7 @@ fn insert(node: &Cell, remaining: u16, key: &[bool], value: &Builder) -> Result<
     if !is_fork {
         if tail.is_empty() {
             // The same key: keep the label and marker, write the new value.
-            return leaf_cell(&label, remaining, value);
+            return leaf_cell(label.as_slice(), remaining, value);
         }
         // The stored leaf's key is a proper prefix of the new one.
         return Err(CellError::Malformed(
@@ -475,7 +492,7 @@ fn split(
     let mut kept = Builder::new();
     store_label(&mut kept, rest(label, at + 1), child_width)?;
     let mut slice = node.parse();
-    read_label(&mut slice, remaining)?;
+    skip_label(&mut slice, remaining)?;
     kept.store_slice(slice)?;
     let kept = kept.build()?;
 
@@ -508,13 +525,17 @@ enum Removal {
 
 /// Removes `key` from under `node`, reporting what became of the subtree. `remaining` is the
 /// key width budget at `node`.
+///
+/// The label is held on the heap for the reason [`insert`] gives: a fork here is rebuilt or
+/// collapsed with its label after the recursive call has already returned.
 fn remove_from(node: &Cell, remaining: u16, key: &[bool]) -> Result<Removal, CellError> {
     if node.is_exotic() {
         return Err(CellError::Pruned);
     }
     let mut slice = node.parse();
-    let label = read_label(&mut slice, remaining)?;
-    if diverges(&label, key).is_some() || key.len() < label.len() {
+    let mut label: Vec<bool> = Vec::new();
+    read_label_into(&mut slice, remaining, &mut label)?;
+    if diverges(label.as_slice(), key).is_some() || key.len() < label.len() {
         return Ok(Removal::NotFound);
     }
 
@@ -580,28 +601,34 @@ fn collapse(
     let mut merged_label = label.to_vec();
     merged_label.push(survivor == 1);
     let mut slice = sibling.parse();
-    let sibling_label = read_label(&mut slice, below - 1)?;
-    merged_label.extend_from_slice(&sibling_label);
+    let mut sibling_label = Label::new();
+    read_label_into(&mut slice, below - 1, &mut sibling_label)?;
+    extend_bits(&mut merged_label, &sibling_label);
 
     let mut merged = Builder::new();
-    store_label(&mut merged, &merged_label, remaining)?;
+    store_label(&mut merged, merged_label.as_slice(), remaining)?;
     merged.store_slice(slice)?;
     merged.build()
 }
 
-/// Checks `node` and everything visible below it reads as a prefix dictionary.
-fn validate_node(node: &Cell, remaining: u16) -> Result<(), CellError> {
+/// Checks `node` and everything visible below it reads as a prefix dictionary. `label` is a
+/// buffer the whole descent shares.
+///
+/// The buffer is borrowed rather than held per frame because this recurses to a depth the
+/// cell graph a peer sent decides, and an inline label in each frame would be stack a peer
+/// sizes. Sharing one is safe because a node is finished with its label before it descends.
+fn validate_node(node: &Cell, remaining: u16, label: &mut Label) -> Result<(), CellError> {
     if node.is_exotic() {
         return Ok(());
     }
     let mut slice = node.parse();
-    let label = read_label(&mut slice, remaining)?;
+    read_label_into(&mut slice, remaining, label)?;
     let is_fork = slice.load_bit()?;
     if !is_fork {
         return Ok(());
     }
 
-    let below = remaining - label_width(&label);
+    let below = remaining - label.width();
     if below == 0 {
         return Err(CellError::Malformed(
             "a prefix-code fork with no key bits left",
@@ -612,8 +639,8 @@ fn validate_node(node: &Cell, remaining: u16) -> Result<(), CellError> {
     }
     let left = node.reference(0).ok_or(NO_BRANCH)?;
     let right = node.reference(1).ok_or(NO_BRANCH)?;
-    validate_node(left, below - 1)?;
-    validate_node(right, below - 1)
+    validate_node(left, below - 1, label)?;
+    validate_node(right, below - 1, label)
 }
 
 /// A walk over every entry of a prefix dictionary, in ascending key order.
@@ -622,7 +649,9 @@ fn validate_node(node: &Cell, remaining: u16) -> Result<(), CellError> {
 /// rather than walking past one.
 pub struct PfxDictIter {
     /// Each pending node, the key bits spelled above it, and the width still to spend at it.
-    stack: Vec<(Cell, Vec<bool>, u16)>,
+    /// The prefix is inline, so the stack is one growing vector rather than a vector of key
+    /// bits per node waiting on it.
+    stack: Vec<(Cell, Label, u16)>,
     done: bool,
 }
 
@@ -650,23 +679,20 @@ impl Iterator for PfxDictIter {
 impl PfxDictIter {
     /// Descends to the next leaf, or reports the walk is over.
     fn step(&mut self) -> Result<Option<(Vec<u8>, u16, DictEntry)>, CellError> {
+        let mut label = Label::new();
         while let Some((node, prefix, remaining)) = self.stack.pop() {
             if node.is_exotic() {
                 return Err(CellError::Pruned);
             }
             let mut slice = node.parse();
-            let label = read_label(&mut slice, remaining)?;
+            read_label_into(&mut slice, remaining, &mut label)?;
             let is_fork = slice.load_bit()?;
             let mut key = prefix;
-            key.extend_from_slice(&label);
+            key.extend(&label)?;
 
             if !is_fork {
                 let bit_offset = usize::from(node.bit_len()) - slice.remaining_bits();
-                #[allow(
-                    clippy::cast_possible_truncation,
-                    reason = "key.len() <= key_bits, which check_key_bits held to a u16"
-                )]
-                let key_len = key.len() as u16;
+                let key_len = key.width();
                 return Ok(Some((
                     pack(&key),
                     key_len,
@@ -677,7 +703,7 @@ impl PfxDictIter {
                 )));
             }
 
-            let below = remaining - label_width(&label);
+            let below = remaining - label.width();
             if below == 0 {
                 return Err(CellError::Malformed(
                     "a prefix-code fork with no key bits left",
@@ -688,7 +714,7 @@ impl PfxDictIter {
             for branch in [1usize, 0usize] {
                 let child = node.reference(branch).ok_or(NO_BRANCH)?.clone();
                 let mut key = key.clone();
-                key.push(branch == 1);
+                key.push(branch == 1)?;
                 self.stack.push((child, key, below - 1));
             }
         }
@@ -885,6 +911,40 @@ mod tests {
     }
 
     #[test]
+    fn a_merged_edge_spells_the_survivor_s_own_label_after_the_branch_bit() {
+        // The merge above holds where the survivor's label is empty, which says nothing
+        // about the order the bits go back in. Keys 100 and 101100 part on the third bit and
+        // leave the survivor a label of 100 past the fork, a run that reads differently
+        // backwards: the merged edge has to spell the fork's label, then the branch bit,
+        // then that label, or the key that comes back is not the key that was stored.
+        let mut dict = PfxDict::new(8).expect("a dictionary");
+        dict.set(&[0b1000_0000], 3, &val(0xa1)).expect("set 100");
+        dict.set(&[0b1011_0000], 6, &val(0xb2)).expect("set 101100");
+
+        assert!(dict.remove(&[0b1000_0000], 3).expect("remove 100"));
+        let Lookup::Found(entry) = dict.get(&[0b1011_0000], 6).expect("query") else {
+            panic!("101100 remains, under the key it was stored with")
+        };
+        assert_eq!(value_of(&entry), 0xb2);
+        let walked: Vec<(Vec<u8>, u16)> = dict
+            .iter()
+            .map(|item| {
+                let (key, len, _) = item.expect("an entry");
+                (key, len)
+            })
+            .collect();
+        assert_eq!(walked, vec![(vec![0b1011_0000], 6)]);
+
+        let mut only = PfxDict::new(8).expect("a dictionary");
+        only.set(&[0b1011_0000], 6, &val(0xb2)).expect("set 101100");
+        assert_eq!(
+            dict.root().map(Cell::repr_hash),
+            only.root().map(Cell::repr_hash),
+            "the merged edge is the one 101100 alone builds"
+        );
+    }
+
+    #[test]
     fn removing_the_only_key_empties_the_dictionary() {
         let mut dict = PfxDict::new(8).expect("a dictionary");
         dict.set(&[0b1100_0000], 2, &val(0x01)).expect("set 11");
@@ -913,13 +973,13 @@ mod tests {
         // left to branch on. A reference client rejects exactly this.
         let mut leaf = Builder::new();
         // A leaf under a zero-width child: an empty label then the 0 marker and a value.
-        store_label(&mut leaf, &[], 0).expect("empty label");
+        store_label(&mut leaf, [].as_slice(), 0).expect("empty label");
         leaf.store_bit(false).expect("marker");
         leaf.store_uint(0, 2).expect("value");
         let leaf = leaf.build().expect("a leaf");
 
         let mut fork = Builder::new();
-        store_label(&mut fork, &[false], 1).expect("a one-bit label");
+        store_label(&mut fork, [false].as_slice(), 1).expect("a one-bit label");
         fork.store_bit(true).expect("fork marker");
         fork.store_ref(leaf.clone()).expect("left");
         fork.store_ref(leaf).expect("right");

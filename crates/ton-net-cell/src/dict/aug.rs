@@ -6,7 +6,7 @@
 
 use core::borrow::Borrow;
 
-use super::label::read_label;
+use super::label::{skip_label, Label};
 use super::{
     build_all, check_key_bits, collapse, collect_fork_extras, descend, key_of, leaf, lookup,
     rebuild, reroot, rest, split, traverse, validate_tree, walk_step, AugNode, DictEntry, Entry,
@@ -122,7 +122,9 @@ fn extra_of<S: Shape>(shape: &S, node: &Cell, max: u16) -> Result<S::Extra, Cell
         return Err(CellError::Pruned);
     }
     let mut slice = node.parse();
-    read_label(&mut slice, max)?;
+    // The summary is whatever follows the label, so the label itself is stepped over rather
+    // than read. This runs once per child of every fork a rebuild touches.
+    skip_label(&mut slice, max)?;
     shape.read_extra(&mut slice)
 }
 
@@ -375,7 +377,7 @@ impl<A: Augmentation> AugDict<A> {
             stack: self
                 .root
                 .clone()
-                .map(|root| vec![(root, Vec::new(), self.key_bits)])
+                .map(|root| vec![(root, Label::new(), self.key_bits)])
                 .unwrap_or_default(),
             done: false,
         }
@@ -751,6 +753,21 @@ mod tests {
         }
     }
 
+    /// A run of key bits written out, so a test can state a prefix as the bits it spells
+    /// rather than as a count of them.
+    fn bits(run: &str) -> Vec<bool> {
+        run.chars().map(|c| c == '1').collect()
+    }
+
+    /// Three keys over a tree whose interior labels run longer than a bit and read
+    /// differently backwards.
+    ///
+    /// The first parts from the other two at the fifth bit and those two part at the ninth,
+    /// so the root's label is `1011` and the sub-fork's is `001`. Neither run is its own
+    /// reverse and neither is a single bit, which is what lets a prefix spelled in the wrong
+    /// order, or not spelled at all, show in an assertion.
+    const LABELLED_KEYS: [u32; 3] = [0xB000_0000, 0xB900_0000, 0xB980_0000];
+
     /// An augmented dictionary over 32-bit keys, one leaf per key, each counting as one.
     fn counted(keys: &[u32]) -> AugDict<CountSum> {
         let mut dict = AugDict::new(CountSum, 32).expect("a sane key width");
@@ -770,6 +787,24 @@ mod tests {
         assert_eq!(forks.len(), 2, "a root fork and one sub-fork");
         assert_eq!(forks[0].1, 3, "the root fork counts every leaf");
         assert_eq!(forks[1].1, 2, "the sub-fork counts its two leaves");
+    }
+
+    #[test]
+    fn a_fork_prefix_spells_the_bits_every_entry_below_it_shares() {
+        // A fork's prefix is the key path a caller reads a subtree's identity off, so it has
+        // to be the run itself, in the order a key spells it, and not merely the right
+        // number of bits. The root's is its own label; the sub-fork's is that label, the
+        // branch bit that led to it, and its own label, in that order.
+        let dict = counted(&LABELLED_KEYS);
+        let forks = dict.fork_extras().expect("reads");
+
+        let spelled: Vec<Vec<bool>> = forks.iter().map(|(prefix, _)| prefix.clone()).collect();
+        assert_eq!(spelled, vec![bits("1011"), bits("10111001")]);
+        assert_eq!(
+            forks.iter().map(|(_, extra)| *extra).collect::<Vec<u32>>(),
+            vec![3, 2],
+            "the root fork counts every leaf and the sub-fork the two below it"
+        );
     }
 
     #[test]
@@ -1090,6 +1125,28 @@ mod tests {
                 Seen::Leaf(3, 1),
             ]
         );
+    }
+
+    #[test]
+    fn a_walk_offers_each_fork_the_prefix_that_leads_to_it() {
+        // A directed walk spells its prefixes down its own recursion rather than through the
+        // one `fork_extras` uses, so the same keys go through both. The prefix a visitor is
+        // handed is what it prunes a subtree by, and a subtree pruned by the wrong path is
+        // the wrong answer with nothing to say so.
+        let dict = counted(&LABELLED_KEYS);
+        let mut offered = Vec::new();
+        let mut leaves = Vec::new();
+        dict.traverse_extra(|node| {
+            match node {
+                AugNode::Fork { prefix, .. } => offered.push(prefix.to_vec()),
+                AugNode::Leaf { key, .. } => leaves.push(key_of(key)),
+            }
+            Traverse::Continue
+        })
+        .expect("walks");
+
+        assert_eq!(offered, vec![bits("1011"), bits("10111001")]);
+        assert_eq!(leaves, LABELLED_KEYS.to_vec(), "in ascending key order");
     }
 
     #[test]

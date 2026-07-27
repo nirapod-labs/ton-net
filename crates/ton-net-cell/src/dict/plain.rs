@@ -3,6 +3,7 @@
 
 //! The plain `HashmapE n X`: a dictionary whose nodes hold only a label and a value.
 
+use super::label::Label;
 use super::{
     check_key_bits, collapse, descend, key_of, leaf, lookup, rebuild, rest, split, walk_step,
     DictEntry, Entry, Lookup, Pending, Shape,
@@ -211,7 +212,7 @@ impl Dict {
             stack: self
                 .root
                 .clone()
-                .map(|root| vec![(root, Vec::new(), self.key_bits)])
+                .map(|root| vec![(root, Label::new(), self.key_bits)])
                 .unwrap_or_default(),
             done: false,
         }
