@@ -13,10 +13,12 @@
 //! second is written so that deleting the option's one use site fails it.
 //!
 //! The third property is the one a caller's safety rests on: a bag comes from a liteserver
-//! and the ceiling in front of it is the reason a declared count cannot be believed. So the
-//! bound is held at the header, which is the one door all three readers come through, and
-//! what is tested is that all three refuse the same bytes rather than that each refuses
-//! something.
+//! and the ceiling in front of it is the reason a declared count cannot be believed. The
+//! bound is applied where the header is read, and `read_header` has three call sites in the
+//! library, one for each way in: `parse_boc_with`, `BocView::open_with` and
+//! `LazyBoc::open_with`. So what is tested is that those three refuse the same bytes, rather
+//! than that each of them refuses something. A ceiling dropped from any one of them would
+//! pass the second property and fail this one.
 
 use ton_net_cell::{
     parse_boc, parse_boc_with, BocView, Cell, CellError, LazyBoc, ParseOptions, MAX_CELLS,
@@ -68,10 +70,13 @@ impl Rng {
 /// A parse's outcome in a form two runs can be compared by.
 ///
 /// The cells are reduced to their representation hashes rather than compared as values,
-/// because that is the identity the format is defined in terms of: two runs agreeing here
-/// agree on every bit that reaches a caller through a cell. The error is carried alongside
-/// rather than discarded, since a bag refused differently by the two doors is exactly the
-/// divergence the default is supposed to forbid.
+/// because that hash is the identity the format defines a cell by: it covers the data, the
+/// references, the kind and the level mask, so two runs agreeing on it built the same graph
+/// short of a SHA-256 collision.
+///
+/// The error is carried rather than discarded because a bag the two calls refuse differently
+/// is the divergence this file exists to catch, and a comparison that kept only the
+/// successes would be an agreement about the bags that were never in question.
 type Outcome = Result<Vec<[u8; 32]>, CellError>;
 
 fn outcome(result: Result<Vec<Cell>, CellError>) -> Outcome {
