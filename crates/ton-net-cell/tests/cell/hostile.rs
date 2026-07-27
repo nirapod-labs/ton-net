@@ -15,7 +15,9 @@
 //! a real bag of cells: single flipped bytes, truncations, and splices reach the deep
 //! paths that arbitrary input never does.
 
-use ton_net_cell::{parse_boc, serialize_boc, Builder, Cell, CellError, MAX_DEPTH};
+use ton_net_cell::{
+    parse_boc, serialize_boc, BocView, Builder, Cell, CellError, LazyBoc, MAX_DEPTH,
+};
 
 /// A real proof, the starting point every mutation works from.
 const PROOF_HEX: &str = include_str!("../fixtures/account-proof.hex");
@@ -196,6 +198,148 @@ fn what_survives_reserialization_parses_back() {
 
     // Without this the test could pass having reserialized nothing at all.
     assert!(checked > 0, "no corrupted tree survived to be reserialized");
+}
+
+/// A two-cell bag, each cell flawed or sound as asked, the two flaws independent.
+///
+/// Neither cell references the other, so neither failure hides the other. A flawed cell
+/// beneath another leaves its parent unbuildable, and then there is one failure to report
+/// and no choice between failures to make.
+///
+/// Cell zero claims a level mask its children would have to justify, and it carries no
+/// children. Cell one carries the hash and depth a cell may store ahead of its data,
+/// filled with bytes its own contents do not produce. Both faults are found where a bag's
+/// cells are finalized rather than where its bytes are read, which is the pass whose order
+/// the test below pins.
+fn two_flawed_cells(first_flawed: bool, second_flawed: bool) -> Vec<u8> {
+    // d1 is 32 * level_mask + 8 * exotic + reference count, and bit four says the cell
+    // carries its own hashes and depths ahead of its data. d2 is zero for a cell with no
+    // data bits.
+    let mut cells = vec![
+        if first_flawed { 0x20 } else { 0x00 },
+        0x00,
+        if second_flawed { 0x10 } else { 0x00 },
+        0x00,
+    ];
+    if second_flawed {
+        // One hash and one depth, which is what a cell of an empty level mask stores, and
+        // no part of it is what this cell's contents hash to.
+        cells.extend([0xaa; 34]);
+    }
+
+    let mut bag = vec![
+        0xb5, 0xee, 0x9c, 0x72, // magic
+        0x01, // one byte per reference, no index, no checksum
+        0x01, // one byte per offset
+        0x02, // two cells
+        0x01, // one root
+        0x00, // no absent cells
+    ];
+    bag.push(u8::try_from(cells.len()).expect("the cell area is under 256 bytes"));
+    bag.push(0x00); // the root is cell zero
+    bag.extend(cells);
+    bag
+}
+
+#[test]
+fn a_bag_with_two_flawed_cells_is_refused_for_the_lower_one() {
+    // Which failure a bag with more than one comes back with must not depend on the order
+    // its cells were finalized in, or the same bytes would produce different errors as
+    // that order changed. The rule is that the lowest cell index wins. The two cells here
+    // fail for different reasons, so which one the rule picked is legible in the error.
+    const BY_LEVEL: CellError =
+        CellError::Malformed("cell level mask is not the one its children imply");
+    const BY_HASH: CellError = CellError::Malformed("cell stores a hash its contents do not give");
+
+    // Each flaw on its own, which is what says the pair below was refused for the fault
+    // planted in one cell rather than for anything the two cells share.
+    assert_eq!(
+        parse_boc(&two_flawed_cells(true, false)),
+        Err(BY_LEVEL),
+        "the first cell claims a level nothing below it gives it"
+    );
+    assert_eq!(
+        parse_boc(&two_flawed_cells(false, true)),
+        Err(BY_HASH),
+        "the second cell stores a hash its contents do not give"
+    );
+
+    // Both at once. Finalizing runs from the highest cell index down, so the second cell's
+    // failure is the one met first and the first cell's is the one reported.
+    assert_eq!(
+        parse_boc(&two_flawed_cells(true, true)),
+        Err(BY_LEVEL),
+        "a bag failing at two cells reports the lower of them"
+    );
+
+    // And the same bag with neither flaw is read, so the shape itself is not what was
+    // being refused.
+    let sound = parse_boc(&two_flawed_cells(false, false))
+        .expect("two sound cells make a bag this crate reads");
+    exercise_roots(&sound);
+}
+
+/// A two-cell bag whose root references a cell that will not build.
+///
+/// The child claims a level mask nothing beneath it gives it, which is a fault found where
+/// the bag's cells are finalized. The root above it is then a cell no pass can build, and
+/// the failure it has is a missing child rather than a fault of its own.
+fn a_flaw_under_a_parent() -> Vec<u8> {
+    let cells = vec![
+        0x01, // the root, one reference and no data bits
+        0x00, 0x01, // which points at cell one
+        0x20, // the child, claiming a level its children would have to justify
+        0x00,
+    ];
+
+    let mut bag = vec![
+        0xb5, 0xee, 0x9c, 0x72, // magic
+        0x01, // one byte per reference, no index, no checksum
+        0x01, // one byte per offset
+        0x02, // two cells
+        0x01, // one root
+        0x00, // no absent cells
+    ];
+    bag.push(u8::try_from(cells.len()).expect("the cell area is under 256 bytes"));
+    bag.push(0x00); // the root is cell zero
+    bag.extend(cells);
+    bag
+}
+
+#[test]
+fn a_cell_built_on_its_own_is_refused_for_the_cell_that_failed() {
+    // Reading one cell of a bag walks its subtree and builds it from the bottom, which is
+    // a third pass over the same cells beside the whole-bag build and the identity-only
+    // verify. A caller that asks for a cell and a caller that parses the bag are looking
+    // at the same bytes, so a fault beneath the cell asked for has to come back as the
+    // fault it is rather than as the parent's missing child.
+    const BY_LEVEL: CellError =
+        CellError::Malformed("cell level mask is not the one its children imply");
+
+    let bag = a_flaw_under_a_parent();
+    assert_eq!(
+        parse_boc(&bag),
+        Err(BY_LEVEL),
+        "the child claims a level nothing below it gives it"
+    );
+
+    // The cell above the fault, which is the case that has a choice to make: it can report
+    // what stopped it, a child that produced no cell, or what stopped the child.
+    let lazy = LazyBoc::open(&bag).expect("every cell reads, and none of them is built");
+    assert_eq!(
+        lazy.cell(0).err(),
+        Some(BY_LEVEL),
+        "reading one cell named its parent's missing child in place of the fault under it"
+    );
+    assert_eq!(
+        BocView::open(&bag).expect("the header reads").cell(0).err(),
+        Some(BY_LEVEL),
+        "and the same through a view, which reads the bag again for the one cell"
+    );
+
+    // The flawed cell asked for directly, where there is nothing above it to report
+    // instead. Both callers agree with the whole-bag read on this one too.
+    assert_eq!(lazy.cell(1).err(), Some(BY_LEVEL));
 }
 
 /// A serialized bag holding one chain: a leaf under `links` parents, so its root has depth

@@ -13,14 +13,19 @@
 //!
 //! | bag | cells | building | verifying |
 //! |---|---:|---:|---:|
-//! | account proof | 45 | 92 | 47 |
-//! | basechain block | 1121 | 2013 | 892 |
+//! | account proof | 45 | 94 | 49 |
+//! | basechain block | 1121 | 2015 | 894 |
 //!
 //! One of those per cell is the cell itself. The other is the hashes above the lowest, which
 //! only a cell significant at more than one level has, and 886 of the block's 1121 cells are.
 //! A pruned branch carries a mask of its own and the mask reaches its ancestors, losing a level
 //! at each Merkle cell above it, which is why 886 of the 1121. Nothing else in a read is per
 //! cell.
+//!
+//! The counts are taken on the thread the read runs on, which is where the whole of these
+//! reads happens. A wave of cells is split across threads once it holds twice
+//! `CELLS_PER_WORKER`, and neither fixture carries that many cells in total, so no wave of
+//! either leaves this thread and none of these counts goes anywhere it would not be seen.
 //!
 //! Counting them at all means installing a global allocator, and a global allocator means
 //! `unsafe`. That is why this is a test binary and not the library: the library forbids
@@ -82,9 +87,11 @@ fn calls_to_allocate<T>(body: impl FnOnce() -> T) -> (T, usize) {
 /// Headroom over what a read costs beyond its cells, which is a buffer for the bag and a few
 /// vectors sized once.
 ///
-/// Measured at six. The bounds below are stated with room over that rather than against it, so
-/// that a vector growing one step differently is not a failing test, while anything per cell
-/// still is.
+/// Measured at eight, which the read path accounts for one at a time: the bag's buffer, the
+/// header's root list, the raw cells, the heights, the two vectors the wave plan is held in,
+/// the slots the cells are built into, and the roots. The bounds below are stated with room
+/// over that rather than against it, so that a vector growing one step differently is not a
+/// failing test, while anything per cell still is.
 const SLACK: usize = 16;
 
 /// The captured mainnet account proof, hex encoded.
