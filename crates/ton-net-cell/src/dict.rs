@@ -378,6 +378,12 @@ struct Walk {
 /// peer chooses. It stops at the first of three things: a label that disagrees with the
 /// key, a key with nothing left to spend, or a branch a proof has pruned away.
 ///
+/// The reason holds for this descent and is not a rule the file keeps everywhere. The
+/// whole-tree walks below, [`collect_forks`], [`validate_node`] and [`traverse_node`],
+/// recurse to that same peer-chosen depth and say so, and so does dropping a tree, since a
+/// cell holds its children. What each of the three costs at the format's limit is measured
+/// and held to a stated stack in `tests/cell/stack.rs`.
+///
 /// Both writers share it, which is what keeps the bounds in one place. Every label is
 /// read under the key bits still to spend, so it can never claim more than are left, and
 /// a fork is only descended when its label is shorter than that, which is what leaves

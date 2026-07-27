@@ -15,4 +15,5 @@ mod hostile;
 mod mainnet_boc;
 mod merkle;
 mod roundtrip;
+mod stack;
 mod whole_block;
