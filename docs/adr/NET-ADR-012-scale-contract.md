@@ -535,8 +535,10 @@ discharge it at the end rather than returning at the first failure they meet.
 
 The parity gate is `the_wave_plan_and_a_single_pass_agree_on_corrupted_bags`, and it sits in
 the unit tests of `boc/parse.rs` rather than in `crates/ton-net-cell/tests/cell/hostile.rs` as
-this record said it would. The comparison needs `prepare`, which is private, and an
-integration test cannot reach it. It mutates the same captured proof with the same
+this record said it would. The comparison drives both plans over one reading of a bag, which
+takes `build_planned`, `verify_planned`, `heights` and `Waves`, and those are private to the
+module and re-exported nowhere. From outside it, a bag can only be read the way the public API
+reads it, which is one plan. It mutates the same captured proof with the same
 single-flipped-bit generator, and it pins what the corpus reached as equalities: 3,225 bags
 reach the finalizing pass and 54 are refused there, so a corpus that quietly stopped refusing
 fails rather than passes.
@@ -565,5 +567,6 @@ that this record governs the gates on wave-parallel finalization, so the closing
 decision 4, that the amendment has not been made, no longer describes the tree.
 
 The Consequences items that turned on those two are discharged with them. Wave-parallel
-finalization landed with the parity gate, and the four descending passes and the walk ahead of
-the build loop have changed shape as that item said they would need to.
+finalization landed with the parity gate rather than without it, and the passes that item said
+would have to change shape have changed shape: a bag is finalized under a plan now, and the
+descending order is one plan among them rather than the only way a pass runs.
