@@ -125,9 +125,9 @@ impl ParseOptions {
 
     /// The cell ceiling a parse under these options holds a bag to.
     ///
-    /// The clamp lives here, at the one place the figure is read, rather than only in the
-    /// setter, because [`max_cells`](ParseOptions::max_cells) is public and a caller can
-    /// write it without passing through one.
+    /// The clamp lives here, at the one place the figure is enforced, rather than only in
+    /// the setter, because [`max_cells`](ParseOptions::max_cells) is public and a caller
+    /// can write it without passing through one.
     pub(crate) fn cell_ceiling(self) -> usize {
         self.max_cells.min(MAX_CELLS)
     }

@@ -92,10 +92,10 @@ fn the_default_options_admit_and_refuse_exactly_what_no_options_do() {
     // so it cannot tell a default that has moved from one that has not. What can are the
     // bags that fail, and the comparison includes which error they failed with.
     //
-    // The assertion below is made before the comparison, and load-bearing rather than decorative. Both sides
-    // below read the same default, so a default that had quietly moved would still make
-    // them agree, and every line after this one would pass on a crate whose bounds had
-    // changed. This is the line that says which figure the default is.
+    // The assertion below is made before the comparison, and is load-bearing rather than
+    // decorative. Both sides below read the same default, so a default that had quietly
+    // moved would still make them agree, and every line after this one would pass on a
+    // crate whose bounds had changed. This is the line that says which figure it is.
     assert_eq!(
         ParseOptions::default().max_cells,
         MAX_CELLS,
