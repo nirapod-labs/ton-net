@@ -9,6 +9,10 @@ superseded-by: none
 
 # NET-ADR-012: What the cell engine promises at scale
 
+Parts of this record describe the tree as it stood when the decision was taken, and some of
+that has since been built. What moved is at the end, under [Since acceptance](#since-acceptance);
+the text above it is left as it was written.
+
 ## Context
 
 The cell engine was built for a wallet reading proofs, where a bag is a few kilobytes. The
@@ -517,3 +521,68 @@ Gates on the work this record decides, none of which runs today:
   included.
 - Any timing figure that is published names the control it was taken against and shows that
   the control moved with the load.
+
+## Since acceptance
+
+Decisions 3 and 4 have since been built, and what was built differs from what this record
+anticipated in three places worth naming. Decisions 1 and 2 are untouched: no parse options
+and no storage seam exist.
+
+**Decision 3 is built, and the gate did not land where this record put it.** The lowest
+failing index now wins in the three passes that judge cells: the `finalize` call in each of
+`build_planned` and `verify_planned`, and the descending build loop in `build_at`, all in
+`crates/ton-net-cell/src/boc/parse.rs`. Each reduces through a `Lowest` and discharges it at
+the end rather than returning at the first failure it meets.
+
+The reference walk ahead of that loop is the exception, and this record asked for it to change
+too. It still returns at the first failure it meets, in stack order, and it was left alone
+because it cannot be reached: `read_raw` refuses a reference that is not a forward index
+inside the bag before `build_at` runs, and `build_at` bounds the index it is handed, so every
+position the walk visits is one the header already held. Its refusal is a branch kept against
+a future edit, not a site that reports.
+
+The parity gate is `the_wave_plan_and_a_single_pass_agree_on_corrupted_bags`, and it sits in
+the unit tests of `boc/parse.rs` rather than in `crates/ton-net-cell/tests/cell/hostile.rs` as
+this record said it would. The comparison drives both plans over one reading of a bag, which
+takes `build_planned`, `verify_planned`, `heights` and `Waves`, and those are private to the
+module and re-exported nowhere. From outside it, a bag can only be read the way the public API
+reads it, which is one plan. It mutates the same captured proof with the same
+single-flipped-bit generator, and it pins what the corpus reached as equalities: 3,225 bags
+reach the finalizing pass and 54 are refused there, so a corpus that quietly stopped refusing
+fails rather than passes.
+
+It compares three things where this record's gate named one, the parallel result against the
+sequential. The third is that building a bag and verifying it refuse it alike. It went in
+because deleting the failure check from the identity-only read left the suite green on the
+tree it was written against, with `BocView::verify` then accepting a bag `parse_boc` refuses.
+
+That reason no longer holds on its own, and this section records it rather than repeating it.
+`a_bag_read_five_ways_reaches_the_same_answer`, in
+`crates/ton-net-cell/tests/cell/fuzz/targets.rs`, landed between the branch's base and its
+merge and catches the same mutation, so the suite is not green under it today. The comparison
+is kept because it holds the agreement on a fixed corpus from inside the module that picks the
+plan, where the fuzz target reaches it through the public API.
+
+The corpus also turned out unable to grade the rule it was chosen for. Of the 54 bags it
+refuses, every one fails at a single cell, because a flipped bit in a proof changes a hash
+without refusing anything, and one failure is picked the same way by every selection rule.
+What grades the rule is `a_wave_wide_enough_to_split_reports_the_lowest_failure`, which builds
+its bag and plants two faults of different kinds.
+
+**Decision 4's gate has grown, and its shape has not.**
+`crates/ton-net-cell/tests/allocations.rs`
+held four readings when this record was written and holds seven: a lookup, a walk and a write
+over a dictionary joined the four over a bag. Its slack over a bag read is measured at eight
+rather than the six stated above, and the file now names the eight one at a time where it used
+to give the figure alone. It states a second slack of four over a dictionary walk. Counts that
+can be pinned exactly are still pinned exactly and rates are still bounded, which is what this
+decision fixed.
+
+**The plan amendment this record was waiting on has landed.** `docs/plan/v0.4.0.md` now states
+that this record governs the gates on wave-parallel finalization, so the closing sentence of
+decision 4, that the amendment has not been made, no longer describes the tree.
+
+The Consequences items that turned on those two are discharged with them. Wave-parallel
+finalization landed with the parity gate rather than without it, and the passes that item said
+would have to change shape have changed shape: a bag is finalized under a plan now, and the
+descending order is one plan among them rather than the only way a pass runs.

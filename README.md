@@ -106,6 +106,12 @@ The design is recorded as a contiguous set of Architecture Decision Records unde
 NET-ADR-001 is the ground the others rest on, and NET-ADR-002 with NET-ADR-003 are the two
 foundations most others build on.
 
+A record describes the tree as it stood when the decision was taken, and it is not rewritten
+when the tree catches up. What was built lands in a `Since acceptance` section at the end,
+with a pointer to it under the title, so the record of what was known then survives alongside
+the correction. Reversing a decision is the other instrument, and that is `supersedes` and
+`superseded-by` in the frontmatter.
+
 | ADR | Decision |
 |---|---|
 | [NET-ADR-001](docs/adr/NET-ADR-001-purpose-and-priorities.md) | Purpose, and the priorities that follow. |
