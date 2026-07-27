@@ -3,7 +3,7 @@
 
 //! Reading and checking a bag's header, before any cell is built.
 
-use super::{crc32c, Header, Reader, MAGIC, MAX_CELLS};
+use super::{crc32c, Header, ParseOptions, Reader, MAGIC};
 use crate::error::CellError;
 
 /// Reads and checks a bag's header, leaving `reader` at the first cell.
@@ -12,7 +12,14 @@ use crate::error::CellError;
 /// the field sizes, the checksum over the whole bag, that the counts are in range, and that
 /// the stated cell-area size accounts for exactly the bytes that remain. A header that
 /// passes describes a bag whose cells can be read without another check on the shape.
-pub(super) fn read_header(reader: &mut Reader<'_>, bytes: &[u8]) -> Result<Header, CellError> {
+///
+/// This is the one place the cell ceiling is applied, and every door into a bag comes
+/// through it, so the bound cannot hold on one path and lapse on another (`NET-ADR-009`).
+pub(super) fn read_header(
+    reader: &mut Reader<'_>,
+    bytes: &[u8],
+    options: ParseOptions,
+) -> Result<Header, CellError> {
     if reader.take(4)? != MAGIC {
         return Err(CellError::NotABagOfCells);
     }
@@ -68,8 +75,9 @@ pub(super) fn read_header(reader: &mut Reader<'_>, bytes: &[u8]) -> Result<Heade
     if absent != 0 {
         return Err(CellError::Header("absent cells"));
     }
-    if count > MAX_CELLS {
-        return Err(CellError::TooManyCells { limit: MAX_CELLS });
+    let ceiling = options.cell_ceiling();
+    if count > ceiling {
+        return Err(CellError::TooManyCells { limit: ceiling });
     }
     if roots == 0 || roots > count {
         return Err(CellError::Header("root count"));

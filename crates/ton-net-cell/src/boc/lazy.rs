@@ -15,7 +15,7 @@
 
 use std::cell::RefCell;
 
-use super::{build_at, read_cells, read_header, Build, Header, RawCells, Reader};
+use super::{build_at, read_cells, read_header, Build, Header, ParseOptions, RawCells, Reader};
 use crate::cell::Cell;
 use crate::error::CellError;
 
@@ -39,8 +39,22 @@ impl LazyBoc {
     /// As [`BocView::open`](super::BocView::open) for the header it reads, and as
     /// [`BocView::materialize`](super::BocView::materialize) for the cells.
     pub fn open(bytes: &[u8]) -> Result<Self, CellError> {
+        Self::open_with(bytes, &ParseOptions::default())
+    }
+
+    /// Reads and checks a bag under bounds the caller has narrowed, building none of it.
+    ///
+    /// This is [`open`](LazyBoc::open) with the crate's own bounds tightened. It refuses a
+    /// bag on the same terms the other two doors do, because all three reach the ceiling
+    /// through the header rather than each carrying one.
+    ///
+    /// # Errors
+    ///
+    /// As [`open`](LazyBoc::open), and as
+    /// [`parse_boc_with`](super::parse_boc_with) for the ceiling `options` names.
+    pub fn open_with(bytes: &[u8], options: &ParseOptions) -> Result<Self, CellError> {
         let mut reader = Reader { bytes, at: 0 };
-        let header = read_header(&mut reader, bytes)?;
+        let header = read_header(&mut reader, bytes, *options)?;
         let mut reader = Reader {
             bytes,
             at: header.body_offset,

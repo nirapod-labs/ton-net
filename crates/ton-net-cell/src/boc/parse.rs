@@ -6,7 +6,7 @@
 use std::num::NonZeroUsize;
 use std::sync::{Arc, OnceLock};
 
-use super::{bit_len, read_header, Header, Reader, MAX_DEPTH};
+use super::{bit_len, read_header, Header, ParseOptions, Reader, MAX_DEPTH};
 use crate::cell::{summarize, Cell, CellType, Identity, Payload, Refs, Span, MAX_BITS, MAX_REFS};
 use crate::error::CellError;
 
@@ -68,8 +68,37 @@ impl RawCell {
 /// # Ok::<(), ton_net_cell::CellError>(())
 /// ```
 pub fn parse_boc(bytes: &[u8]) -> Result<Vec<Cell>, CellError> {
+    parse_boc_with(bytes, &ParseOptions::default())
+}
+
+/// Parses a bag of cells under bounds the caller has narrowed.
+///
+/// This is [`parse_boc`] with the crate's own bounds tightened. Under
+/// [`ParseOptions::default`] the two admit and refuse exactly the same bags, and nothing
+/// `options` can carry widens what is taken, so this door is never the looser of the two.
+///
+/// # Errors
+///
+/// As [`parse_boc`], and [`CellError::TooManyCells`] where `options` names a lower ceiling
+/// than the bag needs. The error reports the ceiling that refused it rather than the
+/// crate's, so a refusal names the bound the caller set.
+///
+/// # Examples
+///
+/// ```
+/// use ton_net_cell::{parse_boc_with, CellError, ParseOptions};
+///
+/// let bytes = [0xb5, 0xee, 0x9c, 0x72, 0x01, 0x01, 0x01, 0x01, 0x00, 0x03, 0x00,
+///              0x00, 0x02, 0xab];
+/// let options = ParseOptions::default().with_max_cells(0);
+/// assert_eq!(
+///     parse_boc_with(&bytes, &options),
+///     Err(CellError::TooManyCells { limit: 0 })
+/// );
+/// ```
+pub fn parse_boc_with(bytes: &[u8], options: &ParseOptions) -> Result<Vec<Cell>, CellError> {
     let mut reader = Reader { bytes, at: 0 };
-    let header = read_header(&mut reader, bytes)?;
+    let header = read_header(&mut reader, bytes, *options)?;
     read_and_build(&mut reader, &header)
 }
 
@@ -1018,7 +1047,7 @@ mod tests {
     /// than an input the two runs share.
     fn prepare(bytes: &[u8]) -> Option<Prepared> {
         let mut reader = Reader { bytes, at: 0 };
-        let header = read_header(&mut reader, bytes).ok()?;
+        let header = read_header(&mut reader, bytes, ParseOptions::default()).ok()?;
         let payload: Arc<[u8]> = Arc::from(reader.bytes);
         let raw = read_raw(&mut reader, &header).ok()?;
         heights(&raw, header.count).ok()?;
