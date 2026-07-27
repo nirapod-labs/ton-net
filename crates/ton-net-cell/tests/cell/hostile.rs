@@ -357,11 +357,12 @@ pub fn deep_chain(links: usize) -> Vec<u8> {
 #[test]
 fn a_bag_deeper_than_the_limit_is_refused() {
     // The depth limit is the only thing between a bag a peer chose and a chain long enough to
-    // take the stack with it. Not while it is read: parsing costs the same at any depth, and
-    // `stack.rs` holds it to that. While it is released, because a cell holds its children and
-    // letting go of the last handle on a chain lets go of the next. Both sides are asserted:
-    // refusing the deep bag is what a limit that refuses everything also does, so the shallow
-    // one has to be read.
+    // take the stack with it. Reading it is not where that happens: parsing costs the same at
+    // any depth, and `stack.rs` holds it to that. Releasing it is, because a cell holds its
+    // children and letting go of the last handle on a chain lets go of the next, and so is
+    // every walk that takes a frame per reference, which `stack.rs` measures at the limit.
+    // Both sides are asserted here: refusing the deep bag is what a limit that refuses
+    // everything also does, so the shallow one has to be read.
     let at_limit = deep_chain(MAX_DEPTH);
     assert!(
         parse_boc(&at_limit).is_ok(),

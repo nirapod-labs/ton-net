@@ -5,114 +5,86 @@
 //!
 //! `MAX_DEPTH` is the only thing bounding how deep a bag may be, and `NET-ADR-012` fixes
 //! that it may not be raised because it is a stack-safety bound rather than a memory one.
-//! This file is the measurement behind that, because a stack bound nothing measures is a
-//! bound nobody can hold a change to.
+//! Nothing measured it, so a walk that started costing twice as much per level had nothing
+//! to fail.
 //!
-//! What the stack costs, measured on the fixtures below as the smallest thread each came
-//! back on, and what it says:
+//! Every figure below is produced by [`measure`] in this file rather than written by hand.
+//! It bisects the thread each scenario comes back on, one process per attempt, and prints
+//! the table. The figures step in pages, because a platform hands a stack out in whole ones
+//! and rounds a smaller request up, which is also why the reading for a flat scenario is a
+//! ceiling rather than a measurement.
 //!
-//! | at the depth limit | debug | release |
+//! On a 1024-link chain and a 1023-fork comb, both at their formats' limits:
+//!
+//! | scenario | debug | release |
 //! |---|---:|---:|
-//! | parsing a bag | under 32 KiB | under 32 KiB |
-//! | parsing it and dropping it | 407 KiB | 103 KiB |
+//! | parse a bag | 32 KiB | 32 KiB |
+//! | parse and release it | 416 KiB | 112 KiB |
+//! | render it with `Cell::dump` | 304 KiB | 192 KiB |
+//! | prove it with `UsageTree::prove` | 880 KiB | 272 KiB |
+//! | validate the dictionary | 1712 KiB | 320 KiB |
+//! | walk the dictionary | 1504 KiB | 272 KiB |
+//! | collect its fork summaries | 1216 KiB | 256 KiB |
 //!
-//! Parsing is flat, and its figure is a ceiling rather than a measurement: a platform will
-//! not hand out a thread stack below its own minimum and rounds a smaller request up, so the
-//! read still came back on every size down to four KiB and the number stops meaning anything
-//! before it gets small enough to bisect. What grows with the depth is dropping the result. A
-//! cell holds its children, so releasing the last handle on a chain releases the next, and
-//! that is a recursion whose depth a peer picked. The existing depth test says the limit
-//! stands between a peer and a chain long enough that "walking it takes the stack with it";
-//! walking it does not, and this is the correction.
+//! Reading a bag is the only scenario that is flat. It costs the same at four links and at
+//! the limit, because the read loop carries its stack on the heap. Everything else walks a
+//! cell per frame and grows with the depth: releasing a tree does, because a cell holds its
+//! children and letting go of the last handle on a chain lets go of the next, and so do the
+//! per-reference walks `NET-ADR-012` already names, `render`, `prune_cell` and `graft`.
 //!
-//! Two things follow, and the second is why these are tests rather than a note. Neither
-//! figure is close to a default thread, which is 2 MiB in Rust and 8 MiB for a process's
-//! first one, so the margin at the limit is about five times in debug and twenty in
-//! release. And the failure has no soft form: a stack that runs out aborts, so none of
-//! `forbid(unsafe_code)`, the denied panicking helpers, or a `Result` reaches it. A budget
-//! that is enforced is the only kind worth stating.
+//! Three facts about the margin, which a reader should have before trusting the budgets. A
+//! default thread is 2 MiB in Rust and 8 MiB for a process's first. Against that the worst
+//! of these clears by six and a half times in release and by a fifth in debug, so a debug
+//! build at the limit is inside a default thread and not far inside it. An embedder that
+//! hands this crate a thread smaller than the default is outside everything measured here,
+//! and the dictionary walks would abort on one of half a megabyte in either profile. And
+//! the failure has no soft form: a stack that runs out aborts, so `forbid(unsafe_code)`,
+//! the denied panicking helpers and a `Result` are all out of the path.
 //!
-//! The budgets below are stated with room over the measurements rather than against them,
-//! so a frame that grows a little is not a failing test, while a cost that grew with the
-//! depth by a different factor is.
+//! The budgets are stated with room over the measurements rather than against them, so a
+//! frame that grows a little is not a failing test, while a cost that grew with the depth by
+//! a different factor is.
 
-use ton_net_cell::{AugDict, Augmentation, Builder, CellError, Dict, Slice, Traverse, MAX_BITS};
+use std::process::Command;
+
+use ton_net_cell::{
+    AugDict, Augmentation, Builder, CellError, Dict, Slice, Traverse, UsageTree, MAX_BITS,
+    MAX_DEPTH,
+};
 
 use crate::hostile::deep_chain;
 
-/// What a bag at the depth limit is allowed to cost, parsed and dropped.
+/// A chain at the depth limit, which `hostile.rs` asserts is a legal bag.
+const LINKS: usize = MAX_DEPTH;
+
+/// The deepest comb a peer can hand over: a fork spends at least one key bit, so a
+/// dictionary is never deeper than its key is wide.
+const FORKS: usize = MAX_BITS as usize;
+
+/// Every scenario, and the stack each is held to.
 ///
-/// Measured at 407 KiB in debug and 103 in release, against a quarter of a default thread.
-const BAG_BUDGET: usize = 768 << 10;
-
-/// What an augmented dictionary at its deepest is allowed to cost, validated or walked.
+/// Each budget is between one and two thirds and two times the debug figure above, which is
+/// room enough that a frame growing a little does not fail and tight enough that halving the
+/// budget does: each was checked to abort at half, which is what says the number holds
+/// something. Anything tighter would fail on a host whose pages are a different size rather
+/// than on a regression, since the measurement can only resolve to a page.
 ///
-/// Measured at 1673 KiB to validate and 1466 to walk, both in debug, where the same walks
-/// in release take 301 and 254. These recurse where the bag read does not, which is what
-/// puts them four times above the bag on the same fixture depth.
-const DICT_BUDGET: usize = 3 << 20;
+/// Reading a bag is the exception and cannot be graded that way. Its figure is the page
+/// floor rather than a cost, so halving it changes nothing;
+/// [`parsing_a_bag_costs_the_same_stack_at_any_depth`] is what holds that one, and it is
+/// graded by making its thread release the deep bag instead of handing it back.
+const SCENARIOS: &[(&str, usize)] = &[
+    ("parse", 32 << 10),
+    ("release", 768 << 10),
+    ("dump", 576 << 10),
+    ("prove", 1536 << 10),
+    ("validate", 3 << 20),
+    ("traverse", 2560 << 10),
+    ("forks", 2 << 20),
+];
 
-/// Runs `body` on a thread of `stack` bytes and waits for it.
-///
-/// A thread that runs out of stack aborts the process rather than unwinding, so a failure
-/// here is a killed test binary and not a failed assertion. That is the honest shape of the
-/// thing being measured, and the panic message names which walk was running.
-fn on_a_stack_of(stack: usize, body: impl FnOnce() + Send + 'static) {
-    std::thread::Builder::new()
-        .stack_size(stack)
-        .spawn(body)
-        .expect("the thread starts")
-        .join()
-        .expect("the walk came back");
-}
-
-#[test]
-fn a_bag_at_the_depth_limit_is_parsed_and_released_inside_its_budget() {
-    // Both halves on the small thread, because the cost being held is the whole of what a
-    // caller pays for a bag it was handed: reading it, and letting go of it.
-    let bag = deep_chain(1023);
-    on_a_stack_of(BAG_BUDGET, move || {
-        let roots = ton_net_cell::parse_boc(&bag).expect("a bag at the limit parses");
-        assert_eq!(roots.len(), 1, "one root");
-        // The chain is asserted to be the depth it is named for, on the thread that pays for
-        // it, because a bag that came out shallow would cost nothing to release and this
-        // budget would hold nothing.
-        let root = roots.first().expect("the one root");
-        assert_eq!(root.depth(), 1023, "the chain is at the limit");
-        drop(roots);
-    });
-}
-
-#[test]
-fn parsing_a_bag_costs_the_same_stack_at_any_depth() {
-    // The half that does not grow, held separately so that a read which started carrying its
-    // stack on the stack would fail here rather than hide inside the budget above. The
-    // shallow bag and the deep one run on the same thread, and it is one the deep one cannot
-    // be released on: releasing it wants about four hundred KiB and this is thirty-two.
-    //
-    // Thirty-two rather than something smaller because a smaller request buys nothing. A
-    // platform has a minimum thread stack and rounds up to it, so this test still passed with
-    // four KiB written here, which is how the figure was arrived at rather than assumed. What
-    // it holds is the shape and not a tight bound: a read that took even thirty bytes a level
-    // would want more than this at the depth limit.
-    const FLAT: usize = 32 << 10;
-    for links in [4usize, 1023] {
-        let bag = deep_chain(links);
-        on_a_stack_of(FLAT, move || {
-            let roots = ton_net_cell::parse_boc(&bag).expect("the bag parses");
-            #[allow(clippy::cast_possible_truncation)]
-            let want = links as u16;
-            let root = roots.first().expect("the one root");
-            assert_eq!(root.depth(), want, "the chain is {links} deep");
-            // Released out on the caller's stack instead, which is the whole point of the
-            // split: this thread pays for the read and nothing else.
-            std::mem::forget(roots);
-        });
-    }
-}
-
-/// The summary an augmented dictionary carries here, and the smallest one that makes the
-/// fork rebuild in `validate` do real work.
+/// The summary the augmented fixture carries. Sixty-four bits, so a fork's rebuilt summary
+/// is wider than the label beside it and the combine is not free.
 #[derive(Debug, Clone)]
 struct Sum;
 
@@ -133,14 +105,11 @@ impl Augmentation for Sum {
     }
 }
 
-/// A comb of `depth` forks: key `i` carries its one set bit at position `i`, so every fork
+/// A comb of `FORKS` forks: key `i` carries its one set bit at position `i`, so every fork
 /// splits a single leaf off and the tree is as deep as it has entries.
-///
-/// A dictionary cannot be deeper than its key is wide, because a fork spends at least one
-/// bit, so `MAX_BITS` forks is the deepest a peer can hand over at all.
-fn comb_keys(depth: usize) -> Vec<[u8; 128]> {
-    let mut keys = Vec::with_capacity(depth + 1);
-    for i in 0..depth {
+fn comb_keys() -> Vec<[u8; 128]> {
+    let mut keys = Vec::with_capacity(FORKS + 1);
+    for i in 0..FORKS {
         let mut key = [0u8; 128];
         key[i / 8] |= 1 << (7 - (i % 8));
         keys.push(key);
@@ -155,56 +124,234 @@ fn a_value() -> Builder {
     value
 }
 
-#[test]
-fn the_deepest_dictionary_a_peer_can_send_is_walked_inside_its_budget() {
-    // A tree one fork short of the widest key, which is the deepest shape there is: each of
-    // these walks descends by recursion, so what is held here is that the recursion at the
-    // format's own limit stays inside a stated stack rather than inside whatever the host
-    // happened to give the thread.
-    let depth = usize::from(MAX_BITS) - 1;
-    let keys = comb_keys(depth);
-
-    let plain = {
-        let value = a_value();
-        Dict::from_items(MAX_BITS, keys.iter().map(|key| (*key, &value))).expect("the comb builds")
-    };
-    let walked = plain.iter().count();
-    assert_eq!(walked, keys.len(), "the walk reached every key");
-
+/// The augmented comb, asserted to be the depth it is named for.
+///
+/// A fixture that came out shallow would clear every budget here having held nothing, so it
+/// is checked before anything is measured on it.
+fn deep_aug() -> AugDict<Sum> {
+    let keys = comb_keys();
     let aug = AugDict::from_items(
         Sum,
         MAX_BITS,
         keys.iter().map(|key| (*key, 1u64, a_value())),
     )
     .expect("the augmented comb builds");
-
-    // The fixture is asserted to be the shape it is named for before anything is measured on
-    // it. A comb that came out balanced would be about ten forks deep rather than a thousand,
-    // every walk below would fit any stack, and all of this would pass having held nothing.
-    #[allow(clippy::cast_possible_truncation)]
-    let want = depth as u16;
     let root = aug.root().expect("the tree has a root");
     assert_eq!(
         root.depth(),
-        want,
-        "the comb is {} forks deep, not {want}",
+        MAX_BITS,
+        "the comb is {} forks deep, not {MAX_BITS}",
         root.depth()
     );
+    aug
+}
 
-    let validating = aug.clone();
-    on_a_stack_of(DICT_BUDGET, move || {
-        validating.validate().expect("the deepest tree validates");
-    });
+/// A chain at the limit, asserted to be that deep.
+fn deep_bag() -> Vec<u8> {
+    let bag = deep_chain(LINKS);
+    let roots = ton_net_cell::parse_boc(&bag).expect("a bag at the limit parses");
+    let root = roots.first().expect("the one root");
+    #[allow(clippy::cast_possible_truncation)]
+    let want = LINKS as u16;
+    assert_eq!(root.depth(), want, "the chain is at the limit");
+    bag
+}
 
-    let walking = aug.clone();
-    on_a_stack_of(DICT_BUDGET, move || {
-        let mut seen = 0usize;
-        walking
-            .traverse_extra(|_| {
+/// Builds what `scenario` needs, then runs it on a stack of `stack` bytes.
+///
+/// A fixture is built out here and moved in, never built inside. Building one parses a bag
+/// and releases it, which is one of the scenarios, and doing that on the measured thread
+/// would put the deepest cost in this file underneath every other reading.
+fn spawn(scenario: &str, stack: usize) {
+    let name = scenario.to_owned();
+    match scenario {
+        "parse" | "release" | "dump" | "prove" => {
+            let bag = deep_bag();
+            on_a_stack_of(scenario, stack, move || run_over_a_bag(&name, &bag));
+        }
+        "validate" | "traverse" | "forks" => {
+            let aug = deep_aug();
+            on_a_stack_of(scenario, stack, move || run_over_a_dictionary(&name, &aug));
+        }
+        "plain" => {
+            let keys = comb_keys();
+            let value = a_value();
+            let dict = Dict::from_items(MAX_BITS, keys.iter().map(|key| (*key, &value)))
+                .expect("the comb builds");
+            on_a_stack_of(scenario, stack, move || {
+                assert_eq!(
+                    dict.iter().count(),
+                    keys.len(),
+                    "the walk reached every key"
+                );
+                std::mem::forget(dict);
+            });
+        }
+        other => panic!("unknown scenario {other}"),
+    }
+}
+
+/// The scenarios over a chain at the depth limit.
+///
+/// What is not being measured is leaked rather than dropped, because releasing a deep tree
+/// is itself one of the scenarios and would otherwise be added to all the others.
+fn run_over_a_bag(scenario: &str, bag: &[u8]) {
+    match scenario {
+        "parse" => {
+            let roots = ton_net_cell::parse_boc(bag).expect("parses");
+            std::mem::forget(roots);
+        }
+        "release" => {
+            let roots = ton_net_cell::parse_boc(bag).expect("parses");
+            drop(roots);
+        }
+        "dump" => {
+            let roots = ton_net_cell::parse_boc(bag).expect("parses");
+            let rendered = roots.first().expect("the one root").dump();
+            assert!(!rendered.is_empty(), "the render produced something");
+            std::mem::forget(roots);
+        }
+        "prove" => {
+            let roots = ton_net_cell::parse_boc(bag).expect("parses");
+            let root = roots.first().expect("the one root").clone();
+            let mut usage = UsageTree::new(root.clone());
+            let mut at = root.clone();
+            loop {
+                usage.mark(&at);
+                let Some(next) = at.reference(0).cloned() else {
+                    break;
+                };
+                at = next;
+            }
+            let proof = usage.prove().expect("the chain proves");
+            assert_eq!(proof.depth(), root.depth() + 1, "a proof stands one above");
+            std::mem::forget((roots, usage, proof, at, root));
+        }
+        other => panic!("{other} is not a scenario over a bag"),
+    }
+}
+
+/// The scenarios over the deepest dictionary a peer can send.
+fn run_over_a_dictionary(scenario: &str, aug: &AugDict<Sum>) {
+    match scenario {
+        "validate" => aug.validate().expect("the deepest tree validates"),
+        "traverse" => {
+            let mut seen = 0usize;
+            aug.traverse_extra(|_| {
                 seen += 1;
                 Traverse::Continue
             })
             .expect("the deepest tree is walked");
-        assert!(seen > 0, "the walk visited something");
-    });
+            // A fork for each of them and a leaf for each key, which is what a comb is.
+            assert_eq!(seen, 2 * FORKS + 1, "the walk visited every node");
+        }
+        "forks" => {
+            let forks = aug.fork_extras().expect("the summaries come back");
+            assert_eq!(forks.len(), FORKS, "one summary for each fork");
+        }
+        other => panic!("{other} is not a scenario over a dictionary"),
+    }
+}
+
+/// Runs `body` on a thread of `stack` bytes, named so an abort says which one died.
+fn on_a_stack_of(name: &str, stack: usize, body: impl FnOnce() + Send + 'static) {
+    std::thread::Builder::new()
+        .name(name.to_owned())
+        .stack_size(stack)
+        .spawn(body)
+        .expect("the thread starts")
+        .join()
+        .expect("the walk came back");
+}
+
+/// The gate, and the child half of [`measure`].
+///
+/// A stack that runs out aborts rather than unwinding, so a scenario cannot be bisected
+/// inside the process running it. This test is the one process per attempt: with
+/// `TON_NET_STACK_SCENARIO` set it runs that scenario on the stack `TON_NET_STACK_KIB` asks
+/// for, and its exit status is the answer. With neither set it runs every scenario on its
+/// budget, which is what the gate does.
+#[test]
+fn every_walk_stays_inside_its_stack_budget() {
+    if let Ok(scenario) = std::env::var("TON_NET_STACK_SCENARIO") {
+        let kib: usize = std::env::var("TON_NET_STACK_KIB")
+            .expect("a stack to try")
+            .parse()
+            .expect("a number of KiB");
+        spawn(&scenario, kib << 10);
+        return;
+    }
+
+    for (scenario, budget) in SCENARIOS {
+        spawn(scenario, *budget);
+    }
+}
+
+/// The plain dictionary's walk, held apart because it is the one that does not recurse.
+///
+/// It runs on the stack the flat bag read is held to, over a tree the recursive walks above
+/// want fifty times that for, which is the whole difference between an explicit stack and
+/// the machine's.
+#[test]
+fn the_iterative_dictionary_walk_is_flat_in_depth() {
+    spawn("plain", 32 << 10);
+}
+
+/// Reading a bag costs the same stack at four links and at the limit.
+///
+/// Held apart from releasing it so that a read which started carrying its stack on the stack
+/// fails here rather than hiding inside the larger budget. The floor is what the platform
+/// hands out rather than what is asked for, so what this holds is the shape: a read taking
+/// even thirty-three bytes a level would want more than this at the limit.
+#[test]
+fn parsing_a_bag_costs_the_same_stack_at_any_depth() {
+    for links in [4usize, LINKS] {
+        let bag = deep_chain(links);
+        on_a_stack_of("parse", 32 << 10, move || {
+            let roots = ton_net_cell::parse_boc(&bag).expect("the bag parses");
+            #[allow(clippy::cast_possible_truncation)]
+            let want = links as u16;
+            let root = roots.first().expect("the one root");
+            assert_eq!(root.depth(), want, "the chain is {links} deep");
+            std::mem::forget(roots);
+        });
+    }
+}
+
+/// Bisects the stack each scenario comes back on and prints the table.
+///
+/// Ignored by default because it spawns on the order of a hundred processes. It is the
+/// source of every figure in this file: a number in a comment that nobody can rerun is a
+/// number that goes stale without failing anything.
+#[test]
+#[ignore = "a measuring harness, run by hand when a figure needs retaking"]
+fn measure() {
+    /// A stack is handed out in whole pages, so the search steps in them and the answer is
+    /// reported as one. A host whose pages are smaller reports a finer figure for the same
+    /// code, which is why a budget here is never set within a page of its measurement.
+    const PAGE: usize = 16;
+
+    let exe = std::env::current_exe().expect("this test binary");
+    println!("| scenario | smallest stack it came back on |");
+    println!("|---|---:|");
+    for (scenario, _) in SCENARIOS {
+        let (mut low, mut high) = (PAGE, 4 << 10);
+        while high - low > PAGE {
+            let mid = low.midpoint(high) / PAGE * PAGE;
+            let ok = Command::new(&exe)
+                .args(["--exact", "stack::every_walk_stays_inside_its_stack_budget"])
+                .env("TON_NET_STACK_SCENARIO", scenario)
+                .env("TON_NET_STACK_KIB", mid.to_string())
+                .output()
+                .expect("the child runs")
+                .status
+                .success();
+            if ok {
+                high = mid;
+            } else {
+                low = mid;
+            }
+        }
+        println!("| {scenario} | {high} KiB |");
+    }
 }
