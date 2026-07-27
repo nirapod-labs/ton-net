@@ -72,9 +72,10 @@ const FORKS: usize = MAX_BITS as usize;
 /// prints so it is not arithmetic anyone has to redo. That is room enough that a frame
 /// growing a little does not fail and tight enough that halving the budget does: each was
 /// checked to abort at half in debug, which is what says the number holds something. A
-/// release build clears every budget by six times or better, so it is the debug figure each
-/// of these is set against. Anything tighter would fail on a host whose pages are a different
-/// size rather than on a regression, since the measurement can only resolve to a page.
+/// release build clears the same budgets by three times or better, so debug is the binding
+/// profile in every row and is what each of these is set against. Anything tighter would fail
+/// on a host whose pages are a different size rather than on a regression, since the
+/// measurement can only resolve to a page.
 ///
 /// Reading a bag is the exception and cannot be graded that way. Its figure is the page
 /// floor rather than a cost, so halving it changes nothing;
