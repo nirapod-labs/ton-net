@@ -151,18 +151,31 @@ impl Builder {
 
     /// Stores `value` as a two's-complement signed integer of `bits` bits.
     ///
+    /// A zero-width field holds only zero and writes nothing, which is what
+    /// [`store_uint`](Builder::store_uint) does with the same argument and what
+    /// [`load_int`](crate::Slice::load_int) reads back from no bits at all. The three used
+    /// to disagree: a zero width was a `TooWide` here and a written nothing there, so the
+    /// one length a variable-width encoding reaches for its zero was a failure on the
+    /// signed side alone.
+    ///
     /// # Errors
     ///
     /// As [`store_uint`](Builder::store_uint), with the range check taken over the signed
     /// range that `bits` bits can hold.
     pub fn store_int(&mut self, value: i64, bits: u32) -> Result<&mut Self, CellError> {
-        if bits == 0 || bits > i64::BITS {
+        if bits > i64::BITS {
             return Err(CellError::TooWide {
                 requested: bits,
                 width: i64::BITS,
             });
         }
-        if bits < i64::BITS {
+        if bits == 0 {
+            if value != 0 {
+                return Err(CellError::Malformed(
+                    "value does not fit the requested bits",
+                ));
+            }
+        } else if bits < i64::BITS {
             let limit = 1i64 << (bits - 1);
             if value >= limit || value < -limit {
                 return Err(CellError::Malformed(
@@ -178,6 +191,49 @@ impl Builder {
             self.store_bit((unsigned >> offset) & 1 == 1)?;
         }
         Ok(self)
+    }
+
+    // The four fixed-width stores below are the write side of the fixed-width loads on
+    // Slice. The width is the method rather than an argument, so the pair a field is
+    // written and read with cannot disagree about how wide it is.
+
+    /// Stores a `u8` in eight bits.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CellError::NoRoomForBits`] if the cell has no room.
+    pub fn store_u8(&mut self, value: u8) -> Result<&mut Self, CellError> {
+        self.store_uint(u64::from(value), 8)
+    }
+
+    /// Stores a `u16` in sixteen bits, most significant first.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CellError::NoRoomForBits`] if the cell has no room.
+    pub fn store_u16(&mut self, value: u16) -> Result<&mut Self, CellError> {
+        self.store_uint(u64::from(value), 16)
+    }
+
+    /// Stores a `u32` in thirty-two bits, most significant first.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CellError::NoRoomForBits`] if the cell has no room.
+    pub fn store_u32(&mut self, value: u32) -> Result<&mut Self, CellError> {
+        self.store_uint(u64::from(value), 32)
+    }
+
+    /// Stores an `i32` in thirty-two bits, most significant first.
+    ///
+    /// This is TL-B's `int32`, which a workchain id uses, and the bits are the ones
+    /// [`store_u32`](Builder::store_u32) writes; only the meaning of the top one differs.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CellError::NoRoomForBits`] if the cell has no room.
+    pub fn store_i32(&mut self, value: i32) -> Result<&mut Self, CellError> {
+        self.store_int(i64::from(value), 32)
     }
 
     /// Stores the low `bits` bits of a wide unsigned integer, most significant first.
@@ -201,6 +257,47 @@ impl Builder {
         self.room_for(bits as u16)?;
         for offset in (0..bits).rev() {
             self.store_bit((value >> offset) & 1 == 1)?;
+        }
+        Ok(self)
+    }
+
+    /// Stores `value` as a two's-complement signed integer of `bits` bits, over 128 bits
+    /// rather than 64.
+    ///
+    /// The signed twin of [`store_uint128`](Builder::store_uint128), and not reachable
+    /// through it: a negative value cast to `u128` sits above the field's range, which the
+    /// unsigned store refuses at any width below 128.
+    ///
+    /// # Errors
+    ///
+    /// As [`store_int`](Builder::store_int), over 128 bits rather than 64.
+    pub fn store_int128(&mut self, value: i128, bits: u32) -> Result<&mut Self, CellError> {
+        if bits > i128::BITS {
+            return Err(CellError::TooWide {
+                requested: bits,
+                width: i128::BITS,
+            });
+        }
+        if bits == 0 {
+            if value != 0 {
+                return Err(CellError::Malformed(
+                    "value does not fit the requested bits",
+                ));
+            }
+        } else if bits < i128::BITS {
+            let limit = 1i128 << (bits - 1);
+            if value >= limit || value < -limit {
+                return Err(CellError::Malformed(
+                    "value does not fit the requested bits",
+                ));
+            }
+        }
+        #[allow(clippy::cast_sign_loss)]
+        let unsigned = value as u128;
+        #[allow(clippy::cast_possible_truncation)]
+        self.room_for(bits as u16)?;
+        for offset in (0..bits).rev() {
+            self.store_bit((unsigned >> offset) & 1 == 1)?;
         }
         Ok(self)
     }
@@ -253,6 +350,40 @@ impl Builder {
         self.room_for((len_bits + bytes * 8) as u16)?;
         self.store_uint(u64::from(bytes), len_bits)?;
         self.store_uint128(value, bytes * 8)?;
+        Ok(self)
+    }
+
+    /// Stores a `VarInteger max`: a byte count, then that many bytes of two's-complement
+    /// value.
+    ///
+    /// The signed form of the same length-then-bytes shape TL-B gives `VarUInteger max`.
+    /// The count is the fewest bytes whose two's-complement form holds the value, so the
+    /// sign bit is part of what decides the length: 127 takes one byte and 128 takes two,
+    /// while -128 takes one and -129 takes two. Zero stores no bytes.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CellError::Malformed`] if `max` is below two or the value needs more
+    /// than `max - 1` bytes, and [`CellError::NoRoomForBits`] if it does not fit.
+    pub fn store_var_int(&mut self, value: i128, max: u32) -> Result<&mut Self, CellError> {
+        if max < 2 {
+            return Err(CellError::Malformed(
+                "variable integer needs a max above one",
+            ));
+        }
+        let len_bits = u32::BITS - (max - 1).leading_zeros();
+        let bytes = signed_byte_len(value);
+        if bytes >= max {
+            return Err(CellError::Malformed(
+                "value is too wide for this VarInteger",
+            ));
+        }
+        // Both halves are checked together, for the reason store_var_uint gives: a length
+        // written with nothing behind it reads back as a different number, not as an error.
+        #[allow(clippy::cast_possible_truncation)]
+        self.room_for((len_bits + bytes * 8) as u16)?;
+        self.store_uint(u64::from(bytes), len_bits)?;
+        self.store_int128(value, bytes * 8)?;
         Ok(self)
     }
 
@@ -315,6 +446,24 @@ impl Builder {
                 *last &= 0xffu8 << (8 - (bits % 8));
             }
         }
+        Ok(self)
+    }
+
+    /// Drops every reference past `refs`, leaving the data bits alone.
+    ///
+    /// The reference half of [`truncate_bits`](Builder::truncate_bits), and the only way
+    /// to un-store a reference. A caller undoing a speculative write could put the bits
+    /// back and not the children, which left a builder that had spent room it could not
+    /// recover.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CellError::NotEnoughRefs`] if the builder holds fewer than `refs`.
+    pub fn truncate_refs(&mut self, refs: usize) -> Result<&mut Self, CellError> {
+        if refs > self.refs.as_slice().len() {
+            return Err(CellError::NotEnoughRefs);
+        }
+        self.refs.truncate(refs);
         Ok(self)
     }
 
@@ -478,6 +627,26 @@ impl Builder {
             level_mask,
         )
     }
+}
+
+/// The fewest whole bytes whose two's-complement form holds `value`; zero needs none.
+///
+/// The sign bit is counted, which is what separates this from the unsigned measurement in
+/// [`Builder::store_var_uint`]: 128 needs a ninth bit to keep it positive and so takes two
+/// bytes, while -128 fills its eighth bit as the sign and takes one.
+fn signed_byte_len(value: i128) -> u32 {
+    if value == 0 {
+        return 0;
+    }
+    // A negative's magnitude is measured on its complement, since leading_zeros counts the
+    // bit pattern and every negative starts with a one. `!value` is `-value - 1`, which is
+    // exactly the width -2^k needs: k bits of magnitude and one of sign.
+    let magnitude_bits = if value < 0 {
+        i128::BITS - (!value).leading_zeros()
+    } else {
+        i128::BITS - value.leading_zeros()
+    };
+    (magnitude_bits + 1).div_ceil(8)
 }
 
 #[cfg(test)]
@@ -684,6 +853,270 @@ mod tests {
             before,
             "a failed store must leave nothing behind"
         );
+    }
+
+    /// A cell of one distinguishable byte, for telling references apart by their contents.
+    fn leaf(byte: u64) -> Cell {
+        let mut b = Builder::new();
+        b.store_uint(byte, 8).expect("a byte fits");
+        b.build().expect("builds")
+    }
+
+    #[test]
+    fn a_zero_width_integer_field_holds_only_zero_signed_or_not() {
+        // The three used to disagree: store_uint wrote nothing, load_int read zero, and
+        // store_int refused the width outright, so the one length a variable-width
+        // encoding reaches for its zero failed on the signed side alone.
+        let mut b = Builder::new();
+        b.store_uint(0, 0).unwrap();
+        b.store_int(0, 0).unwrap();
+        b.store_int128(0, 0).unwrap();
+        assert_eq!(b.bits_used(), 0, "a zero-width field writes nothing");
+        let cell = roundtrip(b);
+        assert_eq!(cell.bit_len(), 0);
+        assert_eq!(cell.parse().load_uint(0).unwrap(), 0);
+        assert_eq!(cell.parse().load_int(0).unwrap(), 0);
+        assert_eq!(cell.parse().load_int128(0).unwrap(), 0);
+
+        // No bits hold no value but zero, and that is the same refusal on either side.
+        let mut b = Builder::new();
+        assert!(matches!(b.store_uint(1, 0), Err(CellError::Malformed(_))));
+        assert!(matches!(b.store_int(1, 0), Err(CellError::Malformed(_))));
+        assert!(matches!(b.store_int(-1, 0), Err(CellError::Malformed(_))));
+        assert!(matches!(b.store_int128(1, 0), Err(CellError::Malformed(_))));
+        assert_eq!(b.bits_used(), 0);
+    }
+
+    #[test]
+    fn the_fixed_width_stores_write_what_the_matching_loads_read() {
+        let mut b = Builder::new();
+        b.store_u8(0x89).unwrap();
+        b.store_u16(0xabcd).unwrap();
+        b.store_u32(0xdead_beef).unwrap();
+        b.store_i32(-1_985_229_329).unwrap();
+        assert_eq!(b.bits_used(), 8 + 16 + 32 + 32);
+        let cell = roundtrip(b);
+        let mut s = cell.parse();
+        assert_eq!(s.load_u8().unwrap(), 0x89);
+        assert_eq!(s.load_u16().unwrap(), 0xabcd);
+        assert_eq!(s.load_u32().unwrap(), 0xdead_beef);
+        assert_eq!(s.load_i32().unwrap(), -1_985_229_329);
+        assert!(s.is_empty());
+
+        // The signed one carries the ends of its type, which is where a width taken as
+        // unsigned would refuse the value.
+        for value in [i32::MIN, -1, 0, i32::MAX] {
+            let mut b = Builder::new();
+            b.store_i32(value).unwrap();
+            assert_eq!(roundtrip(b).parse().load_i32().unwrap(), value, "{value}");
+        }
+    }
+
+    #[test]
+    fn wide_signed_values_round_trip_at_their_bounds() {
+        for (value, bits) in [
+            (0i128, 8u32),
+            (-1, 8),
+            (-128, 8),
+            (127, 8),
+            (-1, 128),
+            (i128::MIN, 128),
+            (i128::MAX, 128),
+            (1 << 100, 102),
+            (-(1i128 << 100), 101),
+        ] {
+            let mut b = Builder::new();
+            b.store_int128(value, bits).unwrap();
+            assert_eq!(
+                roundtrip(b).parse().load_int128(bits).unwrap(),
+                value,
+                "{value} in {bits}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_wide_signed_value_outside_its_range_is_refused() {
+        let mut b = Builder::new();
+        assert!(b.store_int128(128, 8).is_err());
+        assert!(b.store_int128(-129, 8).is_err());
+        assert_eq!(b.bits_used(), 0, "a refused store writes nothing");
+        b.store_int128(-128, 8).unwrap();
+        assert!(matches!(
+            b.store_int128(0, 129),
+            Err(CellError::TooWide { width: 128, .. })
+        ));
+    }
+
+    #[test]
+    fn a_signed_var_int_takes_the_fewest_bytes_the_sign_allows() {
+        // The sign bit is part of the length, so the two edges do not sit at the same
+        // magnitude: 127 fits one byte where 128 does not, and -128 fits one where -129
+        // does not. A byte more would read back as the same number with a different hash.
+        for (value, bits) in [
+            (0i128, 4u16),
+            (1, 12),
+            (127, 12),
+            (128, 20),
+            (-1, 12),
+            (-128, 12),
+            (-129, 20),
+        ] {
+            let mut b = Builder::new();
+            b.store_var_int(value, 16).unwrap();
+            assert_eq!(b.bits_used(), bits, "{value}");
+            assert_eq!(
+                roundtrip(b).parse().load_var_int(16).unwrap(),
+                value,
+                "{value}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_signed_var_int_round_trips_across_widths() {
+        // max 17 leaves room for sixteen bytes, which is what the ends of the type need.
+        for value in [
+            i128::MIN,
+            i128::MAX,
+            -(1i128 << 100),
+            1 << 100,
+            0,
+            -1,
+            255,
+            -256,
+        ] {
+            let mut b = Builder::new();
+            b.store_var_int(value, 17).unwrap();
+            assert_eq!(
+                roundtrip(b).parse().load_var_int(17).unwrap(),
+                value,
+                "{value}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_signed_var_int_too_wide_for_its_max_is_refused_and_stores_nothing() {
+        // A VarInteger 16 carries fifteen bytes at most, and the ends of the type need
+        // sixteen.
+        let mut b = Builder::new();
+        assert!(matches!(
+            b.store_var_int(i128::MIN, 16),
+            Err(CellError::Malformed(_))
+        ));
+        assert!(matches!(
+            b.store_var_int(i128::MAX, 16),
+            Err(CellError::Malformed(_))
+        ));
+        assert_eq!(b.bits_used(), 0);
+        assert!(matches!(
+            b.store_var_int(0, 1),
+            Err(CellError::Malformed(_))
+        ));
+
+        // A max whose length field is wider than its own byte limit is where the two
+        // refusals part. A VarInteger 3 carries two bytes, and its two-bit length field
+        // has a spare code for a third, so without the width check a three-byte value
+        // writes a length no reader of that type would accept.
+        let mut b = Builder::new();
+        assert!(matches!(
+            b.store_var_int(100_000, 3),
+            Err(CellError::Malformed(_))
+        ));
+        assert_eq!(b.bits_used(), 0);
+        b.store_var_int(-32_768, 3).unwrap();
+        assert_eq!(b.bits_used(), 2 + 16, "two bytes are what it does carry");
+    }
+
+    #[test]
+    fn a_signed_var_int_that_cannot_fit_stores_nothing() {
+        // Room for the four-bit length but not the byte behind it.
+        let mut b = Builder::new();
+        b.store_same_bit(false, MAX_BITS - 6).unwrap();
+        let before = b.bits_used();
+        assert!(b.store_var_int(-1, 16).is_err());
+        assert_eq!(
+            b.bits_used(),
+            before,
+            "a failed store must leave nothing behind"
+        );
+    }
+
+    #[test]
+    fn a_builder_counts_the_references_it_holds() {
+        let mut b = Builder::new();
+        assert_eq!(b.refs_used(), 0);
+        for expected in 1..=MAX_REFS {
+            b.store_ref(leaf(0x11)).unwrap();
+            assert_eq!(b.refs_used(), expected);
+            assert_eq!(b.refs_left(), MAX_REFS - expected);
+        }
+    }
+
+    #[test]
+    fn truncating_references_gives_the_room_back_and_keeps_the_earlier_ones() {
+        let mut b = Builder::new();
+        b.store_uint(0xab, 8).unwrap();
+        for byte in [0xa1, 0xb2, 0xc3, 0xd4] {
+            b.store_ref(leaf(byte)).unwrap();
+        }
+        assert!(b.store_ref(leaf(0xe5)).is_err(), "the cell is full");
+
+        b.truncate_refs(2).unwrap();
+        assert_eq!(b.refs_used(), 2);
+        assert_eq!(b.refs_left(), MAX_REFS - 2);
+        assert_eq!(b.bits_used(), 8, "the data bits are left alone");
+
+        // The room is real: the store that just failed now succeeds.
+        b.store_ref(leaf(0xe5)).unwrap();
+        let cell = roundtrip(b);
+        let kept: Vec<u64> = cell
+            .refs()
+            .iter()
+            .map(|child| child.parse().load_uint(8).unwrap())
+            .collect();
+        assert_eq!(
+            kept,
+            vec![0xa1, 0xb2, 0xe5],
+            "the first two, then the new one"
+        );
+    }
+
+    #[test]
+    fn truncating_to_more_references_than_are_held_is_refused_and_changes_nothing() {
+        let mut b = Builder::new();
+        b.store_ref(leaf(0xa1)).unwrap();
+        b.store_ref(leaf(0xb2)).unwrap();
+        assert!(matches!(b.truncate_refs(3), Err(CellError::NotEnoughRefs)));
+        assert_eq!(b.refs_used(), 2);
+        // Truncating to what is already there is a no-op rather than an error, which is
+        // what makes it safe to call with a count a caller recorded earlier.
+        b.truncate_refs(2).unwrap();
+        assert_eq!(b.refs_used(), 2);
+    }
+
+    #[test]
+    fn a_run_of_bits_reads_back_as_the_bools_that_went_in() {
+        let written = [true, false, true, true, false, false, false, true, true];
+        let mut b = Builder::new();
+        b.store_bits(&written).unwrap();
+        assert_eq!(b.bits_used(), 9);
+        let cell = roundtrip(b);
+        assert_eq!(cell.bit_len(), 9);
+        assert_eq!(cell.parse().load_bits(9).unwrap(), written);
+    }
+
+    #[test]
+    fn a_run_of_bits_that_does_not_fit_stores_none_of_them() {
+        let mut b = Builder::new();
+        b.store_same_bit(false, MAX_BITS - 2).unwrap();
+        let before = b.bits_used();
+        assert!(matches!(
+            b.store_bits(&[true, true, true]),
+            Err(CellError::NoRoomForBits { .. })
+        ));
+        assert_eq!(b.bits_used(), before, "a partial run is not a shorter cell");
     }
 
     #[test]
