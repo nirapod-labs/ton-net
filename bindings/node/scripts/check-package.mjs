@@ -45,8 +45,13 @@ try {
   console.error(raw.slice(0, 400));
   process.exit(1);
 }
-const entry = Array.isArray(parsed) ? parsed[0] : parsed;
-if (!entry || !Array.isArray(entry.files)) {
+// Three shapes have been seen for one tarball. An array of one, a bare object, and an
+// object keyed by package name, which is what the npm the release job installs returns:
+//   {"ton-net":{"id":"ton-net@0.4.1", ... ,"files":[ ... ]}}
+// Rather than track which npm answers which way, the file list is looked for.
+const candidates = Array.isArray(parsed) ? parsed : [parsed, ...Object.values(parsed ?? {})];
+const entry = candidates.find((item) => item && Array.isArray(item.files));
+if (!entry) {
   console.error("npm pack --json returned no file list for the main package");
   console.error(JSON.stringify(parsed).slice(0, 400));
   process.exit(1);
