@@ -248,8 +248,9 @@ liteserver accepted in the feasibility spike (`crates/ton-net-adnl/tests/vectors
 `ton_net::VERIFY_EPOCH` records which build's accept-and-reject boundary is in force, and a
 constant alone cannot keep that promise, because nothing stops an edit from changing what
 verifies while the number stays put (NET-ADR-008). So the boundary is pinned as a
-transcript: one captured masterchain read and ten edits chosen to sit on the decision
-boundary are each run through the public facade and their verdicts recorded, and the whole
+transcript: one captured masterchain read, ten edits chosen to sit on the decision
+boundary, and one legal re-encoding of the read are each run through the public facade and
+their verdicts recorded, and the whole
 transcript is compared against the text the test carries
 (`crates/ton-net/tests/epoch.rs`). A change to what the engine accepts fails the test, which
 is the moment to decide whether the epoch moves and to record in the changelog what is now

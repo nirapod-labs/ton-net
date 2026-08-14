@@ -151,6 +151,59 @@ if (fixed.length > 0) {
   }
 }
 
+// The verification epoch is a second number with the same problem, and it is worse
+// placed to be wrong. The transcript in `crates/ton-net/tests/epoch.rs` pins the number
+// against what the verifier accepts, so behaviour and the constant cannot come apart.
+// Nothing pins it against the prose, and the prose is where a consumer reads it: the
+// crates.io front page states it, and it is the one number that decides whether a cached
+// proven result needs checking again. It has already shipped stale once.
+//
+// So: read the constant, then refuse any living document that states a different literal
+// beside the name. Documents that record a decision as it was made are left alone, since
+// an ADR is a record rather than a description of today.
+const epochSource = join(root, "crates/ton-net/src/lib.rs");
+const epochMatch = readFileSync(epochSource, "utf8").match(
+  /pub const VERIFY_EPOCH: u32 = (\d+);/,
+);
+if (!epochMatch) {
+  console.error("no VERIFY_EPOCH declaration in crates/ton-net/src/lib.rs");
+  process.exit(1);
+}
+const epoch = epochMatch[1];
+
+// Every tracked document, rather than a list somebody has to remember to extend: a list
+// goes stale the first time a document is added, and a document nobody added to it is
+// exactly the one that would state the number and never be checked. Decision records are
+// skipped because they record a value as it was when the decision was taken, which is
+// history and not a description of this build.
+const epochProse = execFileSync("git", ["ls-files", "*.md"], {
+  cwd: root,
+  encoding: "utf8",
+})
+  .split("\n")
+  .filter((rel) => rel.length > 0 && !rel.startsWith("docs/adr/"));
+
+const staleEpoch = [];
+for (const rel of epochProse) {
+  const path = join(root, rel);
+  if (!existsSync(path)) {
+    continue;
+  }
+  const lines = readFileSync(path, "utf8").split("\n");
+  lines.forEach((line, index) => {
+    if (!line.includes("VERIFY_EPOCH")) {
+      return;
+    }
+    // A literal stated as the current value, in the shapes the corpus actually writes:
+    // "1 today", "is 1", "= 1".
+    const stated = line.match(/(?:\b(\d+) today\b|\bis (\d+)\b|=\s*(\d+)\b)/);
+    const found = stated && (stated[1] ?? stated[2] ?? stated[3]);
+    if (found && found !== epoch) {
+      staleEpoch.push(`${rel}:${index + 1} says ${found}, the crate ships ${epoch}`);
+    }
+  });
+}
+
 if (drift.length > 0) {
   console.error(`the published artifacts disagree on the version (crates say ${version}):`);
   for (const line of drift) {
@@ -160,6 +213,17 @@ if (drift.length > 0) {
   process.exit(1);
 }
 
+if (staleEpoch.length > 0) {
+  console.error(`the verification epoch is stated stale (the crate ships ${epoch}):`);
+  for (const line of staleEpoch) {
+    console.error(`  - ${line}`);
+  }
+  console.error(
+    "the constant is the source of truth; a document that states a number states this one",
+  );
+  process.exit(1);
+}
+
 console.error(
-  `one version across ${crates.length} crate(s) and ${nodeManifests.length} npm package(s): ${version}`,
+  `one version across ${crates.length} crate(s) and ${nodeManifests.length} npm package(s): ${version}, verification epoch ${epoch}`,
 );

@@ -32,7 +32,7 @@ ecosystem this ships to, so a consumer pins to a minor and upgrades on purpose. 
 milestone numbers below are the build order; the published version stays on the 0.x
 line until the freeze at 1.0.0.
 
-One number runs beside the version. `VERIFY_EPOCH`, 1 today, rises only when the set
+One number runs beside the version. `VERIFY_EPOCH`, 2 today, rises only when the set
 of things the library accepts as proven changes. A caller that stored the epoch a
 result was verified under re-checks when the current value is higher. Each rise is
 recorded in [the changelog] as the delta in what is now accepted and what is now
