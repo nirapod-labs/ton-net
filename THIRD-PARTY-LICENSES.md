@@ -2182,13 +2182,13 @@ Apache License
 
 ## Apache License 2.0 — ton-net-node, ton-net, ton-net-adnl, ton-net-block, ton-net-cell, ton-net-lite, ton-net-tl, itoa, libc, pin-project-lite, proc-macro2, quote, rustc-hash, semver, serde, serde_core, serde_derive, serde_json, syn, syn, thiserror-impl, thiserror, unicode-ident
 
-- **ton-net-node 0.4.0** — <https://github.com/nirapod-labs/ton-net>
-- **ton-net 0.4.0** — <https://github.com/nirapod-labs/ton-net>
-- **ton-net-adnl 0.4.0** — <https://github.com/nirapod-labs/ton-net>
-- **ton-net-block 0.4.0** — <https://github.com/nirapod-labs/ton-net>
-- **ton-net-cell 0.4.0** — <https://github.com/nirapod-labs/ton-net>
-- **ton-net-lite 0.4.0** — <https://github.com/nirapod-labs/ton-net>
-- **ton-net-tl 0.4.0** — <https://github.com/nirapod-labs/ton-net>
+- **ton-net-node 0.4.1** — <https://github.com/nirapod-labs/ton-net>
+- **ton-net 0.4.1** — <https://github.com/nirapod-labs/ton-net>
+- **ton-net-adnl 0.4.1** — <https://github.com/nirapod-labs/ton-net>
+- **ton-net-block 0.4.1** — <https://github.com/nirapod-labs/ton-net>
+- **ton-net-cell 0.4.1** — <https://github.com/nirapod-labs/ton-net>
+- **ton-net-lite 0.4.1** — <https://github.com/nirapod-labs/ton-net>
+- **ton-net-tl 0.4.1** — <https://github.com/nirapod-labs/ton-net>
 - **itoa 1.0.18** — <https://github.com/dtolnay/itoa>
 - **libc 0.2.186** — <https://github.com/rust-lang/libc>
 - **pin-project-lite 0.2.17** — <https://github.com/taiki-e/pin-project-lite>

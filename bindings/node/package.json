@@ -1,6 +1,6 @@
 {
   "name": "ton-net",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "A direct TON network client: ADNL over TCP, liteserver reads, and Merkle-proof verification, with no HTTP indexer in the path.",
   "keywords": [
     "ton",
@@ -42,13 +42,13 @@
     "node": ">= 18.17.0"
   },
   "optionalDependencies": {
-    "@nirapod-labs/ton-net-darwin-arm64": "0.4.0",
-    "@nirapod-labs/ton-net-darwin-x64": "0.4.0",
-    "@nirapod-labs/ton-net-linux-arm64-gnu": "0.4.0",
-    "@nirapod-labs/ton-net-linux-arm64-musl": "0.4.0",
-    "@nirapod-labs/ton-net-linux-x64-gnu": "0.4.0",
-    "@nirapod-labs/ton-net-linux-x64-musl": "0.4.0",
-    "@nirapod-labs/ton-net-win32-x64-msvc": "0.4.0"
+    "@nirapod-labs/ton-net-darwin-arm64": "0.4.1",
+    "@nirapod-labs/ton-net-darwin-x64": "0.4.1",
+    "@nirapod-labs/ton-net-linux-arm64-gnu": "0.4.1",
+    "@nirapod-labs/ton-net-linux-arm64-musl": "0.4.1",
+    "@nirapod-labs/ton-net-linux-x64-gnu": "0.4.1",
+    "@nirapod-labs/ton-net-linux-x64-musl": "0.4.1",
+    "@nirapod-labs/ton-net-win32-x64-msvc": "0.4.1"
   },
   "napi": {
     "binaryName": "ton-net",

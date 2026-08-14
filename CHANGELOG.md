@@ -13,7 +13,35 @@ never published.
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-08-14
+
+The 0.4.0 release the publish workflow could not finish. Its crates reached
+crates.io and its npm packages did not, so `0.4.0` exists on one registry and
+not the other and is superseded here. Take this one; the library is the same.
+
+Three faults in the publish path, each of which had been there before 0.4.0 and
+none of which a release had ever reached far enough to hit. The npm job installed
+with `npm ci`, which cannot succeed at a step that runs before the per-platform
+packages are published, because the lock cannot name a version the registry does
+not have. The publish check read `npm pack --json` by index and crashed with a
+TypeError on the npm that job installs, naming a property instead of what npm had
+returned. And a tag push was the only trigger, so a job failing after crates were
+out left the release half published with no way to finish it.
+
+The npm job now runs before the crates job. crates.io yanks but never deletes
+while npm admits an unpublish for a time, so the irreversible commitment is made
+last, and a failure anywhere else costs no version.
+
+### Changed
+
+- `just default-deps` and the generated Node loader are named in
+  `docs/release-process.md` as things a version bump touches. The loader carries
+  the version in the check it makes against each per-platform binding and no tool
+  stamps it, which a bump discovered by shipping the version before.
+
 ## [0.4.0] - 2026-08-14
+
+Published to crates.io only; see 0.4.1.
 
 The cell engine at full capability: builders and slices without a gap between
 what can be written and what can be read back, every dictionary variant, usage
@@ -367,7 +395,8 @@ The foundation: a liteserver read over TON's own protocols, from Node.
 Reads at this version are the server's unproven word, and are marked in the API
 with a `ServerReported` type.
 
-[Unreleased]: https://github.com/nirapod-labs/ton-net/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/nirapod-labs/ton-net/compare/v0.4.1...HEAD
+[0.4.1]: https://github.com/nirapod-labs/ton-net/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/nirapod-labs/ton-net/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/nirapod-labs/ton-net/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/nirapod-labs/ton-net/compare/v0.1.0...v0.2.0
