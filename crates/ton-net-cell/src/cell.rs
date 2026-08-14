@@ -398,18 +398,9 @@ impl fmt::Debug for Cell {
             .field("bits", &self.inner.bits)
             .field("refs", &self.inner.refs.as_slice().len())
             .field("level_mask", &self.inner.identity.level_mask())
-            .field("hash", &hex(self.hash()))
+            .field("hash", &crate::codec::hex_encode(self.hash()))
             .finish()
     }
-}
-
-/// Renders bytes as lowercase hex, for `Debug`.
-fn hex(bytes: &[u8]) -> String {
-    use std::fmt::Write as _;
-    bytes.iter().fold(String::new(), |mut out, b| {
-        let _ = write!(out, "{b:02x}");
-        out
-    })
 }
 
 #[cfg(test)]
@@ -508,6 +499,17 @@ mod tests {
             size_of::<Inner>(),
             120,
             "all of it, in the one allocation a cell costs"
+        );
+    }
+
+    /// A hash written without its leading zeros, or in the other case, is a line that
+    /// does not match the same hash written anywhere else.
+    #[test]
+    fn debug_names_a_cell_by_its_hash_in_lowercase_hex() {
+        let rendered = format!("{:?}", cell_of(0xAB));
+        assert!(
+            rendered.contains("57c2a1a13baa2762109ed68be0c396f2303ce17e3dde7917d0e74b4072b1dbc7"),
+            "the hash is not in `{rendered}`"
         );
     }
 
