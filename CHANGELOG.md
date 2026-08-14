@@ -13,7 +13,18 @@ never published.
 
 ## [Unreleased]
 
+## [0.4.2] - 2026-08-14
+
+The release 0.4.1 could not finish. `npm pack --json` was read for a file list at a
+key it does not always use, and the npm the publish job installs returns an object
+keyed by package name. Nothing was published: the npm job runs before the crates
+job now, so the crates job was skipped and 0.4.1 reached no registry.
+
+`0.4.0` is on crates.io and nowhere else. `0.4.1` is on neither. Take this one.
+
 ## [0.4.1] - 2026-08-14
+
+Never published; see 0.4.2.
 
 The 0.4.0 release the publish workflow could not finish. Its crates reached
 crates.io and its npm packages did not, so `0.4.0` exists on one registry and
@@ -395,7 +406,8 @@ The foundation: a liteserver read over TON's own protocols, from Node.
 Reads at this version are the server's unproven word, and are marked in the API
 with a `ServerReported` type.
 
-[Unreleased]: https://github.com/nirapod-labs/ton-net/compare/v0.4.1...HEAD
+[Unreleased]: https://github.com/nirapod-labs/ton-net/compare/v0.4.2...HEAD
+[0.4.2]: https://github.com/nirapod-labs/ton-net/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/nirapod-labs/ton-net/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/nirapod-labs/ton-net/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/nirapod-labs/ton-net/compare/v0.2.0...v0.3.0
