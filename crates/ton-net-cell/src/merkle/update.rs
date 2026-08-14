@@ -5,8 +5,10 @@
 //!
 //! A Merkle update carries two trees by hash, an old and a new, each pruned to the branches
 //! that differ. Creating one wraps a pair of trees the way a proof wraps one. Applying one
-//! grafts the unchanged subtrees back from a base that holds the old tree, rebuilding the
-//! new tree whole.
+//! grafts the unchanged subtrees back from a base that holds the old tree, rebuilding the new
+//! tree as far as that base reaches: a whole old state gives back a whole new one, a proof
+//! skeleton gives back a skeleton, and either way what comes out is held to the update's
+//! stored new hash before it is returned.
 
 use std::collections::HashMap;
 
@@ -47,6 +49,19 @@ pub fn create_update(old: &Cell, new: &Cell) -> Result<Cell, CellError> {
 /// self-consistency [`virtualize`](super::virtualize) requires of a proof. This does not
 /// anchor either side to a trusted root; it checks the update against itself.
 ///
+/// [`apply_update`] does not run this, and the split is deliberate. Applying holds the stored
+/// old hash against the base it was handed and the stored new hash against the tree it
+/// rebuilt, which is the same pair of hash equalities reached from the trees a caller
+/// actually has rather than from the ones the update attached. What applying leaves unchecked
+/// is the two stored depths, and a stored depth cannot reach the result: the rebuilt tree's
+/// depth is the one [`Builder`] derives from the cells it was given. So an update carrying a
+/// depth its own content does not give is refused here and applies all the same, which
+/// `an_update_whose_stored_depth_is_wrong_still_applies` pins.
+///
+/// [`combine_updates`] does run this, because it reads both sides of both updates as trees
+/// and re-covers them, so a side that is not the tree its update named would be carried into
+/// a combined update standing for something neither input stood for.
+///
 /// # Errors
 ///
 /// Returns [`CellError::Malformed`] if `update` is not a Merkle update, is missing a side,
@@ -81,18 +96,29 @@ pub fn validate_update(update: &Cell) -> Result<(), CellError> {
     Ok(())
 }
 
-/// Applies a Merkle update to the base it transforms, returning the new tree whole.
+/// Applies a Merkle update to the base it transforms, returning the new tree.
 ///
-/// `base` is the full old tree, the one the update's old side stands for. Where the update's
-/// new side prunes a branch, that branch is an unchanged subtree, and this grafts it back
-/// from `base` by its hash. The result is the new tree in full, and it hashes to the new
-/// hash the update names.
+/// `base` is the old tree, the one the update's old side stands for. Where the update's new
+/// side prunes a branch, that branch is an unchanged subtree, and this grafts it back from
+/// `base` by its hash. The result hashes at level zero to the new hash the update names,
+/// which is checked before it is returned.
+///
+/// The result is no more complete than `base` in the regions the update prunes, and is
+/// complete in the regions the new side reveals. A base holding a pruned branch is
+/// legitimate and not refused: a proof skeleton answers at level zero with the hash of the
+/// subtree it stands for, so grafting from it yields a tree that hashes to the update's new
+/// hash while still carrying pruned branches of its own. That is the case a caller holding a
+/// state proof rather than a whole state is in, and the mainnet basechain block's own state
+/// update applied to its own pruned old side is one, which
+/// `applying_a_mainnet_state_update_to_a_pruned_base_keeps_the_pruning` pins. A caller that
+/// needs a result it can read to the leaves supplies a base it can read to the leaves.
 ///
 /// # Errors
 ///
 /// Returns [`CellError::Malformed`] if `update` is not a Merkle update, if `base` is not the
 /// tree its old side stands for, if a pruned branch names a subtree the base does not hold,
-/// or if the rebuilt tree does not hash to the update's new hash.
+/// if the new side nests a Merkle cell, or if the rebuilt tree does not hash to the update's
+/// new hash.
 pub fn apply_update(base: &Cell, update: &Cell) -> Result<Cell, CellError> {
     may_apply(base, update)?.ok_or(CellError::Malformed(
         "merkle update does not apply to this base",
@@ -104,6 +130,12 @@ pub fn apply_update(base: &Cell, update: &Cell) -> Result<Cell, CellError> {
 /// This is [`apply_update`] without the requirement that the base matches: a base that is
 /// not the update's old tree yields `None` rather than an error, which lets a caller try an
 /// update against a base it is unsure of.
+///
+/// Two hash equalities bracket the work and neither is skippable: the update's stored old
+/// hash against the base, before anything is walked, and its stored new hash against the tree
+/// that came out. Nothing here reads the update's old side, since the base is the tree being
+/// transformed and the old side is a copy of it the sender attached. [`validate_update`] is
+/// the check over those attached sides and is not run here; the sentence on it says why.
 ///
 /// # Errors
 ///
@@ -227,6 +259,13 @@ fn splice_revealed(node: &Cell, revealed: &HashMap<[u8; 32], Cell>) -> Result<Ce
 }
 
 /// Indexes every cell in `tree` by its level-zero hash.
+///
+/// Every cell means a pruned branch too, which is what lets a proof skeleton serve as a base:
+/// a branch answers at level zero with the hash of the subtree it stands for, so it lands
+/// under that subtree's key and is grafted in where the subtree would have been. The first
+/// insertion for a hash wins, so where a base carries only the branch the result carries the
+/// branch onward, and where it carries both the branch and the real subtree the walk decides
+/// between them by which it reaches first.
 fn index_by_hash(tree: &Cell, into: &mut HashMap<[u8; 32], Cell>) {
     if into.contains_key(tree.hash()) {
         return;
@@ -237,30 +276,39 @@ fn index_by_hash(tree: &Cell, into: &mut HashMap<[u8; 32], Cell>) {
     }
 }
 
-/// Rebuilds `node` in full, grafting each pruned branch back from the base index.
+/// Rebuilds `node` against the base index, grafting each pruned branch back from it.
 fn graft(node: &Cell, base: &HashMap<[u8; 32], Cell>) -> Result<Cell, CellError> {
-    if node.cell_type() == CellType::PrunedBranch {
+    match node.cell_type() {
         // A pruned branch on the new side stands for a subtree that did not change, so the
         // base holds it under the hash the branch answers with.
-        return base.get(node.hash()).cloned().ok_or(CellError::Malformed(
+        CellType::PrunedBranch => base.get(node.hash()).cloned().ok_or(CellError::Malformed(
             "merkle update prunes a subtree the base does not hold",
-        ));
+        )),
+        // A library reference stands in for nothing: it names code by hash. `classify` in
+        // `boc/parse.rs` holds one off the wire to zero references, so nothing read from a
+        // bag carries a pruned branch under it to graft. The cell the new side
+        // revealed is already the cell the new tree holds, and one sits in the state update
+        // of the basechain block in `tests/fixtures/block-basechain.hex`, so refusing it
+        // would refuse a state transition the network itself produced.
+        CellType::LibraryReference => Ok(node.clone()),
+        // A Merkle cell inside an update covers a further tree at a further level, which is
+        // the running virtualization offset this module's documentation defers until a
+        // structure this client reads needs one.
+        CellType::MerkleProof | CellType::MerkleUpdate => Err(CellError::Malformed(
+            "a merkle update rebuilds no merkle cell nested inside it",
+        )),
+        CellType::Ordinary => {
+            let mut builder = Builder::new();
+            let mut bits = node.parse();
+            for _ in 0..node.bit_len() {
+                builder.store_bit(bits.load_bit()?)?;
+            }
+            for child in node.refs() {
+                builder.store_ref(graft(child, base)?)?;
+            }
+            builder.build()
+        }
     }
-    if node.is_exotic() {
-        return Err(CellError::Malformed(
-            "a merkle update rebuilds only ordinary cells",
-        ));
-    }
-
-    let mut builder = Builder::new();
-    let mut bits = node.parse();
-    for _ in 0..node.bit_len() {
-        builder.store_bit(bits.load_bit()?)?;
-    }
-    for child in node.refs() {
-        builder.store_ref(graft(child, base)?)?;
-    }
-    builder.build()
 }
 
 #[cfg(test)]
@@ -292,6 +340,33 @@ mod tests {
             usage.mark(cell);
         }
         usage.prune().expect("the side prunes")
+    }
+
+    /// A Merkle update over `old` and `new` whose stored depths are what `depths` names
+    /// rather than what the two sides give.
+    ///
+    /// [`create_update`] writes each side's own depth, so forging one takes the covering
+    /// layout by hand. Everything else is what `covering_cell` writes: the tag, both hashes,
+    /// both depths, both sides, and the mask the two sides imply.
+    fn update_with_depths(old: &Cell, new: &Cell, depths: (u16, u16)) -> Cell {
+        let mut builder = Builder::new();
+        builder.store_uint(0x04, 8).expect("the tag fits");
+        builder.store_bytes(old.hash()).expect("the old hash fits");
+        builder.store_bytes(new.hash()).expect("the new hash fits");
+        builder
+            .store_uint(u64::from(depths.0), 16)
+            .expect("a depth fits");
+        builder
+            .store_uint(u64::from(depths.1), 16)
+            .expect("a depth fits");
+        builder.store_ref(old.clone()).expect("the old side fits");
+        builder.store_ref(new.clone()).expect("the new side fits");
+        builder
+            .finish(
+                CellType::MerkleUpdate,
+                (old.level_mask() | new.level_mask()) >> 1,
+            )
+            .expect("the update cell is well formed")
     }
 
     #[test]
@@ -327,6 +402,127 @@ mod tests {
         assert!(may_apply(&leaf(0x99), &update)
             .expect("a mismatch is not an error")
             .is_none());
+    }
+
+    #[test]
+    fn an_update_whose_stored_depth_is_wrong_still_applies() {
+        let shared = leaf(0x55);
+        let old_full = node(0x11, &[&shared, &leaf(0xaa)]);
+        let new_full = node(0x22, &[&shared, &leaf(0xbb)]);
+        let old_side = prune_to(&old_full, &[&leaf(0xaa)]);
+        let new_side = prune_to(&new_full, &[&leaf(0xbb)]);
+
+        // Both sides are one deep. Naming the new side as seven deep leaves both stored tree
+        // hashes as the sides give them, and only the stored depth wrong.
+        assert_eq!(new_side.depth(), 1, "the fixture is one deep");
+        let forged = update_with_depths(&old_side, &new_side, (old_side.depth(), 7));
+
+        // The check over the attached sides catches it, and names the depth rather than a
+        // hash, so this is the depth half of the split and not a hash mismatch in disguise.
+        assert_eq!(
+            validate_update(&forged),
+            Err(CellError::Malformed(
+                "merkle update depth does not match its content"
+            ))
+        );
+
+        // Applying does not run that check, and cannot be misled by what it skipped: the
+        // rebuilt tree is the one the update's new hash names, at the depth the rebuild
+        // gives it rather than the depth the update claimed.
+        let rebuilt = apply_update(&old_full, &forged).expect("the update still applies");
+        assert_eq!(rebuilt.hash(), new_full.hash());
+        assert_eq!(rebuilt.depth(), new_full.depth());
+        assert_ne!(rebuilt.depth(), 7, "the claimed depth reached nothing");
+    }
+
+    #[test]
+    fn applying_against_a_pruned_base_keeps_the_pruning() {
+        let shared = leaf(0x55);
+        let old_full = node(0x11, &[&shared, &leaf(0xaa)]);
+        let new_full = node(0x22, &[&shared, &leaf(0xbb)]);
+        let old_side = prune_to(&old_full, &[&leaf(0xaa)]);
+        let new_side = prune_to(&new_full, &[&leaf(0xbb)]);
+        let update = create_update(&old_side, &new_side).expect("the update builds");
+
+        // The base here is the update's own old side, a skeleton rather than the whole old
+        // tree. It answers at level zero with the same hash the whole tree does, so the
+        // update applies to it.
+        let rebuilt = apply_update(&old_side, &update).expect("a pruned base is not refused");
+        assert_eq!(rebuilt.hash(), new_full.hash());
+
+        // What came back stands for the new tree without holding it: the shared subtree the
+        // base had already pruned is still a pruned branch.
+        assert_eq!(
+            rebuilt
+                .reference(0)
+                .expect("the shared side is there")
+                .cell_type(),
+            CellType::PrunedBranch,
+        );
+        assert_ne!(
+            rebuilt.level_mask(),
+            0,
+            "a tree carrying a pruned branch stands above level zero"
+        );
+        // Against the whole old tree the same update gives back the whole new tree, which is
+        // what makes the line above a property of the base and not of the update.
+        let whole = apply_update(&old_full, &update).expect("the update applies");
+        assert_eq!(
+            whole
+                .reference(0)
+                .expect("the shared side is there")
+                .cell_type(),
+            CellType::Ordinary,
+        );
+        assert_eq!(whole.level_mask(), 0);
+    }
+
+    #[test]
+    fn a_revealed_library_reference_is_carried_through_and_a_nested_merkle_cell_is_not() {
+        // A library reference names code by hash and holds no reference, so it is content
+        // the new side revealed rather than a placeholder standing for something the base
+        // holds. One sits inside the state update of the basechain block fixture.
+        let mut builder = Builder::new();
+        builder.store_uint(0x02, 8).expect("the tag fits");
+        builder.store_bytes(&[0x7c; 32]).expect("the hash fits");
+        let library = builder
+            .finish(CellType::LibraryReference, 0)
+            .expect("a library reference is well formed");
+
+        let old = node(0x11, &[&leaf(0xaa)]);
+        let new = node(0x22, &[&library]);
+        let update = create_update(&old, &new).expect("the update builds");
+        let rebuilt = apply_update(&old, &update).expect("the library reference is carried");
+        assert_eq!(rebuilt.hash(), new.hash());
+        assert_eq!(
+            rebuilt
+                .reference(0)
+                .expect("the library side is there")
+                .cell_type(),
+            CellType::LibraryReference,
+        );
+
+        // A Merkle cell nested in a side covers a further tree at a further level, which
+        // this module resolves for nothing and so refuses rather than copies.
+        let mut builder = Builder::new();
+        builder.store_uint(0x03, 8).expect("the tag fits");
+        builder
+            .store_bytes(leaf(0xcc).hash())
+            .expect("the hash fits");
+        builder.store_uint(0, 16).expect("the depth fits");
+        builder.store_ref(leaf(0xcc)).expect("the content fits");
+        let nested = builder
+            .finish(CellType::MerkleProof, 0)
+            .expect("a merkle proof is well formed");
+
+        let nesting = node(0x33, &[&nested]);
+        let update = create_update(&old, &nesting).expect("the update builds");
+        assert_eq!(
+            apply_update(&old, &update),
+            Err(CellError::Malformed(
+                "a merkle update rebuilds no merkle cell nested inside it"
+            ))
+        );
     }
 
     #[test]

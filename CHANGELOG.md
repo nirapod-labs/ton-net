@@ -44,6 +44,18 @@ never published.
 
 ### Changed
 
+- `apply_update` and `may_apply` rebuild through a library reference on an
+  update's new side instead of refusing it. A library reference names code by
+  hash and stands in for no subtree, and one sits in the state update of a
+  mainnet basechain block, so refusing it refused a state transition the network
+  itself produced. Something previously refused now passes, which NET-ADR-008
+  section 5 calls a behavioral break. `VERIFY_EPOCH` does not move: the public
+  verifier reaches a Merkle proof and a block's state update, never
+  `apply_update`, and the epoch transcript is unchanged.
+
+  A nested Merkle cell is still refused, and its message now says which case it
+  refuses rather than which case it takes.
+
 - `Dict::from_items` and `AugDict::from_items` sort their items by key once and
   build the tree from the leaves up, so each node is built with its children
   already final. Both were a loop over `set`, which rebuilds the forks it
