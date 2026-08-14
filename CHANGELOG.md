@@ -15,6 +15,13 @@ never published.
 
 ### Added
 
+- `BocView::has_cache_bits`, reporting whether a bag's offset index carries a
+  cache bit inside each of its entries. The flag decides how an entry is spelled,
+  not whether one is there: under it an entry taken for a plain offset is the
+  offset shifted. Both mainnet block fixtures set it, so it is the ordinary case.
+  Nothing here reads the index, so it changes no read today; it is reported
+  because a reader that retains the index cannot take an offset without it.
+
 - The `ton-net` facade re-exports the cell types its own methods answer with:
   `Slice`, `Identity`, `Builder`, `CellError`, `Dict`, `DictEntry`, `DictIter`,
   `Lookup` and `MsgAddress`, beside the `Cell` and `CellType` it already carried.

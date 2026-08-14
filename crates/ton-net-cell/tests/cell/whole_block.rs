@@ -318,3 +318,28 @@ fn a_bag_written_with_stored_hashes_grows_by_exactly_what_its_cells_call_for() {
         assert_eq!(again[0].repr_hash(), roots[0].repr_hash(), "{what}");
     }
 }
+
+/// The blocks the chain produced set the cache-bits flag, and reading them does not depend
+/// on it.
+///
+/// The flag says an index entry carries a cache bit inside the value rather than beside it,
+/// so an entry read as a plain offset under it is the offset shifted. Nothing here reads the
+/// index, which is why both blocks parse today, and that is the whole reason this case
+/// exists: the flag is the ordinary case rather than an exotic one, so a reader that starts
+/// trusting the index meets it immediately.
+#[test]
+fn a_mainnet_block_sets_the_cache_bits_flag_and_still_reads() {
+    for (what, text) in [("masterchain", MASTERCHAIN), ("basechain", BASECHAIN)] {
+        let bag = unhex(text);
+        let view = BocView::open(&bag).expect("the block opens");
+
+        assert!(view.has_cache_bits(), "{what}: the chain set no cache bits");
+        assert!(
+            view.has_index(),
+            "{what}: the flag rides in an index this bag lacks"
+        );
+
+        let roots = parse_boc(&bag).expect("the block parses");
+        assert_eq!(roots.len(), 1, "{what}");
+    }
+}
