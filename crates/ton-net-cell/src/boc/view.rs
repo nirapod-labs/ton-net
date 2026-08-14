@@ -120,14 +120,7 @@ mod tests {
         let mut builder = Builder::new();
         builder.store_uint(byte, 8).expect("a byte fits");
         let cell = builder.build().expect("a cell forms");
-        serialize_boc_with(
-            &[cell],
-            &BocOptions {
-                index,
-                crc32c: true,
-            },
-        )
-        .expect("serializes")
+        serialize_boc_with(&[cell], &BocOptions::default().with_index(index)).expect("serializes")
     }
 
     /// A two-cell bag: a root holding `0xab` and a reference holding `0xcd`.
