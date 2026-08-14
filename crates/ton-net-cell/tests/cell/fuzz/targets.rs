@@ -123,31 +123,24 @@ pub(super) fn bag_of_cells(bytes: &[u8]) -> bool {
 
     let written = serialize_boc(&roots).expect("a bag that parsed serializes");
 
-    // The round trip is checked for every bag but one shape: a bag whose root list names one
-    // cell twice is written back with more root entries than cells, which `read_header`
-    // refuses. That is a defect rather than a property, and it is pinned in
-    // `tests/cell/roundtrip.rs`; `docs/fuzzing.md` says why it is a case rather than a
-    // comment. The condition below only states which bags this check covers.
-    if roots.len() <= cells.len() {
-        let back = parse_boc(&written).expect("a bag this crate wrote parses back");
+    let back = parse_boc(&written).expect("a bag this crate wrote parses back");
+    assert_eq!(
+        back.len(),
+        roots.len(),
+        "a round trip changed the root count"
+    );
+    for (again, root) in back.iter().zip(&roots) {
         assert_eq!(
-            back.len(),
-            roots.len(),
-            "a round trip changed the root count"
-        );
-        for (again, root) in back.iter().zip(&roots) {
-            assert_eq!(
-                again.repr_hash(),
-                root.repr_hash(),
-                "a round trip changed a cell's identity"
-            );
-        }
-        assert_eq!(
-            serialize_boc(&back).expect("a bag this crate wrote serializes"),
-            written,
-            "serializing the same cells twice gave two different bags"
+            again.repr_hash(),
+            root.repr_hash(),
+            "a round trip changed a cell's identity"
         );
     }
+    assert_eq!(
+        serialize_boc(&back).expect("a bag this crate wrote serializes"),
+        written,
+        "serializing the same cells twice gave two different bags"
+    );
     true
 }
 
@@ -194,11 +187,22 @@ pub(super) fn header(bytes: &[u8]) -> bool {
         bytes.len(),
         view.cell_count()
     );
+    // Two root entries may name one cell, so the cell count does not bound the root list.
+    // Two other things do, and both are asserted: the ceiling, which is `MAX_CELLS` here
+    // because `BocView::open` takes no options, and the bytes the bag carries for the list,
+    // which is what keeps the reservation proportional to the input rather than to a
+    // constant.
     assert!(
-        view.root_count() >= 1 && view.root_count() <= view.cell_count(),
-        "a header declared {} roots among {} cells",
-        view.root_count(),
-        view.cell_count()
+        view.root_count() >= 1 && view.root_count() <= MAX_CELLS,
+        "a header declared {} roots past the {MAX_CELLS} ceiling",
+        view.root_count()
+    );
+    assert!(
+        view.root_count() <= bytes.len(),
+        "a header of a {} byte bag declared {} roots, so the list it reserves for is not \
+         bounded by the bytes behind it",
+        bytes.len(),
+        view.root_count()
     );
     assert!(
         view.cell_area_len() <= bytes.len(),
@@ -613,15 +617,9 @@ pub(super) fn compressed(bytes: &[u8]) -> bool {
             .and_then(|prefix| <[u8; 4]>::try_from(prefix).ok())
             .map(u32::from_le_bytes)
             .and_then(|named| usize::try_from(named).ok());
-        // The check is `<=` rather than `==`, and that is a statement about the code as it
-        // stands rather than a weaker property chosen for comfort. `decompress` documents
-        // that it refuses bytes that "do not expand to the length they name", and the
-        // decoder underneath treats the prefix as the size to allocate rather than the size
-        // to produce: it fills a buffer of that length, decodes into it, and truncates to
-        // what the body gave. A body that produces fewer bytes than its prefix names
-        // therefore comes back short rather than refused, so equality does not hold today.
-        // What does hold, and what the cap in front of it is for, is that nothing comes back
-        // longer than the prefix.
+        // The bound is `<=`, not `==`: the decoder sizes its buffer from the prefix and
+        // truncates to what the body gave, so a short body comes back short. Nothing comes
+        // back longer.
         assert!(
             named.is_some_and(|named| expanded.len() <= named),
             "decompression ran past the length the input named"

@@ -84,10 +84,11 @@ level and no more.
 Where a bag carries hashes of its own, they are checked and not substituted. `check_stored` in
 `crates/ton-net-cell/src/boc/parse.rs` compares a cell's stored hashes and depths against what
 its contents give and refuses on a mismatch. A grep for the name returns its definition and
-three call sites: the read that builds a bag's cells, the read that keeps an identity per cell
-in place of a cell, and the on-demand build that `BocView::cell` and `LazyBoc::cell` both reach
-through `build_at`. The third is the path a resolver runs on, which is why it is named here
-rather than folded into the other two.
+two call sites, one in the read that builds a bag's cells and one in the read that keeps an
+identity per cell in place of a cell. Three paths reach them. The third is `build_at`, the
+on-demand build behind `BocView::cell` and `LazyBoc::cell`, which calls `build_one` rather
+than naming `check_stored` itself. That path is the one a resolver runs on, which is why it is
+counted here rather than folded into the other two.
 
 None of that is a corner case, on a count taken over the block fixture in
 `crates/ton-net-cell/tests/fixtures/block-basechain.hex`. The bag holds 1121 cells, of which
@@ -474,9 +475,10 @@ Checkable now, against the tree:
   `crates/ton-net-cell/src/usage.rs`.
 - A bag's own hashes are checked and not substituted. `check_stored` in
   `crates/ton-net-cell/src/boc/parse.rs` compares stored hashes and depths against the computed
-  ones and refuses on a mismatch; a grep for the name returns its definition and three call
-  sites, in `read_and_build`, in `verify_roots`, and in `build_at`, which is the on-demand build
-  behind `BocView::cell` and `LazyBoc::cell`.
+  ones and refuses on a mismatch; a grep for the name returns its definition and two call
+  sites, reached from `read_and_build` and from `verify_roots`. A third path arrives at the
+  first through `build_one`, which `build_at`, the on-demand build behind `BocView::cell` and
+  `LazyBoc::cell`, calls.
 - A pruned branch is held to zero references, to a non-zero mask, to two agreeing copies of
   that mask, and to a length of two bytes plus thirty-four per marked level, in `classify` in
   `crates/ton-net-cell/src/boc/parse.rs`.

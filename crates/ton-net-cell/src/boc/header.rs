@@ -79,12 +79,22 @@ pub(super) fn read_header(
     if count > ceiling {
         return Err(CellError::TooManyCells { limit: ceiling });
     }
-    if roots == 0 || roots > count {
+    // A root list holds indices, so two entries may name one cell and a bag may carry more
+    // roots than distinct cells; the cell count is not the bound. Whether an index names a
+    // cell that exists is checked in the loop below, one at a time.
+    if roots == 0 || roots > ceiling {
         return Err(CellError::Header("root count"));
     }
     // Every cell costs at least its two descriptor bytes, so a count the remaining bytes
     // could not hold is truncation. Checked before allocating for the count.
     if count.saturating_mul(2) > reader.remaining() {
+        return Err(CellError::Truncated);
+    }
+    // Each root entry costs `ref_size` bytes, so a root list the remaining bytes could not
+    // hold is truncation. The ceiling above caps the reservation at a constant, not at
+    // anything the bag carries: without this a twenty-one byte bag naming the ceiling in
+    // roots reserves a megabyte before an index is read.
+    if roots.saturating_mul(ref_size) > reader.remaining() {
         return Err(CellError::Truncated);
     }
 
