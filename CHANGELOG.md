@@ -55,6 +55,18 @@ never published.
 
 ### Changed
 
+- `apply_update` and `may_apply` rebuild through a library reference on an
+  update's new side instead of refusing it. A library reference names code by
+  hash and stands in for no subtree, and one sits in the state update of a
+  mainnet basechain block, so refusing it refused a state transition the network
+  itself produced. Something previously refused now passes, which NET-ADR-008
+  section 5 calls a behavioral break. `VERIFY_EPOCH` does not move: the public
+  verifier reaches a Merkle proof and a block's state update, never
+  `apply_update`, and the epoch transcript is unchanged.
+
+  A nested Merkle cell is still refused, and its message now says which case it
+  refuses rather than which case it takes.
+
 - `Dict::from_items` and `AugDict::from_items` sort their items by key once and
   build the tree from the leaves up, so each node is built with its children
   already final. Both were a loop over `set`, which rebuilds the forks it
@@ -92,6 +104,22 @@ never published.
 - `parse_boc` no longer narrows the stated cell area size before the check that
   holds a bag to it. Where `usize` is 32 bits, which is every wasm target, a bag
   could state one length, carry another, and pass that check.
+
+- A bag naming one cell from two root entries reads back. A root list holds
+  indices and nothing stops two of them naming the same cell, so writing such a
+  bag stores the cell once and states more roots than cells, which the reader
+  refused: the crate would not read a bag it had just written.
+
+  **`VERIFY_EPOCH` rises to 2.** What is now accepted and was not: a proof whose
+  root list is longer than its cell list, where every entry names a cell the bag
+  carries. Nothing is now refused that was accepted before, and no proof, hash,
+  signature or freshness rule moved. A caller that stored a verified result under
+  epoch 1 can keep it; the widened set only admits encodings epoch 1 turned away,
+  and each is checked exactly as before once it is read.
+
+  The root list is still bounded twice: by the cell ceiling a parse runs under,
+  and by the bytes the bag carries for it, so a small bag naming a large root
+  count is refused rather than reserved for.
 
 ## [0.3.0] - 2026-07-22
 

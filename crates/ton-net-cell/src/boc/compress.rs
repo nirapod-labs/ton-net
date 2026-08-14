@@ -45,11 +45,15 @@ pub fn compress(bag: &[u8]) -> Vec<u8> {
 /// hard cap before the decoder allocates, so a small input cannot name a large allocation,
 /// and the expansion itself runs on the bounds-checked decode path.
 ///
+/// The named length bounds the expansion rather than asserting it. The decoder sizes its
+/// buffer from the prefix and truncates to what the body gave, so a body producing fewer
+/// bytes than its prefix names comes back short rather than refused. Nothing comes back
+/// longer.
+///
 /// # Errors
 ///
 /// Returns [`CellError::Truncated`] if the bytes are too short to name a length, or
-/// [`CellError::Malformed`] if they name a length past the cap, or are not valid LZ4, or do
-/// not expand to the length they name.
+/// [`CellError::Malformed`] if they name a length past the cap or are not valid LZ4.
 pub fn decompress(bytes: &[u8]) -> Result<Vec<u8>, CellError> {
     // lz4_flex prepends the uncompressed length as four little-endian bytes. Reading it and
     // refusing a length past the cap here is what keeps the decoder below from allocating for
