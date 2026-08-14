@@ -106,6 +106,17 @@ pub enum CellError {
     #[error("dictionary label is longer than the key it labels")]
     LabelTooLong,
 
+    /// A base64 or hex string is not one the transport codec reads.
+    ///
+    /// This covers more than a malformed string.
+    /// [`base64_decode`](crate::base64_decode) also refuses a well-formed string that
+    /// spells bytes another string already spells, because a caller that keys anything
+    /// on the written form of a hash holds an entry it cannot find under the other
+    /// spelling. Each function states how far that goes;
+    /// [`hex_decode`](crate::hex_decode) reads either case.
+    #[error("transport encoding is invalid: {0}")]
+    Encoding(&'static str),
+
     /// A change fell in a branch a Merkle proof has pruned away.
     ///
     /// A pruned branch holds a hash rather than a subtree, so a change reaching one would
