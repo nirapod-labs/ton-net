@@ -104,12 +104,13 @@ having survived, which the test runner reports anyway.
   seven at its widest, which is `MAX_BITS` at a descriptor of 255, and `Refs` in
   `crates/ton-net-cell/src/cell/refs.rs` is an enum whose widest variant holds `MAX_REFS`
   cells. What parses then round trips, to the same root representation hashes and to the
-  same bytes twice running, for every bag but the one shape named below.
+  same bytes twice running, for every bag it parses.
 
 - **`header`** opens the same case through `BocView` and checks what the header states about
   itself before a cell is built: a cell count inside `MAX_CELLS`, at least one root and no
-  more roots than cells, a cell area no larger than the bag, and at most one cell per two
-  bytes the bag carries. That last is the form the no-unbounded-allocation rule takes here.
+  more roots than the cell ceiling, a cell area no larger than the bag, and at most one cell
+  per two bytes the bag carries. That last is one of two forms the no-unbounded-allocation
+  rule takes here; the root list carries the other, held to the bytes the bag has left for it.
   Every cell costs its two descriptor bytes, so a count the remaining bytes could not hold
   is a count nothing behind it can honour, and the header reader refuses one before it
   allocates for it. This is the door that can see that: counting the cells of a bag that
@@ -186,7 +187,7 @@ every target green while checking nothing past the first refusal.
 
 ## Where a check states less than it might
 
-Three of the checks are narrower than the obvious wording, and each is narrow because of
+Two of the checks are narrower than the obvious wording, and each is narrow because of
 what the code does rather than to make a run easier to pass. A check written wider than the
 code holds is a claim the code does not prove, which is the one thing this repository asks
 a contributor not to write.
@@ -214,17 +215,6 @@ names, and not necessarily one that long. The decoder underneath sizes its buffe
 prefix, decodes into it, and truncates to what the body actually produced, so the prefix is
 a bound on the expansion rather than a statement of it. The cap in front of that read is
 what keeps the bound meaningful, and the target asserts the bound.
-
-The round trip is checked for every bag except one, and that exception is a defect rather
-than a property. A bag's root list may name one cell twice, so a bag can carry more root
-entries than it has distinct cells; `serialize_boc` writes one root entry per root it was
-handed against a cell count of the distinct cells it walked, and a header stating more
-roots than cells is refused on the way back in. The defect is pinned as its own case in
-`crates/ton-net-cell/tests/cell/roundtrip.rs`, which holds the sixteen byte bag that
-reproduces it and the two directions a fix could take. It is a case rather than a comment
-because a defect described in prose beside the assertion that steps around it reads as
-design; that is the one statement of the reason, and the code points here for it. The
-`bag_of_cells` target only states which bags its round-trip check covers.
 
 ## Adding a target
 

@@ -52,9 +52,17 @@ The decode side is treated as an untrusted boundary, with three rules on it:
    cannot name a large allocation.
 3. The expansion runs on `lz4_flex`'s bounds-checked safe-decode path
    (`decompress_size_prepended`, reached through `default-features = false` plus the
-   `safe-decode` feature, not the crate's unsafe fast path). Bytes that are not valid LZ4, or
-   that do not expand to the length they name, return
-   `CellError::Malformed("bytes are not valid lz4")`.
+   `safe-decode` feature, not the crate's unsafe fast path). Bytes that are not valid LZ4
+   return `CellError::Malformed("bytes are not valid lz4")`.
+
+   **Corrected against the code.** This clause read "or that do not expand to the length
+   they name" until that was checked and found false. The named length sizes the buffer and
+   is not asserted against what the body produces, so a body expanding short of its prefix
+   returns a short buffer rather than an error. What holds, and what the cap in front of it
+   is for, is that nothing comes back longer than the prefix names.
+   `crates/ton-net-cell/tests/cell/fuzz/targets.rs` asserts that bound and
+   `docs/fuzzing.md` states it. The decision is unchanged: the cap before allocation and the
+   bounds-checked expansion are what this record decides, and both hold.
 
 The cap sits above what the largest readable bag needs and still bounds the allocation.
 `parse_boc` refuses a bag with more than `MAX_CELLS` cells (`1 << 17`, 131,072), and every
@@ -135,3 +143,25 @@ These are properties the code shows, not aspirations.
 - The feature gate holds at build time. `mod compress` and the crate-level re-export are
   behind `#[cfg(feature = "compress")]`, and `compress = ["dep:lz4_flex"]` is the only path
   that pulls the crate, so a default build compiles without it.
+
+### Not verified, and stated rather than left implied
+
+The Context above says TON compresses a serialized bag with LZ4 and that this reads and
+writes that form. The first half is the premise this record was taken on. The second half
+is an interoperation claim, and **nothing in this repository checks it**. What is
+implemented is the length-prefixed block form `lz4_flex` writes, four little-endian bytes
+of expanded length ahead of an LZ4 block, which is that crate's own convention and not the
+LZ4 frame format.
+
+Against the tree: `crates/ton-net-tl` declares no constructor for a compressed bag,
+`docs/protocol/wire-format.md` has no entry for one, no captured fixture of a bag another
+implementation compressed exists under any `tests/fixtures`, and this record cites no
+source for the framing. The compressed corpus the fuzz target runs on is the mainnet bags
+compressed by this crate, so it grades the round trip against itself and could not detect
+a disagreement with the network.
+
+So the property that holds today is that this crate reads what this crate writes, safely
+and under a cap. Whether those bytes are what a TON node emits is undetermined here. Two
+things would settle it, and neither is a change to this decision: a captured bag from a
+node, read back to the identities it should give, and a citation for the framing in
+`docs/protocol/wire-format.md`.

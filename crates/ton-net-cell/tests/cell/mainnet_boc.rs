@@ -131,6 +131,58 @@ fn every_pruned_branch_is_long_enough_to_read() {
 }
 
 #[test]
+fn a_pruned_branch_marking_two_levels_reads_at_both() {
+    let roots = parse_boc(&proof()).expect("the captured proof parses");
+
+    // Most of this bag's branches mark one level. Two mark two: the pair standing for the
+    // block's old and new states, which hang off the block's Merkle update, which hangs off
+    // the Merkle proof at the root of the bag. Each Merkle cell lowers the mask a level, so a
+    // branch with two of them above it has to be significant two levels up to reach past
+    // both, and what is left over is what those cells carry: 0b001 on the update, nothing on
+    // the proof. Nothing in this crate writes such a branch. `pruned_branch` in the usage
+    // module stores a level-one mask and takes no other, so a mask this wide is read here and
+    // produced only by the network.
+    let branch = all_cells(&roots)
+        .into_iter()
+        .find(|cell| cell.cell_type() == CellType::PrunedBranch && cell.level_mask() == 0b011)
+        .expect("the bag holds a branch marking two levels");
+
+    let data = branch.data();
+    assert_eq!(
+        data.len(),
+        2 + 2 * 34,
+        "a tag, a mask, then a hash and a depth per marked level"
+    );
+
+    // Below its own level the branch answers with what it stored for the subtree it replaced,
+    // one stored pair per marked level, which is what the parent hashed rather than the
+    // subtree.
+    let identity = branch.identity();
+    assert_eq!(identity.count(), 3, "two marked levels and one besides");
+    assert_eq!(identity.hash(0).map(|h| &h[..]), Some(&data[2..34]));
+    assert_eq!(identity.hash(1).map(|h| &h[..]), Some(&data[34..66]));
+    assert_eq!(
+        identity.depth(0),
+        Some(u16::from_be_bytes([data[66], data[67]]))
+    );
+    assert_eq!(
+        identity.depth(1),
+        Some(u16::from_be_bytes([data[68], data[69]]))
+    );
+
+    // Reading by level lands on the same values, and the branch's own level is the one hash
+    // it computed for itself rather than one it was handed.
+    assert_eq!(Some(identity.hash_at(0)), identity.hash(0));
+    assert_eq!(Some(identity.hash_at(1)), identity.hash(1));
+    assert_eq!(identity.hash_at(2), branch.repr_hash());
+    assert_ne!(
+        branch.repr_hash(),
+        branch.hash(),
+        "a branch is not the subtree it stands for"
+    );
+}
+
+#[test]
 fn identity_matches_the_hashes_the_engine_computed() {
     let roots = parse_boc(&proof()).expect("the captured proof parses");
 

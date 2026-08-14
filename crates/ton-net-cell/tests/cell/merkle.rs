@@ -17,7 +17,8 @@
 //! reproduces that server's proof cell byte for byte, which pins the layout to real bytes.
 
 use ton_net_cell::{
-    create_proof, create_update, parse_boc, validate_update, virtualize, CellType, UsageTree,
+    apply_update, create_proof, create_update, parse_boc, validate_update, virtualize, Cell,
+    CellType, UsageTree,
 };
 
 /// The account proof captured from mainnet, a bag of Merkle proofs.
@@ -50,6 +51,23 @@ fn hex(bytes: &[u8]) -> String {
         let _ = write!(out, "{b:02x}");
         out
     })
+}
+
+/// Every cell reachable from `cell`, revisiting a shared subtree as many times as it is
+/// referenced, since what is being counted is what the tree holds and not what it deduplicates
+/// to.
+fn walk(cell: &Cell, out: &mut Vec<Cell>) {
+    out.push(cell.clone());
+    for child in cell.refs() {
+        walk(child, out);
+    }
+}
+
+/// How many of the cells under `cell` are of `kind`.
+fn count_of(cell: &Cell, kind: CellType) -> usize {
+    let mut cells = Vec::new();
+    walk(cell, &mut cells);
+    cells.iter().filter(|c| c.cell_type() == kind).count()
 }
 
 #[test]
@@ -133,6 +151,137 @@ fn pruning_a_mainnet_block_to_a_path_keeps_its_root_hash() {
             "reference {side} should be pruned"
         );
     }
+}
+
+#[test]
+fn pruning_a_mainnet_block_to_two_disjoint_paths_keeps_both() {
+    let roots = parse_boc(&unhex(BASECHAIN_BLOCK)).expect("the block parses");
+    let block = &roots[0];
+
+    // Two cells three hops down that share only the extra above them, so the marked set is a
+    // fork rather than a chain: a proof of both has to keep two branches of one node, which a
+    // single-path proof never exercises.
+    let extra = block
+        .reference(3)
+        .expect("a block holds an extra reference");
+    let left = extra
+        .reference(0)
+        .and_then(|child| child.reference(0))
+        .expect("the first branch of the extra");
+    let right = extra
+        .reference(2)
+        .and_then(|child| child.reference(0))
+        .expect("the third branch of the extra");
+    assert_ne!(left.hash(), right.hash(), "the two targets are two cells");
+
+    let mut usage = UsageTree::new(block.clone());
+    assert!(usage.mark_path(left), "the left target is in the block");
+    assert!(usage.mark_path(right), "the right target is in the block");
+    let skeleton = usage.prune().expect("the skeleton builds");
+
+    // The root hash is the liteserver's own, so the multi-path skeleton is held to a value
+    // from outside this engine rather than to its own arithmetic.
+    assert_eq!(
+        hex(skeleton.hash()),
+        BASECHAIN_ROOT,
+        "a two-path skeleton does not hash to the block it was pruned from"
+    );
+
+    let kept_extra = skeleton.reference(3).expect("the extra is kept");
+    assert_eq!(kept_extra.cell_type(), CellType::Ordinary);
+    let kept_left = kept_extra
+        .reference(0)
+        .and_then(|child| child.reference(0))
+        .expect("the left path survives");
+    let kept_right = kept_extra
+        .reference(2)
+        .and_then(|child| child.reference(0))
+        .expect("the right path survives");
+    assert_eq!(kept_left.cell_type(), CellType::Ordinary);
+    assert_eq!(kept_right.cell_type(), CellType::Ordinary);
+    assert_eq!(kept_left.hash(), left.hash(), "the left target reads back");
+    assert_eq!(
+        kept_right.hash(),
+        right.hash(),
+        "the right target reads back"
+    );
+
+    // The branch of the fork nobody marked is stood in for, which is what makes the two above
+    // a fact about the marking rather than about the tree being kept whole.
+    assert_eq!(
+        kept_extra
+            .reference(1)
+            .expect("the unmarked branch is there")
+            .cell_type(),
+        CellType::PrunedBranch,
+    );
+
+    // And marking one path alone prunes the other, so keeping both is what the second mark
+    // bought.
+    let mut one = UsageTree::new(block.clone());
+    assert!(one.mark_path(left), "the left target is in the block");
+    let single = one.prune().expect("the single-path skeleton builds");
+    assert_eq!(hex(single.hash()), BASECHAIN_ROOT);
+    assert_eq!(
+        single
+            .reference(3)
+            .and_then(|extra| extra.reference(2))
+            .expect("the right branch is there")
+            .cell_type(),
+        CellType::PrunedBranch,
+        "the unmarked path should have been stood in for"
+    );
+}
+
+#[test]
+fn applying_a_mainnet_state_update_to_a_pruned_base_keeps_the_pruning() {
+    let roots = parse_boc(&unhex(BASECHAIN_BLOCK)).expect("the block parses");
+    let block = &roots[0];
+    let update = block.reference(2).expect("a block holds a state update");
+    assert_eq!(update.cell_type(), CellType::MerkleUpdate);
+
+    // The base here is the update's own old side, which the network wrote as a skeleton: it
+    // stands for the old state without holding it, and answers at level zero with the old
+    // state's hash, so it is a base this update transforms.
+    let old_side = update.reference(0).expect("the old side");
+    assert_ne!(
+        count_of(old_side, CellType::PrunedBranch),
+        0,
+        "the fixture's old side is a skeleton, not a whole state"
+    );
+
+    let rebuilt = apply_update(old_side, update).expect("a pruned base is not refused");
+
+    // The new state hash is the network's own value, sitting in the update's data past the
+    // tag and the old hash.
+    assert_eq!(
+        &rebuilt.hash()[..],
+        &update.data()[33..65],
+        "the rebuilt tree is not the state the update names"
+    );
+
+    // What came back stands for the new state at the same reach the base had. Grafting from a
+    // skeleton carries the skeleton's pruned branches into the answer, and the tree says so:
+    // it holds pruned branches and stands above level zero.
+    assert_ne!(count_of(&rebuilt, CellType::PrunedBranch), 0);
+    assert_ne!(rebuilt.level_mask(), 0);
+
+    // The state also holds a library reference, a cell that names code by hash and stands in
+    // for nothing. It is content the new side revealed, so it is carried through rather than
+    // looked for in the base.
+    assert_eq!(
+        count_of(&rebuilt, CellType::LibraryReference),
+        count_of(
+            update.reference(1).expect("the new side"),
+            CellType::LibraryReference
+        ),
+        "every library reference the new side revealed is in the rebuilt state"
+    );
+    assert_ne!(
+        count_of(&rebuilt, CellType::LibraryReference),
+        0,
+        "the fixture's new side reveals a library reference"
+    );
 }
 
 #[test]

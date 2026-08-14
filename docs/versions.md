@@ -71,7 +71,8 @@ value. When the current value is higher, the caller re-verifies rather than trus
 an older set of rules produced. Nothing else in the API answers that.
 
 The boundary is pinned in the build as a transcript. `crates/ton-net/tests/epoch.rs` runs the
-public verifier over one captured masterchain read and ten edits of it, and compares the
+public verifier over one captured masterchain read, ten edits of it and one legal
+re-encoding of it, and compares the
 verdicts against a fixed text whose first line is the epoch. The number and the boundary it
 names are one pinned pair, so moving either without the other fails the build. Each rise is
 recorded in [`CHANGELOG.md`](../CHANGELOG.md) as the delta in what is now accepted and what is
