@@ -114,7 +114,7 @@ mod verified;
 /// The number is meaningless across libraries and is not a version. It only ever
 /// increases, and each increase is recorded in the changelog as the delta in what is
 /// accepted and what is refused.
-pub const VERIFY_EPOCH: u32 = 1;
+pub const VERIFY_EPOCH: u32 = 2;
 
 pub use address::Address;
 pub use client::Client;

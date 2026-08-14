@@ -44,7 +44,7 @@ The plain method name is the proven one. `account` proves; `account_reported` is
 unchecked exception, named for what it is. A caller lands on the safe read without
 choosing it, and takes the server's word on purpose.
 
-`VERIFY_EPOCH` is a separate integer, 1 today. A version says whether the API
+`VERIFY_EPOCH` is a separate integer, 2 today. A version says whether the API
 changed; it cannot say whether an upgrade changed what the library accepts as proven,
 because that boundary moves independently of any signature. This number rises only
 when the accept and reject boundary moves, so a caller that stored the epoch a result

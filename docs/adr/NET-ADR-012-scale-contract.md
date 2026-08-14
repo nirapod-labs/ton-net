@@ -11,7 +11,8 @@ superseded-by: none
 
 Parts of this record describe the tree as it stood when the decision was taken, and some of
 that has since been built. What moved is at the end, under [Since acceptance](#since-acceptance);
-the text above it is left as it was written.
+the text above it is left as it was written, except where a claim about the tree was found
+false and corrected, which is marked in place.
 
 ## Context
 
@@ -57,7 +58,9 @@ The present state, read from the tree rather than assumed:
   `Reader`, held in the `boc.rs` trunk and handed down; the other four take the slice whole
   and never open it as cells: `file_hash` hashes it, `compress` compresses it, and
   `decompress` and `decompress_boc` expand it, the second handing its expansion to
-  `parse_boc`. A bag larger than
+  `parse_boc`. **Corrected against the code:** the feature's fourth function, `compress_boc`,
+  takes root cells rather than a bag, so it is not an entry point for one and this list,
+  whose subject is the entry points that read a bag, does not name it. A bag larger than
   memory cannot be presented to this crate in any form, because there is no form to present
   it in.
 - Finalization is a single pass, and `ton-net-cell` runs no parallelism. Its dependencies are
@@ -86,7 +89,10 @@ NET-ADR-011 is upstream of this record. It fixes the barrier between an identity
 computed and one a bag asserted about itself, the barrier
 `crates/ton-net-cell/src/boc/parse.rs` realizes in `check_stored`, where a cell's stored
 hashes and depths are checked against what its contents give and are used in place of them on
-none of its three call sites, in `read_and_build`, in `verify_roots`, and in `build_at`.
+neither of its two call sites, reached from `read_and_build` and from `verify_roots`.
+**Corrected against the code:** this read three call sites, naming `build_at` as one of them.
+A grep returns two, and `build_at` reaches the first through `build_one` without naming
+`check_stored` itself.
 Scale is where that barrier is under the most pressure, because the cheapest way to make a
 large bag finalize quickly is to believe what it says about itself. This record does not
 reopen the barrier. Every decision below is taken on the computed side of it, and where a
