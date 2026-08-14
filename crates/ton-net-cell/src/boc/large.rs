@@ -10,7 +10,7 @@
 //! [`serialize_boc`](super::serialize_boc) produces.
 
 use super::serialize::{byte_width, index_of, push_be, topological};
-use super::{crc32c_update, BocOptions, CRC32C_INIT, MAGIC, MAX_CELLS};
+use super::{crc32c_update, BocOptions, CRC32C_INIT, MAGIC, MAX_CELLS, WITH_HASHES};
 use crate::cell::Cell;
 use crate::error::CellError;
 
@@ -61,7 +61,12 @@ pub fn serialize_boc_chunks_with(
     let mut body_len = 0usize;
     let mut offsets = Vec::with_capacity(count);
     for (cell, refs) in order.iter().zip(&children) {
-        body_len += 2 + cell.data().len() + refs.len() * ref_size;
+        let stored = if options.stored_hashes {
+            cell.identity().stored_len()
+        } else {
+            0
+        };
+        body_len += 2 + stored + cell.data().len() + refs.len() * ref_size;
         offsets.push(body_len);
     }
     let offset_size = byte_width(body_len as u64);
@@ -113,6 +118,7 @@ pub fn serialize_boc_chunks_with(
         ref_size,
         header: Some(header),
         crc_enabled: options.crc32c,
+        stored_hashes: options.stored_hashes,
         running_crc,
         cursor: 0,
         phase: Phase::Header,
@@ -136,6 +142,7 @@ pub struct BocChunks {
     ref_size: usize,
     header: Option<Vec<u8>>,
     crc_enabled: bool,
+    stored_hashes: bool,
     running_crc: u32,
     cursor: usize,
     phase: Phase,
@@ -167,8 +174,15 @@ impl Iterator for BocChunks {
                             (self.order.get(self.cursor), self.children.get(self.cursor))
                         {
                             let (d1, d2) = cell.stored_descriptors();
-                            chunk.push(d1);
+                            chunk.push(if self.stored_hashes {
+                                d1 | WITH_HASHES
+                            } else {
+                                d1
+                            });
                             chunk.push(d2);
+                            if self.stored_hashes {
+                                cell.identity().write_stored(&mut chunk);
+                            }
                             chunk.extend_from_slice(cell.data());
                             for &index in refs {
                                 push_be(&mut chunk, index as u64, self.ref_size);
@@ -226,12 +240,41 @@ mod tests {
         let roots = shared_child_bag();
         for index in [false, true] {
             for crc32c in [false, true] {
-                let options = BocOptions { index, crc32c };
-                let streamed = run(serialize_boc_chunks_with(&roots, &options).expect("streams"));
-                let whole = serialize_boc_with(&roots, &options).expect("serializes");
-                assert_eq!(streamed, whole, "index={index} crc32c={crc32c}");
+                for stored_hashes in [false, true] {
+                    let options = BocOptions::default()
+                        .with_index(index)
+                        .with_checksum(crc32c)
+                        .with_stored_hashes(stored_hashes);
+                    let streamed =
+                        run(serialize_boc_chunks_with(&roots, &options).expect("streams"));
+                    let whole = serialize_boc_with(&roots, &options).expect("serializes");
+                    assert_eq!(
+                        streamed, whole,
+                        "index={index} crc32c={crc32c} stored_hashes={stored_hashes}"
+                    );
+                }
             }
         }
+    }
+
+    /// The stored run is emitted from two call sites that share only
+    /// `Identity::write_stored`, and the streaming one sizes the body in a pass separate
+    /// from the one that emits it. The equality above catches a disagreement between them;
+    /// this catches the case where both agree and neither wrote anything.
+    #[test]
+    fn a_streamed_bag_with_stored_hashes_is_longer_than_one_without() {
+        let roots = shared_child_bag();
+        let plain =
+            run(serialize_boc_chunks_with(&roots, &BocOptions::default()).expect("streams"));
+        let stored = run(serialize_boc_chunks_with(
+            &roots,
+            &BocOptions::default().with_stored_hashes(true),
+        )
+        .expect("streams"));
+        assert!(
+            stored.len() > plain.len(),
+            "a stream with stored hashes wrote no more bytes than one without"
+        );
     }
 
     #[test]

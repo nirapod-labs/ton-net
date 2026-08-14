@@ -7,7 +7,7 @@ use std::collections::{HashMap, HashSet};
 
 use sha2::{Digest, Sha256};
 
-use super::{crc32c, MAGIC, MAX_CELLS};
+use super::{crc32c, MAGIC, MAX_CELLS, WITH_HASHES};
 use crate::cell::Cell;
 use crate::error::CellError;
 
@@ -86,25 +86,64 @@ pub(super) fn index_of(order: &[Cell]) -> HashMap<[u8; 32], usize> {
 
 /// What to write into a bag of cells beyond the cells themselves.
 ///
-/// The format carries two optional pieces past the header. An index gives the offset of
-/// each cell so a reader can reach one without walking the bag; a CRC-32C checksum trails
-/// the whole bag so a reader can refuse corrupted bytes before building anything. Neither
-/// changes which cells the bag holds, only how a reader may work over it.
+/// The format carries three optional pieces. An index gives the offset of each cell so a
+/// reader can reach one without walking the bag; a CRC-32C checksum trails the whole bag so
+/// a reader can refuse corrupted bytes before building anything; and each cell may state its
+/// own hashes and depths ahead of its data. None of them changes which cells the bag holds,
+/// only how a reader may work over it.
+///
+/// The type is `non_exhaustive` because its fields are public and a caller reads them, so a
+/// fourth option later would otherwise be a breaking change for a caller who spelled a struct
+/// literal. Reach a value through [`BocOptions::default`] and the setters beside it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct BocOptions {
     /// Write the per-cell offset index.
     pub index: bool,
     /// Write the trailing CRC-32C checksum.
     pub crc32c: bool,
+    /// Write each cell's own hashes and depths ahead of its data.
+    pub stored_hashes: bool,
 }
 
 impl Default for BocOptions {
-    /// A checksum and no index, the form [`serialize_boc`] writes.
+    /// A checksum, no index and no stored hashes, the form [`serialize_boc`] writes.
     fn default() -> Self {
         Self {
             index: false,
             crc32c: true,
+            stored_hashes: false,
         }
+    }
+}
+
+impl BocOptions {
+    /// Writes the per-cell offset index.
+    #[must_use]
+    pub fn with_index(mut self, index: bool) -> Self {
+        self.index = index;
+        self
+    }
+
+    /// Writes the trailing CRC-32C checksum.
+    #[must_use]
+    pub fn with_checksum(mut self, crc32c: bool) -> Self {
+        self.crc32c = crc32c;
+        self
+    }
+
+    /// Writes each cell's own hashes and depths ahead of its data.
+    ///
+    /// This crate's parser recomputes each cell's hashes and refuses a stored copy that
+    /// disagrees, so the run buys its reader nothing. A whole block uses this form on some of
+    /// its cells, 44 of the 1428 in the two block fixtures; this writes it on every cell.
+    ///
+    /// Off by default, because it makes a bag larger by one hash and one depth per level each
+    /// cell's mask makes significant and one of each besides.
+    #[must_use]
+    pub fn with_stored_hashes(mut self, stored_hashes: bool) -> Self {
+        self.stored_hashes = stored_hashes;
+        self
     }
 }
 
@@ -140,7 +179,8 @@ pub fn serialize_boc(roots: &[Cell]) -> Result<Vec<u8>, CellError> {
 
 /// Serializes a cell graph as a bag of cells, choosing what to write beyond the cells.
 ///
-/// This is [`serialize_boc`] with the index and checksum under the caller's control. A bag
+/// This is [`serialize_boc`] with what is written beyond the cells under the caller's
+/// control. A bag
 /// with an index states where each cell begins, and a bag with a checksum can be refused on
 /// the way back in if it is corrupt. Multiple roots are written by passing more than one:
 /// the shared cells beneath them are still stored once.
@@ -166,8 +206,15 @@ pub fn serialize_boc_with(roots: &[Cell], options: &BocOptions) -> Result<Vec<u8
     let mut offsets = Vec::with_capacity(count);
     for (cell, refs) in order.iter().zip(&children) {
         let (d1, d2) = cell.stored_descriptors();
-        body.push(d1);
+        body.push(if options.stored_hashes {
+            d1 | WITH_HASHES
+        } else {
+            d1
+        });
         body.push(d2);
+        if options.stored_hashes {
+            cell.identity().write_stored(&mut body);
+        }
         body.extend_from_slice(cell.data());
         for &index in refs {
             push_be(&mut body, index as u64, ref_size);

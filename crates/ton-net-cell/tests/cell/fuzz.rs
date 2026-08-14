@@ -314,7 +314,10 @@ fn corpus() -> Vec<Vec<u8>> {
     if let Ok(roots) = parse_boc(&unhex(ACCOUNT_PROOF)) {
         for index in [false, true] {
             for crc32c in [false, true] {
-                if let Ok(bag) = serialize_boc_with(&roots, &BocOptions { index, crc32c }) {
+                let options = BocOptions::default()
+                    .with_index(index)
+                    .with_checksum(crc32c);
+                if let Ok(bag) = serialize_boc_with(&roots, &options) {
                     seeds.push(bag);
                 }
             }
@@ -541,10 +544,10 @@ fn derived(rng: &mut Rng, corpus: &[Vec<u8>]) -> Vec<u8> {
         changed(rng, &cell)
     };
 
-    let options = BocOptions {
-        index: rng.below(2) == 0,
-        crc32c: rng.below(2) == 0,
-    };
+    let options = BocOptions::default()
+        .with_index(rng.below(2) == 0)
+        .with_checksum(rng.below(2) == 0)
+        .with_stored_hashes(rng.below(2) == 0);
     let mut bag = serialize_boc_with(&[root], &options).unwrap_or(seed);
     if rng.below(3) == 0 && !bag.is_empty() {
         let at = rng.below(bag.len());
