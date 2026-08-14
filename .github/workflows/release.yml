@@ -36,9 +36,22 @@ name: release
 on:
   push:
     tags: ["v*"]
+  # A tag is pushed once, and a job that fails after the crates are published leaves a
+  # release half out with no way to finish it: re-running replays the workflow as it was
+  # at the tag, so a fix on the default branch never reaches it. That happened on v0.4.0.
+  # A dispatch runs this file from the branch it is dispatched from, against the tag it
+  # names, and skips the registry the push already reached.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: The tag to finish publishing.
+        required: true
 
 env:
   CARGO_TERM_COLOR: always
+  # A push carries the tag in its ref. A dispatch runs from the default branch, so its
+  # ref names that branch and the tag has to be said.
+  RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
 
 # The floor, raised per job where a job earns it. `id-token: write` is the whole
 # credential story and belongs only to the two jobs that publish: it lets them ask
@@ -62,6 +75,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.RELEASE_TAG }}
       - uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
         with:
           toolchain: stable
@@ -78,10 +93,10 @@ jobs:
       - name: the tag matches the manifests
         run: |
           set -euo pipefail
-          tagged="${GITHUB_REF_NAME#v}"
+          tagged="${RELEASE_TAG#v}"
           declared=$(node -p "require('./bindings/node/package.json').version")
           if [ "$tagged" != "$declared" ]; then
-            echo "::error::tag $GITHUB_REF_NAME does not match the declared version $declared"
+            echo "::error::tag $RELEASE_TAG does not match the declared version $declared"
             exit 1
           fi
           node scripts/check-versions.mjs
@@ -89,6 +104,9 @@ jobs:
 
   crates:
     needs: gate
+    # A dispatch is for finishing a release whose crates are already out. Publishing a
+    # version twice is an error on crates.io, not a no-op.
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     # Scoped to the environment the trusted publishers name. A required reviewer here
     # is what makes a tag push insufficient on its own.
@@ -98,6 +116,8 @@ jobs:
       id-token: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.RELEASE_TAG }}
       - uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
         with:
           toolchain: stable
@@ -128,7 +148,12 @@ jobs:
           done
 
   npm:
-    needs: crates
+    needs: [gate, crates]
+    # `always()` so a skipped crates job does not carry this one away with it. The gate
+    # still has to have passed, and a crates job that failed still stops the release.
+    if: |
+      always() && needs.gate.result == 'success'
+      && needs.crates.result != 'failure' && needs.crates.result != 'cancelled'
     runs-on: ubuntu-latest
     environment: release
     permissions:
@@ -138,6 +163,8 @@ jobs:
       actions: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.RELEASE_TAG }}
 
       # Trusted publishing needs node 22.14.0 and npm 11.5.1.
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -159,9 +186,12 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
+          # The commit the tag names, read from the checkout rather than from the run: on
+          # a dispatch the run's own sha is the branch it was dispatched from.
+          sha=$(git rev-parse HEAD)
           # Both workflows start on the same push, so this one is usually still running.
           for _ in $(seq 60); do
-            run=$(gh run list --workflow build-binding.yml --commit "$GITHUB_SHA" \
+            run=$(gh run list --workflow build-binding.yml --commit "$sha" \
                     --limit 1 --json databaseId,status,conclusion \
                     --jq '.[0] | select(.status=="completed" and .conclusion=="success") | .databaseId')
             if [ -n "$run" ]; then
@@ -170,7 +200,7 @@ jobs:
             fi
             sleep 30
           done
-          echo "::error::no successful build-binding run for $GITHUB_SHA"
+          echo "::error::no successful build-binding run for $sha"
           exit 1
 
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
@@ -185,7 +215,11 @@ jobs:
         working-directory: bindings/node
         run: |
           set -euo pipefail
-          npm ci
+          # `npm install`, not `npm ci`. The lock cannot name the per-platform packages at
+          # a version that is not on the registry yet, and this step runs before they are
+          # published, so `npm ci` refuses the tree it is given every time. The node job in
+          # `ci.yml` reaches the same conclusion for the same reason.
+          npm install --no-audit --no-fund
           # Rebuilds the npm/<target> directories from the napi config, then moves each
           # downloaded .node into the one that names its triple.
           npx napi create-npm-dirs
@@ -218,6 +252,8 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.RELEASE_TAG }}
 
       # The release notes are the changelog entry. Writing them twice is how the two
       # come to disagree, so the section for this version is lifted out rather than
@@ -227,7 +263,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          version="${GITHUB_REF_NAME#v}"
+          version="${RELEASE_TAG#v}"
           awk -v v="$version" '
             $0 ~ "^## \\[" v "\\]" { inside = 1; next }
             inside && /^## / { exit }
@@ -237,4 +273,4 @@ jobs:
             echo "::error::CHANGELOG.md has no section for $version"
             exit 1
           fi
-          gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --notes-file notes.md
+          gh release create "$RELEASE_TAG" --title "$RELEASE_TAG" --notes-file notes.md
