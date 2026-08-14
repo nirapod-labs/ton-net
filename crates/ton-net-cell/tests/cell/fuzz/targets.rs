@@ -599,15 +599,9 @@ pub(super) fn compressed(bytes: &[u8]) -> bool {
             .and_then(|prefix| <[u8; 4]>::try_from(prefix).ok())
             .map(u32::from_le_bytes)
             .and_then(|named| usize::try_from(named).ok());
-        // The check is `<=` rather than `==`, and that is a statement about the code as it
-        // stands rather than a weaker property chosen for comfort. `decompress` documents
-        // that it refuses bytes that "do not expand to the length they name", and the
-        // decoder underneath treats the prefix as the size to allocate rather than the size
-        // to produce: it fills a buffer of that length, decodes into it, and truncates to
-        // what the body gave. A body that produces fewer bytes than its prefix names
-        // therefore comes back short rather than refused, so equality does not hold today.
-        // What does hold, and what the cap in front of it is for, is that nothing comes back
-        // longer than the prefix.
+        // The bound is `<=`, not `==`: the decoder sizes its buffer from the prefix and
+        // truncates to what the body gave, so a short body comes back short. Nothing comes
+        // back longer.
         assert!(
             named.is_some_and(|named| expanded.len() <= named),
             "decompression ran past the length the input named"
