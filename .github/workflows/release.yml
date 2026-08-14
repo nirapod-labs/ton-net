@@ -103,7 +103,10 @@ jobs:
       - run: just gate
 
   crates:
-    needs: gate
+    # Last, and after npm, because crates.io yanks but never deletes while npm admits an
+    # unpublish for a time. The irreversible commitment is not made until every reversible
+    # one has succeeded, so a failure anywhere else costs no version.
+    needs: [gate, npm]
     # A dispatch is for finishing a release whose crates are already out. Publishing a
     # version twice is an error on crates.io, not a no-op.
     if: github.event_name == 'push'
@@ -148,12 +151,7 @@ jobs:
           done
 
   npm:
-    needs: [gate, crates]
-    # `always()` so a skipped crates job does not carry this one away with it. The gate
-    # still has to have passed, and a crates job that failed still stops the release.
-    if: |
-      always() && needs.gate.result == 'success'
-      && needs.crates.result != 'failure' && needs.crates.result != 'cancelled'
+    needs: gate
     runs-on: ubuntu-latest
     environment: release
     permissions:
@@ -246,7 +244,12 @@ jobs:
         run: npm publish --access public --provenance
 
   announce:
-    needs: npm
+    needs: [npm, crates]
+    # `always()` so a crates job skipped by a dispatch does not carry this one away. Both
+    # registries still have to have not failed.
+    if: |
+      always() && needs.npm.result == 'success'
+      && needs.crates.result != 'failure' && needs.crates.result != 'cancelled'
     runs-on: ubuntu-latest
     permissions:
       contents: write
