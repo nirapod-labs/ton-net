@@ -20,7 +20,7 @@ default:
     @just --list
 
 # Everything the hermetic CI gate runs. No network.
-gate: fmt-check lint typos licenses workflows versions default-deps test doc
+gate: fmt-check lint typos licenses workflows versions default-deps census test doc
 
 # A moved action tag is somebody else's code in this build. Also checks that a workflow
 # states what it may write and that a fork's schedule does not run it.
@@ -37,6 +37,13 @@ deny:
 # toolchains that do not read each other, so nothing but this keeps them in step.
 versions:
     node scripts/check-versions.mjs
+
+# A count stated in prose against the set it counts: the facade's re-exports against the
+# document that lists them, and a count of a crate's features against its manifest. Both
+# are written from a reading that was correct and go stale in a commit that never opens
+# the document.
+census:
+    node scripts/check-surface-census.mjs
 
 # Whether the cell engine's optional dependencies are still optional. `test` already
 # compiles and runs the default build, so the narrow thing left unchecked is that lz4_flex
