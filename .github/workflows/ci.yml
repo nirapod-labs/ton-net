@@ -232,6 +232,12 @@ jobs:
       # numbers.
       - name: one version everywhere
         run: node scripts/check-versions.mjs
+      # The same failure one step out from a number: a count stated in prose about a
+      # set the compiler owns. The facade's re-export list and a crate's feature table
+      # both move in commits that have no reason to open the document counting them,
+      # and every other check here reads spelling, links or types rather than a census.
+      - name: stated counts match what they count
+        run: node scripts/check-surface-census.mjs
       # What crates.io would accept, including the metadata it requires and the
       # files each package would carry. Cargo resolves the inter-crate
       # dependencies through a temporary local registry, so this runs before the
