@@ -15,6 +15,16 @@ never published.
 
 ### Added
 
+- `base64_encode`, `base64_decode`, `hex_encode` and `hex_decode` in
+  `ton-net-cell`, the two spellings a serialized bag and a cell hash travel in,
+  with `CellError::Encoding` for a string that is not one they read. `base64_decode`
+  takes the canonical standard-alphabet form and nothing else, so a byte string has
+  one base64 spelling and a caller keying a map on the written form of a hash cannot
+  hold the same hash twice. The URL-safe alphabet is refused here because it is the
+  spelling of a user-friendly address, which is parsed in `ton-net`; which alphabets an
+  address may be written in is undecided and is recorded beside that parser rather than
+  settled here. `hex_decode` reads either case and refuses the leading `+` that
+  `u8::from_str_radix` accepts.
 - `BocOptions::with_stored_hashes`, which writes each cell's own hashes and
   depths ahead of its data, the form the parser has always read and checked. Off
   by default: it makes a bag larger and buys nothing to a reader that recomputes,
@@ -130,6 +140,13 @@ never published.
   holding a `&mut Slice` are unaffected.
 
 ### Fixed
+
+- `from_json`, behind the `json` feature, read a cell's hex data with
+  `u8::from_str_radix`, which accepts a leading `+`. Both `+f` and `0f` answered 15
+  and both are two characters, so the even-length check passed them alike and a cell
+  gained a second JSON spelling for every byte below `0x10` it held. It now reads
+  `hex_decode`, and the two messages a malformed `data` field reports are unchanged. Case is
+  still read either way, which is a second spelling this does not close.
 
 - `parse_boc` no longer narrows the stated cell area size before the check that
   holds a bag to it. Where `usize` is 32 bits, which is every wasm target, a bag

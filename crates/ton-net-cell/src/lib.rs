@@ -30,6 +30,11 @@
 //! is the way back: outside this crate a cell comes from parsing or from a builder and
 //! from nowhere else.
 //!
+//! A bag and a hash travel as text more often than as bytes, so [`base64_encode`] and
+//! [`hex_encode`] write one down and [`base64_decode`] and [`hex_decode`] read it back.
+//! What each reader takes beyond what its own encoder writes is stated on the reader:
+//! base64 takes that one spelling and nothing else, hex takes either case.
+//!
 //! [`Dict`] is TON's dictionary, a radix tree over fixed-width keys that carries almost
 //! everything a block holds. It sits here rather than above the block types because it
 //! belongs to the cell model: the virtual machine has opcodes for it, and a wallet needs
@@ -78,6 +83,7 @@
 mod boc;
 mod builder;
 mod cell;
+mod codec;
 mod dict;
 mod error;
 mod merkle;
@@ -101,6 +107,7 @@ pub use builder::Builder;
 #[cfg(feature = "json")]
 pub use cell::json;
 pub use cell::{Cell, CellType, Identity, MAX_BITS, MAX_REFS};
+pub use codec::{base64_decode, base64_encode, hex_decode, hex_encode};
 pub use dict::{
     AugDict, AugDictIter, AugEntry, AugItem, AugNode, Augmentation, Dict, DictEntry, DictIter,
     ForkExtra, Lookup, PfxDict, PfxDictIter, PfxMatch, Traverse,
