@@ -245,7 +245,16 @@ config names, `with_max_head_age` returns a config with a different freshness
 bound, and `max_head_age` reads the current one.
 
 `Address` parses both the raw `workchain:hex` form and the user-friendly base64
-form, verifying the checksum on the latter and refusing a non-canonical spelling.
+form, verifying the checksum on the latter. Within one base64 alphabet it refuses a
+non-canonical spelling, so a character appended to a 48-character address is not a
+second string for the same account. Across the two alphabets it does not: `-` and
+`+` both decode to 62 and `_` and `/` both to 63, so an address written either way
+parses, and the two parse equal. Which alphabets a user-friendly address may be
+written in is an open question this repository does not settle, and the decoder is
+left taking both rather than narrowed on a preference; the reasoning and the test
+that pins the count sit on `base64_decode` in `crates/ton-net/src/codec.rs`. A
+caller that needs one identity per account compares parsed `Address` values, which
+is what equality here is for, rather than the strings they came from.
 It exposes `workchain` and `account_id`, and the two sending hints the
 user-friendly form carries, `is_bounceable` and `is_test_only`. The hints say how
 a message should be sent and which network an address was written for, not which

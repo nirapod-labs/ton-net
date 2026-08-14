@@ -15,6 +15,7 @@ use serde_json::{json, Value};
 
 use super::{Cell, MAX_BITS};
 use crate::builder::Builder;
+use crate::codec::{hex_decode, hex_encode};
 use crate::error::CellError;
 
 /// Renders an ordinary cell tree as JSON.
@@ -38,7 +39,7 @@ pub fn to_json(cell: &Cell) -> Result<Value, CellError> {
         .collect::<Result<Vec<_>, _>>()?;
     Ok(json!({
         "bits": cell.bit_len(),
-        "data": hex(cell.data()),
+        "data": hex_encode(cell.data()),
         "refs": refs,
     }))
 }
@@ -84,29 +85,18 @@ pub fn from_json(value: &Value) -> Result<Cell, CellError> {
     builder.build()
 }
 
-/// The lowercase hex of `bytes`.
-fn hex(bytes: &[u8]) -> String {
-    use std::fmt::Write as _;
-    bytes.iter().fold(String::new(), |mut out, byte| {
-        let _ = write!(out, "{byte:02x}");
-        out
-    })
-}
-
-/// Reads a hex string into its bytes.
+/// Reads a hex string into its bytes, under this form's own wording for why it failed.
+///
+/// The length is checked here and again inside [`hex_decode`] because the two failures
+/// are worth telling apart in a JSON value: a caller who wrote an odd number of
+/// characters made a different mistake from one who wrote a character that is not a hex
+/// digit. Once the length is even the only failure left is the character, so the map
+/// below loses nothing.
 fn unhex(text: &str) -> Result<Vec<u8>, CellError> {
     if text.len() % 2 != 0 {
         return Err(CellError::Malformed("cell json data is not whole bytes"));
     }
-    (0..text.len() / 2)
-        .map(|i| {
-            let pair = text
-                .get(i * 2..i * 2 + 2)
-                .ok_or(CellError::Malformed("cell json data is not hex"))?;
-            u8::from_str_radix(pair, 16)
-                .map_err(|_| CellError::Malformed("cell json data is not hex"))
-        })
-        .collect()
+    hex_decode(text).map_err(|_| CellError::Malformed("cell json data is not hex"))
 }
 
 /// The bit at `index` of `data`, most significant bit first, false past the end.
@@ -182,5 +172,24 @@ mod tests {
             from_json(&json!({ "bits": 8, "data": "zz", "refs": [] })),
             Err(CellError::Malformed("cell json data is not hex")),
         );
+    }
+
+    #[test]
+    fn data_with_a_leading_sign_is_refused() {
+        // `u8::from_str_radix` takes a leading `+`, so a reader built on it answers 15
+        // for `+f` as well as for `0f`. Both are two characters, so the even-length check
+        // waves them both through, and a cell gains a second spelling for every byte
+        // below 0x10 it holds: four for the two below. Case is a second spelling too and
+        // is not refused, so this closes one family and does not make the form canonical.
+        let canonical = from_json(&json!({ "bits": 16, "data": "0f0f", "refs": [] }))
+            .expect("the hex spelling builds");
+        for spelling in ["+f0f", "0f+f", "+f+f"] {
+            assert_eq!(
+                from_json(&json!({ "bits": 16, "data": spelling, "refs": [] })),
+                Err(CellError::Malformed("cell json data is not hex")),
+                "`{spelling}` was read as hex",
+            );
+        }
+        assert_eq!(canonical.data(), &[0x0f, 0x0f]);
     }
 }

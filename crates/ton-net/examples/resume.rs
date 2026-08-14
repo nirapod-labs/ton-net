@@ -98,9 +98,7 @@ fn hex(bytes: &[u8; 32]) -> String {
 }
 
 fn unhex(text: &str) -> Option<[u8; 32]> {
-    let bytes: Vec<u8> = (0..text.len())
-        .step_by(2)
-        .map(|i| u8::from_str_radix(text.get(i..i + 2)?, 16).ok())
-        .collect::<Option<_>>()?;
-    bytes.try_into().ok()
+    // Through the crate's own reader rather than `from_str_radix`, which accepts a leading
+    // `+` and so reads "+f" as a second spelling of "0f".
+    ton_net_cell::hex_decode(text).ok()?.try_into().ok()
 }
