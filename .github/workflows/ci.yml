@@ -107,6 +107,11 @@ jobs:
         run: |
           cargo test
           cargo test -p ton-net-cell --all-features
+      # The bare `cargo test` two lines up compiles and runs the default build, so this is
+      # not asking whether that build works. It asks whether the two optional dependencies
+      # are still absent from it. `scripts/check-default-deps.mjs` carries the reasoning.
+      - name: optional dependencies stayed optional
+        run: node scripts/check-default-deps.mjs
 
   mutants:
     name: would a test notice a missing check

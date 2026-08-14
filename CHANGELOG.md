@@ -15,6 +15,22 @@ never published.
 
 ### Added
 
+- The `ton-net` facade re-exports the cell types its own methods answer with:
+  `Slice`, `Identity`, `Builder`, `CellError`, `Dict`, `DictEntry`, `DictIter`,
+  `Lookup` and `MsgAddress`, beside the `Cell` and `CellType` it already carried.
+  A consumer could call `Cell::parse`, `Cell::identity` or `Cell::to_boc` through
+  the facade and had nowhere to put the result, because naming the type meant
+  naming a crate the facade presents as internal. `parse_boc` and `serialize_boc`
+  come with them, since `Client::account_state` hands a proof and a state back as
+  raw bag bytes and a facade consumer could write a bag out and not read one back,
+  as do `MAX_CELLS`, `MAX_DEPTH`, `MAX_BITS` and `MAX_REFS`. No feature of the cell
+  engine is forwarded; `docs/api-design.md` says why for each.
+- `just default-deps`, in the gate, asserting that the cell engine's default
+  feature set names neither `lz4_flex` nor `serde_json`. The default build was
+  already compiled and tested; what nothing asserted was that the two optional
+  dependencies stay out of it, which held only as a consequence of two
+  `optional = true` lines. NET-ADR-010 lists the lz4_flex half as a verification
+  item.
 - `base64_encode`, `base64_decode`, `hex_encode` and `hex_decode` in
   `ton-net-cell`, the two spellings a serialized bag and a cell hash travel in,
   with `CellError::Encoding` for a string that is not one they read. `base64_decode`

@@ -20,7 +20,7 @@ default:
     @just --list
 
 # Everything the hermetic CI gate runs. No network.
-gate: fmt-check lint typos licenses workflows versions census test doc
+gate: fmt-check lint typos licenses workflows versions default-deps census test doc
 
 # A moved action tag is somebody else's code in this build. Also checks that a workflow
 # states what it may write and that a fork's schedule does not run it.
@@ -44,6 +44,14 @@ versions:
 # the document.
 census:
     node scripts/check-surface-census.mjs
+
+# Whether the cell engine's optional dependencies are still optional. `test` already
+# compiles and runs the default build, so the narrow thing left unchecked is that lz4_flex
+# and serde_json stay out of it. Naming either feature in a `default` list puts its crate in
+# every build with nothing failing, which is the silent mutation this catches; dropping the
+# `optional` line alone is caught by cargo, which refuses the manifest.
+default-deps:
+    node scripts/check-default-deps.mjs
 
 # Regenerates the notices the npm tarballs carry. The `.node` links its whole
 # dependency tree in, so publishing it redistributes eighty-odd other projects and
