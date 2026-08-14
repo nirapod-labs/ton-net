@@ -35,6 +35,10 @@
 //! boundary rather than to be numerous: the anchor, the proof bytes, the state bytes, the
 //! account asked about, and a whole valid state belonging to somebody else.
 //!
+//! Beside them sits one case that damages nothing: the same read re-encoded into a bag the
+//! reader once turned away. An edit can only show that a refusal stayed a refusal, so a
+//! move in the other direction needs a case that is legal and was refused anyway.
+//!
 //! Every refusal reads `PROOF`, and that is the facade's design rather than a loss here:
 //! bytes handed over as a proof that do not parse are a server failing to prove its
 //! answer, so they are not sorted into a separate kind. The transcript is therefore
@@ -59,13 +63,14 @@ const OTHER_READ: &str = include_str!("fixtures/read-basechain.txt");
 /// Regenerate by running with `--nocapture` and reading the printed transcript, but only
 /// after deciding the change was meant.
 const TRANSCRIPT: &str = "\
-epoch 1
+epoch 2
 account-substituted     -> refused PROOF
 anchor-flipped          -> refused PROOF
 captured                -> proved 222859282039087 active
 proof-empty             -> refused PROOF
 proof-flipped           -> refused PROOF
 proof-is-not-a-bag      -> refused PROOF
+proof-roots-repeated    -> proved 222859282039087 active
 proof-truncated         -> refused PROOF
 state-empty             -> refused PROOF
 state-flipped           -> refused PROOF
@@ -129,6 +134,24 @@ fn verdict(anchor: &[u8; 32], account: &[u8; 32], proof: &[u8], state: &[u8]) ->
     }
 }
 
+/// Rewrites a bag with its first root repeated until the root list is longer than the cell
+/// list, which is the shape the reader refused before epoch 2.
+///
+/// The cells are untouched and every root entry names one of them, so the proof this returns
+/// stands for exactly what the captured one stands for.
+fn roots_repeated(bag: &[u8]) -> Vec<u8> {
+    let roots = ton_net_cell::parse_boc(bag).expect("the captured proof parses");
+    let cells = ton_net_cell::BocView::open(bag)
+        .expect("the captured proof opens")
+        .cell_count();
+
+    let mut repeated = roots.clone();
+    while repeated.len() <= cells {
+        repeated.push(roots[0].clone());
+    }
+    ton_net_cell::serialize_boc(&repeated).expect("the repeated roots write back")
+}
+
 /// Flips one bit a good way into the buffer, past any header.
 fn flip(bytes: &[u8]) -> Vec<u8> {
     let mut out = bytes.to_vec();
@@ -175,6 +198,12 @@ fn the_accepted_set_is_what_the_epoch_claims() {
             ),
         ),
         ("proof-empty", verdict(&anchor, &account, &[], &read.state)),
+        (
+            // A legal bag, not an edit: a root list may name one cell twice, so a bag may
+            // state more roots than distinct cells, which the reader refused before epoch 2.
+            "proof-roots-repeated",
+            verdict(&anchor, &account, &roots_repeated(&read.proof), &read.state),
+        ),
         (
             "proof-is-not-a-bag",
             verdict(&anchor, &account, b"not a bag of cells", &read.state),
