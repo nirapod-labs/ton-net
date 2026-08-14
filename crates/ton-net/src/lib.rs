@@ -130,8 +130,45 @@ pub use ton_net_lite::{AccountState, BlockIdExt, MasterchainInfo, ServerReported
 /// The decoded chain structures, defined in ton-net-block and surfaced here.
 pub use ton_net_block::{Account, AccountRead, AccountStatus, Coins};
 
-/// The cell types a decoded account carries, defined in ton-net-cell and surfaced here.
-pub use ton_net_cell::{Cell, CellType};
+/// The cell model a decoded account carries, defined in ton-net-cell and surfaced here.
+///
+/// The list is the closure of one rule over the cell model: a type a method on a
+/// re-exported cell type answers with is nameable here, or that method is unusable
+/// through the facade. An [`Account`] carries its code and data as [`Cell`]s, and from a
+/// [`Cell`] the answers this reaches are a [`Slice`] from [`Cell::parse`], an
+/// [`Identity`] from [`Cell::identity`], a [`Builder`] from [`Cell::to_builder`], and a
+/// [`CellError`] from every read that can fail. Types a cell answers with that need no
+/// name of their own, a `Vec<u8>` from [`Cell::to_boc`] and a `String` from
+/// [`Cell::dump`], are outside it. A
+/// [`Slice`] adds the [`Dict`] that [`Slice::load_dict`] answers with, the [`Lookup`],
+/// [`DictEntry`] and [`DictIter`] that a dictionary is read through, and the
+/// [`MsgAddress`] that [`Slice::load_address`] reads.
+///
+/// [`MsgAddress`] is the wire form an address takes inside a message, which is not
+/// [`Address`]: that one is the form a person writes and a caller parses.
+///
+/// The block layer is not closed the same way. [`Account::decode`] answers with a
+/// `BlockError`, which is not nameable here, so a caller reads that failure through the
+/// `From` conversion into [`Error`] rather than by naming it. Closing that is a separate
+/// decision about which layer's error a consumer sees.
+///
+/// What the rule does not pull in stays out. The augmented and prefix dictionaries, the
+/// proof builders, and the streaming readers are reachable from no method on a type this
+/// crate returns, so a consumer whose need is the cell engine on its own depends on
+/// ton-net-cell rather than finding half of it here.
+pub use ton_net_cell::{
+    Builder, Cell, CellError, CellType, Dict, DictEntry, DictIter, Identity, Lookup, MsgAddress,
+    Slice,
+};
+
+/// The bag-of-cells codec, defined in ton-net-cell and surfaced here.
+///
+/// [`Client::account_state`] hands a proof and a state back as raw bag bytes, and
+/// [`AccountState`] documents them as such, so a facade with [`Cell::to_boc`] and no
+/// [`parse_boc`] can write a bag out and cannot read one in. [`MAX_CELLS`] and
+/// [`MAX_DEPTH`] are the bounds a parse refuses past; [`MAX_BITS`] and [`MAX_REFS`] are
+/// the bounds one cell holds within.
+pub use ton_net_cell::{parse_boc, serialize_boc, MAX_BITS, MAX_CELLS, MAX_DEPTH, MAX_REFS};
 
 // The README ships to crates.io and cannot be replaced once a version is published,
 // so its examples are compiled here rather than trusted. Doc-only: this does not

@@ -41,14 +41,59 @@ The re-exported surface, grouped by where each type is defined:
 - From the liteserver layer: `ServerReported`, `BlockIdExt`, `MasterchainInfo`,
   `AccountState`.
 - From the block layer: `Account`, `AccountStatus`, `AccountRead`, `Coins`.
-- From the cell layer: `Cell`, `CellType`.
+- From the cell layer: the model, `Cell`, `CellType`, `Identity`, `Slice`,
+  `Builder`, `CellError`, `Dict`, `DictEntry`, `DictIter`, `Lookup` and
+  `MsgAddress`; and the bag codec, `parse_boc`, `serialize_boc`, `MAX_CELLS`,
+  `MAX_DEPTH`, `MAX_BITS` and `MAX_REFS`.
+
+Which types the cell layer contributes is decided by a rule rather than by
+taste, because a closed facade is a promise that fails quietly otherwise. A
+method answering with a type the facade does not re-export is a method a
+consumer cannot use: the call compiles inside the workspace, where every crate
+is a path away, and outside it the result has nowhere to go. The cell model is
+re-exported to that closure: every type a method on a re-exported cell type
+answers with is nameable here. The block layer is not: `Account::decode` answers
+with a `BlockError` the facade does not re-export, so that failure is read
+through the conversion into `Error` rather than by naming it, and closing that is
+a separate decision about which layer's error a consumer sees. An `Account`
+carries its code and data as `Cell`s, and from a `Cell` that rule reaches
+`Slice`, `Identity`, `Builder` and `CellError`, then through a `Slice` the
+`Dict` it loads, the `Lookup`, `DictEntry` and `DictIter` a dictionary is read
+through, and the `MsgAddress` a message carries. `MsgAddress` is the wire form
+of an address and is not `Address`, which is the form a person writes.
+`crates/ton-net/tests/surface.rs` holds the rule for the methods it enumerates,
+by binding each result to a name written as `ton_net::`.
+
+The bag codec is here for a different reason. `account_state` hands a proof and
+a state back as raw bag-of-cells bytes, so a facade carrying `Cell::to_boc` and
+no `parse_boc` could write a bag and not read one, and that escape hatch would
+dead-end. The four constants are the bounds a parse refuses past and the bounds
+one cell holds within.
+
+What the rule does not reach stays out: the augmented and prefix dictionaries,
+the proof builders and usage tracking, and the streaming and chunked readers are
+reachable from no method on a type the facade returns. No feature of the cell engine
+is forwarded, and each is out for its own reason. `parallel` pulls no dependency
+and splits a wide finalization wave across threads, so forwarding it would start
+threads under a caller running several parses beside each other, which is the
+caller's choice to make and not this crate's. `json` renders a cell as a
+`serde_json::Value`, so forwarding it would put a type the facade does not
+re-export back into a facade signature, and would pin the facade's public API to
+serde_json's major version. `compress` is clean on types, dealing only in
+`Vec<u8>`, `Cell` and `CellError`, and waits on the build rather than on the
+surface: no read here returns a compressed bag and no method takes one, and the
+gate compiles, lints and documents the facade in one configuration, so a feature
+the gate does not build is code rotting behind a flag. It is forwarded when a
+read or a write here handles a compressed bag, together with the lane that keeps
+it compiled.
 
 The facade owns the connection lifecycle, address parsing, the bundled network
 config, block-sync, and the type distinction between a proven read and a
 reported one. A caller who needs only the cell model or only a decoded account
 can depend on the lower crate directly, because each crate is publishable on its
-own, but the facade is the surface the API is designed around and the one this
-document describes.
+own, and that is also how the cell engine's features are reached today, but
+the facade is the surface the API is designed around and the one this document
+describes.
 
 ## Two kinds of read
 
