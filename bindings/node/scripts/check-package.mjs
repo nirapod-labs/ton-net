@@ -24,10 +24,34 @@ const FORBIDDEN = [/^src\//, /^scripts\//, /\.node$/, /^test\.mjs$/, /^npm\//, /
 
 const problems = [];
 
-const packed = JSON.parse(
-  execFileSync("npm", ["pack", "--dry-run", "--json"], { cwd: binding, encoding: "utf8" }),
-);
-const shipped = packed[0].files.map((entry) => entry.path);
+// Only stdout is captured. `npm pack` runs the prepack script, whose own output would
+// otherwise land in the same stream as the JSON, and inheriting stderr keeps npm's
+// notices where a reader can still see them.
+const raw = execFileSync("npm", ["pack", "--dry-run", "--json"], {
+  cwd: binding,
+  encoding: "utf8",
+  stdio: ["ignore", "pipe", "inherit"],
+});
+
+// The shape is read rather than assumed. npm has reported this as a one-element array,
+// and a release failed here on a newer npm that answered with something else, with a
+// TypeError naming a property instead of the output that produced it. Whatever arrives,
+// this either finds the file list or says what it got.
+let parsed;
+try {
+  parsed = JSON.parse(raw);
+} catch (error) {
+  console.error(`npm pack --json did not return JSON: ${error.message}`);
+  console.error(raw.slice(0, 400));
+  process.exit(1);
+}
+const entry = Array.isArray(parsed) ? parsed[0] : parsed;
+if (!entry || !Array.isArray(entry.files)) {
+  console.error("npm pack --json returned no file list for the main package");
+  console.error(JSON.stringify(parsed).slice(0, 400));
+  process.exit(1);
+}
+const shipped = entry.files.map((file) => file.path);
 
 for (const name of REQUIRED) {
   if (!shipped.includes(name)) {
