@@ -212,6 +212,32 @@ impl Identity {
         }
     }
 
+    /// How many bytes a bag carries for this identity where a cell states its own hashes.
+    ///
+    /// One hash and one depth per level the mask makes significant, and one of each besides.
+    pub(crate) fn stored_len(&self) -> usize {
+        self.count() * (32 + 2)
+    }
+
+    /// Writes those bytes onto `out`, every hash first and then every depth, which is the
+    /// order the reader takes them back in.
+    ///
+    /// This cannot come up short. [`Identity::blank`] takes the room for `count` hashes from
+    /// the mask alone and `Extra` holds a fixed array, so every slot below the count is there
+    /// to be read. The test below holds that for every mask the model defines.
+    pub(crate) fn write_stored(&self, out: &mut Vec<u8>) {
+        for index in 0..self.count() {
+            if let Some(hash) = self.hash(index) {
+                out.extend_from_slice(hash);
+            }
+        }
+        for index in 0..self.count() {
+            if let Some(depth) = self.depth(index) {
+                out.extend_from_slice(&depth.to_be_bytes());
+            }
+        }
+    }
+
     /// The hash for `level`, with levels above the cell's own answering with its topmost.
     ///
     /// The fallback is the cell's lowest hash rather than a zero hash. A cell that answered
@@ -359,4 +385,33 @@ pub(super) fn compute(
         ));
     }
     Ok(identity)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Identity;
+
+    #[test]
+    fn a_stored_run_is_the_length_it_declares_for_every_mask() {
+        // The whole domain rather than a sample: a level mask is three bits, so eight values
+        // is every mask the cell model defines. `write_stored` is infallible and writes what
+        // `stored_len` states, and the two are derived separately, so this is what holds them
+        // together. A run shorter than its declared length would be a bag whose stated cell
+        // area no reader could reconcile.
+        for mask in 0..=0b111u8 {
+            let identity = Identity::blank(mask).expect("the model defines a three-bit mask");
+            let mut written = Vec::new();
+            identity.write_stored(&mut written);
+            assert_eq!(
+                written.len(),
+                identity.stored_len(),
+                "mask {mask:#05b} wrote a run of a different length than it declares"
+            );
+            assert_eq!(
+                identity.stored_len(),
+                identity.count() * 34,
+                "mask {mask:#05b} declares a length that is not one hash and one depth per level"
+            );
+        }
+    }
 }

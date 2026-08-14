@@ -129,7 +129,7 @@ fn read_raw(reader: &mut Reader<'_>, header: &Header) -> Result<Vec<RawCell>, Ce
         // level its mask marks and one more besides. A whole block arrives this way; a
         // Merkle proof does not. None of it is taken on trust: it is checked against what
         // the cell's own contents give, so a bag that describes itself wrongly is refused.
-        let stored = if d1 & 16 != 0 {
+        let stored = if d1 & super::WITH_HASHES != 0 {
             let per_level = level_mask.count_ones() as usize + 1;
             let at = reader.consumed();
             let taken = reader.take(per_level * (32 + 2))?;
@@ -1163,14 +1163,8 @@ mod tests {
         while level.len() > 1 {
             level = level.chunks(MAX_REFS).map(&mut numbered).collect();
         }
-        serialize_boc_with(
-            &level,
-            &BocOptions {
-                index: false,
-                crc32c: false,
-            },
-        )
-        .expect("the fan serializes")
+        serialize_boc_with(&level, &BocOptions::default().with_checksum(false))
+            .expect("the fan serializes")
     }
 
     /// The plan a serialized bag finalizes under.
