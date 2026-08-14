@@ -35,6 +35,12 @@ use parse::{build_at, build_cell, read_and_build, read_cells, verify_roots, Buil
 /// The four bytes every bag of cells begins with.
 const MAGIC: [u8; 4] = [0xb5, 0xee, 0x9c, 0x72];
 
+/// The bit in a cell's first descriptor byte that says its hashes and depths sit ahead of
+/// its data.
+///
+/// The one bit of the descriptor a writer chooses; every other bit comes from the cell.
+const WITH_HASHES: u8 = 0x10;
+
 /// The most cells [`parse_boc`] will read from one bag.
 ///
 /// A bag arrives from a liteserver, which is not trusted, so a declared cell count is
@@ -565,7 +571,10 @@ mod tests {
         let expected = *roots[0].repr_hash();
         for index in [false, true] {
             for crc32c in [false, true] {
-                let bag = serialize_boc_with(&roots, &BocOptions { index, crc32c }).unwrap();
+                let options = BocOptions::default()
+                    .with_index(index)
+                    .with_checksum(crc32c);
+                let bag = serialize_boc_with(&roots, &options).unwrap();
                 let back = parse_boc(&bag).expect("the bag reads back");
                 assert_eq!(
                     *back[0].repr_hash(),
@@ -591,22 +600,8 @@ mod tests {
         // The index adds count offsets between the roots and the cells, so the bag is longer
         // by exactly that, and still reads back to the same cells.
         let roots = parse_boc(&TWO_CELLS).unwrap();
-        let plain = serialize_boc_with(
-            &roots,
-            &BocOptions {
-                index: false,
-                crc32c: true,
-            },
-        )
-        .unwrap();
-        let indexed = serialize_boc_with(
-            &roots,
-            &BocOptions {
-                index: true,
-                crc32c: true,
-            },
-        )
-        .unwrap();
+        let plain = serialize_boc_with(&roots, &BocOptions::default().with_index(false)).unwrap();
+        let indexed = serialize_boc_with(&roots, &BocOptions::default().with_index(true)).unwrap();
         assert!(indexed.len() > plain.len(), "the index takes room");
         assert_eq!(
             parse_boc(&indexed).unwrap()[0].repr_hash(),
