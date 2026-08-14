@@ -13,6 +13,13 @@ never published.
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-08-14
+
+The cell engine at full capability: builders and slices without a gap between
+what can be written and what can be read back, every dictionary variant, usage
+trees, virtualization, Merkle proof and update creation, and the bag-of-cells
+codec in every form this client meets. `VERIFY_EPOCH` rises to 2.
+
 ### Added
 
 - `BocView::has_cache_bits`, reporting whether a bag's offset index carries a
@@ -360,7 +367,8 @@ The foundation: a liteserver read over TON's own protocols, from Node.
 Reads at this version are the server's unproven word, and are marked in the API
 with a `ServerReported` type.
 
-[Unreleased]: https://github.com/nirapod-labs/ton-net/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/nirapod-labs/ton-net/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/nirapod-labs/ton-net/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/nirapod-labs/ton-net/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/nirapod-labs/ton-net/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/nirapod-labs/ton-net/releases/tag/v0.1.0

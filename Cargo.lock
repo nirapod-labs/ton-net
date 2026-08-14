@@ -1082,7 +1082,7 @@ dependencies = [
 
 [[package]]
 name = "ton-net"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -1096,7 +1096,7 @@ dependencies = [
 
 [[package]]
 name = "ton-net-adnl"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "aes",
  "ctr",
@@ -1110,7 +1110,7 @@ dependencies = [
 
 [[package]]
 name = "ton-net-block"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "criterion",
  "curve25519-dalek",
@@ -1123,7 +1123,7 @@ dependencies = [
 
 [[package]]
 name = "ton-net-cell"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "criterion",
  "lz4_flex",
@@ -1135,7 +1135,7 @@ dependencies = [
 
 [[package]]
 name = "ton-net-lite"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "thiserror",
  "tokio",
@@ -1145,7 +1145,7 @@ dependencies = [
 
 [[package]]
 name = "ton-net-node"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "napi",
  "napi-build",
@@ -1156,7 +1156,7 @@ dependencies = [
 
 [[package]]
 name = "ton-net-tl"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "tl-proto",
 ]

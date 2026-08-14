@@ -35,6 +35,13 @@ one per-platform package for each target the binding builds. The main package li
 the seven per-platform packages as optional dependencies, pinned exact, so the
 loader installs the single native binary the host can run and skips the rest.
 
+A ninth npm-side file carries the version and no tool stamps it:
+`bindings/node/index.js`, the generated loader. It checks each per-platform
+package's version against the one it was generated under, and names that version in
+the check, so a bump leaves it stating the version before until
+`npx napi build --platform` regenerates it. The `node binding` job refuses a diff
+there, which is what catches a bump that stopped at the manifests.
+
 One changelog, `CHANGELOG.md`, covers the whole library. A release is tagged
 `v{version}`. Both are settled in
 [NET-ADR-008](adr/NET-ADR-008-versioning-and-bindings.md); the tag name is fixed in
