@@ -427,13 +427,16 @@ enum Outcome {
 /// Performs one read the script chose, reporting what its failure would mean.
 ///
 /// The split matters. A primitive read checks its whole width before it moves, so a failure
-/// leaves the cursor exactly where it was. A composite read is two reads: `load_maybe_ref`
-/// spends a bit and then asks for a reference, and `load_var_uint` spends a length and then
-/// asks for that many bytes, so either can fail with the first half already consumed. Only
-/// the first group is held to the stronger rule.
+/// leaves the cursor exactly where it was. `load_maybe_ref` is two reads, a bit and then a
+/// reference, and a bit once spent cannot be given back, so it can fail with its first half
+/// consumed. Only the first group is held to the stronger rule.
+///
+/// The variable-length reads are two reads as well, a length and then that many bytes, and
+/// they sit in the first group because they put the cursor back rather than leave it inside
+/// a field they failed on.
 fn scripted_read(slice: &mut Slice<'_>, script: &mut Rng) -> Outcome {
     let width = script.below(200);
-    let refused_whole = match script.below(12) {
+    let refused_whole = match script.below(14) {
         0 => slice.load_bit().is_err(),
         1 => slice.load_uint(u32::try_from(width).unwrap_or(0)).is_err(),
         2 => slice
@@ -453,7 +456,22 @@ fn scripted_read(slice: &mut Slice<'_>, script: &mut Rng) -> Outcome {
                 );
             })
             .is_err(),
-        9 => {
+        9 => slice
+            .load_bits(width)
+            .map(|bits| {
+                assert!(
+                    bits.len() == width,
+                    "a run of bits came back a different length than it was asked for"
+                );
+            })
+            .is_err(),
+        10 => slice
+            .load_var_uint(u32::try_from(width % 33).unwrap_or(0))
+            .is_err(),
+        11 => slice
+            .load_var_int(u32::try_from(width % 33).unwrap_or(0))
+            .is_err(),
+        12 => {
             // A subslice reads without advancing, so it is checked rather than counted.
             let taken = slice.subslice(script.below(64), width, script.below(4), script.below(4));
             if let Ok(window) = taken {
@@ -468,12 +486,8 @@ fn scripted_read(slice: &mut Slice<'_>, script: &mut Rng) -> Outcome {
             }
             return Outcome::RefusedWhole;
         }
-        10 => {
-            let _ = slice.load_maybe_ref();
-            return Outcome::Spent;
-        }
         _ => {
-            let _ = slice.load_var_uint(u32::try_from(width % 33).unwrap_or(0));
+            let _ = slice.load_maybe_ref();
             return Outcome::Spent;
         }
     };
