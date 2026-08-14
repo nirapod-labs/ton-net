@@ -65,6 +65,30 @@ never published.
   checks the length before it writes anything, so a run the slice is too short to
   supply leaves the buffer as it was; a snake that fails partway along its chain
   leaves on the buffer what it had already read.
+- `Builder::store_u8`, `store_u16`, `store_u32` and `store_i32` write a
+  fixed-width field, the stores that answer `Slice::load_u8` and its three
+  neighbours. The width is the method rather than an argument, so the pair a
+  field is written and read with cannot disagree about how wide it is.
+- `Slice::load_bits` reads a run of bits into a `Vec<bool>`, which is what
+  `Builder::store_bits` writes. That store was the one in this crate whose output
+  nothing here could read back in the form it went in. The length is checked
+  before anything is read, so a slice too short leaves the cursor where it was.
+- `Builder::store_int128` and `Slice::load_int128` are the signed pair beside
+  `store_uint128` and `load_uint128`. Casting the unsigned reading is not the same
+  thing: a field narrower than 128 bits carries its sign in the top bit of the
+  field rather than the top bit of the type, so it has to be extended from there.
+- `Builder::store_var_int` and `Slice::load_var_int` are the signed form of the
+  length-then-bytes shape TL-B gives `VarUInteger n`. The length is the fewest
+  bytes whose two's-complement form holds the value, so the sign bit is part of
+  what decides it: 127 takes one byte and 128 takes two, while -128 takes one and
+  -129 takes two. As with the unsigned form, the write side is minimal and the
+  read side takes the length as it finds it.
+- `Builder::truncate_refs` drops the references past a count, the reference half
+  of `truncate_bits`. Undoing a speculative write could put the bits back and not
+  the children, which left a builder having spent room it could not recover.
+- `Slice::can_read` answers whether this many bits and references are still there,
+  the read side of `Builder::can_extend_by`, for a decoder choosing between shapes
+  before it spends anything on one.
 
 ### Changed
 
@@ -109,12 +133,36 @@ never published.
   payload larger than one frame carries. The read side already refused a body
   outside that range, so the two ends now hold to the same ceiling. Nothing is
   sealed on a refusal and the send keystream does not move.
+- `Builder::store_int` accepts a width of zero holding the value zero, which is
+  what `store_uint` already did with the same argument and what `Slice::load_int`
+  already read back from no bits at all. It was a `TooWide` refusal, so the one
+  length a variable-length encoding reaches for its own zero failed on the signed
+  side alone. A non-zero value in no bits is still refused, now as `Malformed`,
+  which is the refusal the unsigned store gives it.
+- `Slice::preload_uint` and `Slice::preload_bit` take `&self` rather than
+  `&mut self`. They read without moving, which is what `peek_ref` beside them
+  already said in its receiver; the two asked for a mutable cursor only because
+  of how they saved and restored a position they never needed to move. Callers
+  holding a `&mut Slice` are unaffected.
 
 ### Fixed
 
 - `parse_boc` no longer narrows the stated cell area size before the check that
   holds a bag to it. Where `usize` is 32 bits, which is every wasm target, a bag
   could state one length, carry another, and pass that check.
+- `Slice::load_var_uint` puts the cursor back when the value runs off the end of
+  the slice. It read the length, failed on the value, and left the cursor inside
+  the field, so a caller that recovered from the failure read part of that value
+  as the next field. The primitive loads already put it back; the composite ones,
+  `load_maybe_ref`, `load_dict`, `load_address` and the snake reads, still do
+  not, which `tests/cell/fuzz/targets.rs` grades apart.
+- `Slice::load_var_uint` refuses a length whose bit count overflows rather than
+  multiplying it out. A `max` that gives a thirty-two bit length field admits a
+  length past 2^29, and eight times that does not fit a `u32`: the product wrapped,
+  so a hostile length read as a field of no bits, and on a build with overflow
+  checks it panicked instead. It is now `CellError::TooWide`. No production caller in
+  this workspace passes a `max` that large, the in-tree ones passing 7 and 16, so the
+  reach is a caller this crate does not yet have.
 
 - A bag naming one cell from two root entries reads back. A root list holds
   indices and nothing stops two of them naming the same cell, so writing such a

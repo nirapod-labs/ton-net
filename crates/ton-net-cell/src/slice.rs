@@ -24,6 +24,22 @@ fn bit_at(data: &[u8], index: usize) -> bool {
         .is_some_and(|byte| (byte >> (7 - (index % 8))) & 1 == 1)
 }
 
+/// Reads the low `bits` bits of `raw` as a two's-complement signed integer.
+fn sign_extend_128(raw: u128, bits: u32) -> i128 {
+    // A zero-width field has no sign bit to extend, and a shift by the full width is not a
+    // shift Rust defines, so the early return covers both at once.
+    if bits == 0 {
+        return 0;
+    }
+    // Saturating holds the shift inside the width whatever the argument. Every caller has
+    // already held `bits` at or under 128, where this is the plain difference, and a
+    // full-width value pads by nothing and comes back as itself.
+    let pad = u128::BITS.saturating_sub(bits);
+    #[allow(clippy::cast_possible_wrap)]
+    let shifted = (raw << pad) as i128;
+    shifted >> pad
+}
+
 /// A cursor that reads typed values out of one cell.
 ///
 /// A slice holds two independent positions, one into the cell's bits and one into its
@@ -93,6 +109,15 @@ impl<'a> Slice<'a> {
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.remaining_bits() == 0 && self.remaining_refs() == 0
+    }
+
+    /// Whether this many bits and references are still there to read.
+    ///
+    /// The read side of [`Builder::can_extend_by`](crate::Builder::can_extend_by), for a
+    /// decoder choosing between shapes before it spends anything on one.
+    #[must_use]
+    pub fn can_read(&self, bits: usize, refs: usize) -> bool {
+        bits <= self.remaining_bits() && refs <= self.remaining_refs()
     }
 
     /// Advances the bit cursor by `n` and returns where the run started.
@@ -246,18 +271,87 @@ impl<'a> Slice<'a> {
     /// # Ok::<(), ton_net_cell::CellError>(())
     /// ```
     pub fn load_var_uint(&mut self, max: u32) -> Result<u128, CellError> {
+        self.read_var(max).map(|(raw, _)| raw)
+    }
+
+    /// Reads a variable-length signed integer of at most `max` bytes.
+    ///
+    /// The `VarInteger max` encoding: the same length-then-bytes shape
+    /// [`load_var_uint`](Slice::load_var_uint) reads, with the bytes taken as two's
+    /// complement and sign-extended from the top of the field the length names. A length
+    /// of zero reads as zero.
+    ///
+    /// The length is read as it was written. Nothing here refuses a length longer than the
+    /// value needed, the same way `load_var_uint` does not, so a reader that has to hold a
+    /// producer to the minimal form checks it against
+    /// [`store_var_int`](crate::Builder::store_var_int) rather than expecting a failure
+    /// from this.
+    ///
+    /// # Errors
+    ///
+    /// As [`load_var_uint`](Slice::load_var_uint).
+    pub fn load_var_int(&mut self, max: u32) -> Result<i128, CellError> {
+        let (raw, bits) = self.read_var(max)?;
+        Ok(sign_extend_128(raw, bits))
+    }
+
+    /// Reads the length and the raw value bits of a `VarUInteger max` or `VarInteger max`,
+    /// returning the bits and how many of them there were.
+    ///
+    /// The cursor is put back if any part fails, so a value that runs off the end of the
+    /// slice leaves the length unread as well. Without that a caller that recovers from a
+    /// short read resumes in the middle of a field.
+    fn read_var(&mut self, max: u32) -> Result<(u128, u32), CellError> {
         if max < 2 {
             return Err(CellError::Malformed(
                 "variable integer needs a max above one",
             ));
         }
         let len_bits = u32::BITS - (max - 1).leading_zeros();
+        let start = self.bit;
+        // A failure here has not moved the cursor: load_uint checks the length first.
         #[allow(
             clippy::cast_possible_truncation,
             reason = "max >= 2 is checked above, so len_bits = 32 - leading_zeros(max - 1) is at most 32, and load_uint returns a value under 2^32, which fits u32"
         )]
         let len = self.load_uint(len_bits)? as u32;
-        self.load_uint128(len * 8)
+        // A length near the top of a u32 asks for more bits than the product can express.
+        // Unchecked, a length of 2^29 aborts where arithmetic is checked and reads as a
+        // field of no bits at all where it is not, and neither is a refusal.
+        let Some(value_bits) = len.checked_mul(8) else {
+            self.bit = start;
+            return Err(CellError::TooWide {
+                requested: len,
+                width: u128::BITS,
+            });
+        };
+        match self.load_uint128(value_bits) {
+            Ok(raw) => Ok((raw, value_bits)),
+            Err(err) => {
+                self.bit = start;
+                Err(err)
+            }
+        }
+    }
+
+    /// Reads `n` bits, one to a `bool`, in the order they sit in the cell.
+    ///
+    /// The read side of [`Builder::store_bits`](crate::Builder::store_bits), which was the
+    /// one store in this crate whose output nothing here could read back in the form it
+    /// went in. The length is checked before anything is read, so a slice too short leaves
+    /// the cursor where it was.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CellError::NotEnoughBits`] if the slice has fewer than `n` bits left.
+    pub fn load_bits(&mut self, n: usize) -> Result<Vec<bool>, CellError> {
+        let start = self.advance(n)?;
+        let data = self.cell.data();
+        let mut out = Vec::with_capacity(n);
+        for i in 0..n {
+            out.push(bit_at(data, start + i));
+        }
+        Ok(out)
     }
 
     /// Reads `n` whole bytes.
@@ -375,6 +469,25 @@ impl<'a> Slice<'a> {
         Ok(shifted >> (i64::BITS - n))
     }
 
+    /// Reads `n` bits as a two's-complement signed integer, over 128 bits rather than 64.
+    ///
+    /// The signed twin of [`load_uint128`](Slice::load_uint128). Casting the unsigned
+    /// reading is not the same thing: a field narrower than 128 bits carries its sign in
+    /// the top bit of the field, not the top bit of the type, so it has to be extended
+    /// from there.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CellError::TooWide`] if `n` is over 128, or
+    /// [`CellError::NotEnoughBits`] if the slice has fewer than `n` bits left. Both come
+    /// from the unsigned read this goes through. A width guard here would report the same
+    /// error the read below reports, so it is left to the one place that decides it rather
+    /// than stated twice and checkable in neither.
+    pub fn load_int128(&mut self, n: u32) -> Result<i128, CellError> {
+        let raw = self.load_uint128(n)?;
+        Ok(sign_extend_128(raw, n))
+    }
+
     /// Reads an amount in nanotons, which TON encodes as `VarUInteger 16`.
     ///
     /// # Errors
@@ -389,11 +502,10 @@ impl<'a> Slice<'a> {
     /// # Errors
     ///
     /// As [`load_uint`](Slice::load_uint).
-    pub fn preload_uint(&mut self, n: u32) -> Result<u64, CellError> {
-        let saved = self.bit;
-        let value = self.load_uint(n);
-        self.bit = saved;
-        value
+    pub fn preload_uint(&self, n: u32) -> Result<u64, CellError> {
+        // Reading through a copy takes no `&mut` for a read that changes nothing, which
+        // is what puts this family on one receiver: peek_ref beside it never needed one.
+        self.clone().load_uint(n)
     }
 
     /// Reads one bit without advancing.
@@ -401,11 +513,8 @@ impl<'a> Slice<'a> {
     /// # Errors
     ///
     /// As [`load_bit`](Slice::load_bit).
-    pub fn preload_bit(&mut self) -> Result<bool, CellError> {
-        let saved = self.bit;
-        let value = self.load_bit();
-        self.bit = saved;
-        value
+    pub fn preload_bit(&self) -> Result<bool, CellError> {
+        self.clone().load_bit()
     }
 
     /// Looks at the next reference without taking it.
@@ -545,7 +654,7 @@ impl<'a> Slice<'a> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{parse_boc, Builder, Cell, CellError, Dict};
+    use crate::{parse_boc, Builder, Cell, CellError, Dict, Slice};
 
     // One cell of eight bits holding 0xab.
     const ONE_CELL: [u8; 14] = [
@@ -820,6 +929,199 @@ mod tests {
         // Asking for a reference this cell does not have fails and moves nothing.
         assert!(slice.skip_bits_and_refs(8, 1).is_err());
         assert_eq!(slice.load_u8().unwrap(), 0x89, "the byte cursor stayed put");
+    }
+
+    #[test]
+    fn preloading_reads_without_moving_and_takes_only_a_shared_cursor() {
+        let roots = parse_boc(&FOUR_BYTES).unwrap();
+        let slice = roots[0].parse();
+        // A shared borrow is enough, which is what puts these on the receiver peek_ref
+        // already had. The two used to ask for `&mut` only because of how they saved and
+        // restored a position they never needed to move.
+        let view: &Slice<'_> = &slice;
+        assert_eq!(view.preload_uint(8).unwrap(), 0x89);
+        assert!(view.preload_bit().unwrap());
+        assert_eq!(view.preload_uint(16).unwrap(), 0x89ab);
+        assert_eq!(slice.remaining_bits(), 32, "nothing was spent");
+
+        // The reading is the one the matching load gives from the same place, and the
+        // load after it starts where the preload did.
+        let mut walking = roots[0].parse();
+        walking.skip_bits(8).unwrap();
+        assert_eq!(walking.preload_uint(8).unwrap(), 0xab);
+        assert!(walking.preload_bit().unwrap(), "0xab starts with a set bit");
+        assert_eq!(walking.load_uint(8).unwrap(), 0xab);
+        assert_eq!(walking.remaining_bits(), 16);
+
+        // A preload past the end fails and leaves the cursor put, same as a load.
+        assert!(walking.preload_uint(17).is_err());
+        assert_eq!(walking.remaining_bits(), 16);
+        let mut spent = roots[0].parse();
+        spent.skip_bits(32).unwrap();
+        assert!(spent.preload_bit().is_err());
+    }
+
+    #[test]
+    fn peeking_a_reference_leaves_it_for_the_read_that_follows() {
+        let roots = parse_boc(&TWO_CELLS).unwrap();
+        let mut slice = roots[0].parse();
+        let peeked = slice.peek_ref().unwrap();
+        assert_eq!(peeked.parse().load_u8().unwrap(), 0xcd);
+        assert_eq!(slice.remaining_refs(), 1, "a peek spends nothing");
+        assert_eq!(slice.peek_ref().unwrap().repr_hash(), peeked.repr_hash());
+        assert_eq!(slice.load_ref().unwrap().repr_hash(), peeked.repr_hash());
+        assert!(slice.peek_ref().is_err(), "the reference is spent");
+
+        // A window bounds the peek the same way it bounds the load, so a peek cannot see
+        // a reference the cursor is not allowed to take.
+        let outer = roots[0].parse();
+        let narrowed = outer.subslice(0, 0, 0, 0).unwrap();
+        assert!(matches!(narrowed.peek_ref(), Err(CellError::NotEnoughRefs)));
+        assert!(outer.peek_ref().is_ok(), "the parent still sees it");
+    }
+
+    #[test]
+    fn a_cursor_names_the_cell_it_reads_and_a_window_names_the_same_one() {
+        let roots = parse_boc(&FOUR_BYTES).unwrap();
+        let slice = roots[0].parse();
+        assert_eq!(slice.cell().repr_hash(), roots[0].repr_hash());
+
+        // A window is a narrower view of one cell rather than a cell of its own, which is
+        // the difference between this and to_cell.
+        let window = slice.subslice(8, 8, 0, 0).unwrap();
+        assert_eq!(window.cell().repr_hash(), roots[0].repr_hash());
+        assert_ne!(window.to_cell().unwrap().repr_hash(), roots[0].repr_hash());
+
+        // The borrow is the cell's and not the cursor's, so it outlives the cursor that
+        // handed it over.
+        let outlives: &Cell = roots[0].parse().cell();
+        assert_eq!(outlives.bit_len(), 32);
+
+        // A cell with a child is what tells this apart from any of the cells below it, so
+        // the identity is checked on one rather than on a leaf where the two coincide.
+        let roots = parse_boc(&TWO_CELLS).unwrap();
+        let mut slice = roots[0].parse();
+        let child = slice.load_ref().unwrap();
+        assert_ne!(child.repr_hash(), roots[0].repr_hash());
+        assert_eq!(
+            slice.cell().repr_hash(),
+            roots[0].repr_hash(),
+            "the cursor still names the cell it opened, not the one it just took"
+        );
+    }
+
+    #[test]
+    fn a_run_of_bits_too_long_for_the_slice_moves_nothing() {
+        let roots = parse_boc(&ONE_CELL).unwrap();
+        let mut slice = roots[0].parse();
+        assert_eq!(
+            slice.load_bits(9),
+            Err(CellError::NotEnoughBits {
+                requested: 9,
+                available: 8,
+            })
+        );
+        // 0xab is 1010_1011, and the refused run left every bit of it.
+        assert_eq!(
+            slice.load_bits(8).unwrap(),
+            vec![true, false, true, false, true, false, true, true]
+        );
+        assert!(slice.is_empty());
+    }
+
+    #[test]
+    fn the_fit_predicate_answers_at_the_bound_and_one_past_it() {
+        let roots = parse_boc(&TWO_CELLS).unwrap();
+        let slice = roots[0].parse();
+        assert_eq!(slice.remaining_bits(), 0);
+        assert!(slice.can_read(0, 1), "exactly what is there fits");
+        assert!(!slice.can_read(1, 1), "one bit more does not");
+        assert!(!slice.can_read(0, 2), "one reference more does not");
+
+        let roots = parse_boc(&FOUR_BYTES).unwrap();
+        let mut slice = roots[0].parse();
+        assert!(slice.can_read(32, 0));
+        assert!(!slice.can_read(33, 0));
+        slice.skip_bits(8).unwrap();
+        assert!(slice.can_read(24, 0), "the bound follows the cursor");
+        assert!(!slice.can_read(25, 0));
+    }
+
+    #[test]
+    fn a_wide_signed_read_extends_the_sign_from_the_field_not_the_type() {
+        let roots = parse_boc(&FOUR_BYTES).unwrap();
+        // The same thirty-two bits the unsigned read gives as a large positive.
+        assert_eq!(roots[0].parse().load_uint128(32).unwrap(), 0x89ab_cdef);
+        assert_eq!(roots[0].parse().load_int128(32).unwrap(), -1_985_229_329);
+
+        // One bit past the type is refused before the slice is consulted.
+        assert_eq!(
+            roots[0].parse().load_int128(129),
+            Err(CellError::TooWide {
+                requested: 129,
+                width: 128,
+            })
+        );
+
+        // A read the slice cannot supply fails on the bits and leaves the cursor put.
+        let mut slice = roots[0].parse();
+        assert!(matches!(
+            slice.load_int128(128),
+            Err(CellError::NotEnoughBits { .. })
+        ));
+        assert_eq!(slice.remaining_bits(), 32);
+    }
+
+    #[test]
+    fn a_variable_integer_that_runs_out_mid_value_leaves_the_length_unread() {
+        // A four-bit length saying one byte, with four bits of slice behind it. Reading
+        // the length and then failing on the value would leave the cursor inside the
+        // field, so a caller that recovers reads part of the value as the next field.
+        let mut builder = Builder::new();
+        builder.store_uint(1, 4).unwrap();
+        builder.store_uint(0b1111, 4).unwrap();
+        let cell = builder.build().unwrap();
+
+        let mut slice = cell.parse();
+        assert!(matches!(
+            slice.load_var_uint(16),
+            Err(CellError::NotEnoughBits { .. })
+        ));
+        assert_eq!(
+            slice.remaining_bits(),
+            8,
+            "the cursor is back at the length"
+        );
+
+        let mut slice = cell.parse();
+        assert!(matches!(
+            slice.load_var_int(16),
+            Err(CellError::NotEnoughBits { .. })
+        ));
+        assert_eq!(slice.remaining_bits(), 8);
+        // And the field is still there to read by hand.
+        assert_eq!(slice.load_uint(4).unwrap(), 1);
+    }
+
+    #[test]
+    fn a_variable_integer_length_too_large_to_measure_in_bits_is_refused() {
+        // A max near the top of a u32 gives a thirty-two bit length field, and a length
+        // past 2^29 multiplies past what a u32 holds. Unchecked, that product wraps and a
+        // hostile length reads as a field of no bits rather than as a refusal.
+        let mut builder = Builder::new();
+        builder.store_uint(0x2000_0000, 32).unwrap();
+        let cell = builder.build().unwrap();
+
+        let expected = CellError::TooWide {
+            requested: 0x2000_0000,
+            width: 128,
+        };
+        assert_eq!(cell.parse().load_var_uint(u32::MAX), Err(expected.clone()));
+        assert_eq!(cell.parse().load_var_int(u32::MAX), Err(expected));
+
+        let mut slice = cell.parse();
+        assert!(slice.load_var_uint(u32::MAX).is_err());
+        assert_eq!(slice.remaining_bits(), 32, "the length is not half-read");
     }
 
     #[test]

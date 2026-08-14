@@ -257,6 +257,54 @@ proptest! {
         prop_assert_eq!(b.build().unwrap().parse().load_int(bits).unwrap(), value);
     }
 
+    /// A wide signed integer survives the sign extension in both directions.
+    #[test]
+    fn wide_signed_integers_round_trip_through_the_builder(value in any::<i128>(), bits in 1u32..=128) {
+        // Brought into range the way the sixty-four bit property does it, by keeping the
+        // low bits and sign-extending them, so the cases near the top of the range are
+        // generated rather than skipped.
+        #[allow(clippy::cast_possible_wrap, clippy::cast_sign_loss)]
+        let value = (((value as u128) << (128 - bits)) as i128) >> (128 - bits);
+        let mut b = crate::Builder::new();
+        b.store_int128(value, bits).unwrap();
+        prop_assert_eq!(b.build().unwrap().parse().load_int128(bits).unwrap(), value);
+    }
+
+    /// A run of bits reads back as the bits that went in, in the order they went in.
+    #[test]
+    fn runs_of_bits_round_trip_through_the_builder(
+        bits in proptest::collection::vec(any::<bool>(), 0..=usize::from(crate::MAX_BITS)),
+    ) {
+        let mut b = crate::Builder::new();
+        b.store_bits(&bits).unwrap();
+        let read = b.build().unwrap().parse().load_bits(bits.len()).unwrap();
+        prop_assert_eq!(read, bits);
+    }
+
+    /// A signed variable-length integer round-trips, at the fewest bytes that hold it.
+    ///
+    /// Minimality is stated here without reference to the measurement the store uses: the
+    /// width it chose holds the value and the width one byte below it does not. That is
+    /// what keeps one number to one encoding, and so to one hash.
+    #[test]
+    fn signed_var_ints_round_trip_at_the_least_width_that_holds_them(value in any::<i128>()) {
+        // A `VarInteger 17` carries sixteen bytes, the whole of the type, behind a
+        // five-bit length.
+        const LEN_BITS: u16 = 5;
+        let mut b = crate::Builder::new();
+        b.store_var_int(value, 17).unwrap();
+        prop_assert_eq!((b.bits_used() - LEN_BITS) % 8, 0);
+        let bytes = u32::from((b.bits_used() - LEN_BITS) / 8);
+        prop_assert_eq!(b.build().unwrap().parse().load_var_int(17).unwrap(), value);
+
+        prop_assert!(crate::Builder::new().store_int128(value, bytes * 8).is_ok());
+        if bytes > 0 {
+            prop_assert!(crate::Builder::new()
+                .store_int128(value, (bytes - 1) * 8)
+                .is_err());
+        }
+    }
+
     /// An amount survives the variable-length encoding, whose byte count must be minimal.
     #[test]
     fn coins_round_trip_through_the_builder(value in any::<u128>()) {
