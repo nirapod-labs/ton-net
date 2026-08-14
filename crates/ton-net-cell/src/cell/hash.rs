@@ -28,6 +28,71 @@ const MAX_HASHES: usize = 4;
 ///
 /// A Merkle cell shifts the mask it covers down a level, so a mask loses a level at each
 /// Merkle cell above it and reaches no further once it is empty.
+///
+/// # An identity is derived, never supplied
+///
+/// Every value of this type that leaves the crate was computed when its cell was built, from
+/// that cell's own data, kind, level mask and children. One value inside it is read rather
+/// than derived, and it is the cell model's own substitution rather than a way in: a pruned
+/// branch's hashes and depths below its own level come out of the branch's body, which is
+/// what lets a pruned tree hash to the root of the full one.
+///
+/// The fields are private and no constructor is reachable from outside, so a caller can
+/// neither assemble one nor take a real one and edit it. That is what would make an identity
+/// worth the name at a seam, for a store keyed by identity or a reader handing one back in
+/// place of a subtree, neither of which exists yet. NET-ADR-011 fixes it, and the two cases
+/// below are the check it names.
+///
+/// A struct literal does not compile, because every field is private:
+///
+/// ```compile_fail
+/// use ton_net_cell::Identity;
+///
+/// let forged = Identity {
+///     level_mask: 0,
+///     hash0: [0u8; 32],
+///     depth0: 0,
+///     extra: None,
+/// };
+/// ```
+///
+/// Neither does an assignment to a field of a genuine one, which is the forgery that matters:
+/// a value the crate really derived, with the hash swapped for another:
+///
+/// ```compile_fail
+/// let bytes = [0xb5, 0xee, 0x9c, 0x72, 0x01, 0x01, 0x01, 0x01, 0x00, 0x03, 0x00,
+///              0x00, 0x02, 0xab];
+/// let roots = ton_net_cell::parse_boc(&bytes).expect("the bag parses");
+/// let mut identity = roots[0].identity().clone();
+///
+/// identity.hash0 = [0u8; 32];
+/// ```
+///
+/// What is left is reading, and the accessors are the whole of it. This is the same preamble
+/// as the case above, so the two are refused for the reason claimed rather than for a broken
+/// example:
+///
+/// ```
+/// let bytes = [0xb5, 0xee, 0x9c, 0x72, 0x01, 0x01, 0x01, 0x01, 0x00, 0x03, 0x00,
+///              0x00, 0x02, 0xab];
+/// let roots = ton_net_cell::parse_boc(&bytes).expect("the bag parses");
+/// let identity = roots[0].identity().clone();
+///
+/// assert_eq!(identity.level_mask(), 0);
+/// assert_eq!(identity.count(), 1, "an empty mask has one hash");
+/// assert_eq!(identity.hash(0), Some(roots[0].hash()));
+/// assert_eq!(identity.depth(0), Some(0));
+/// assert_eq!(identity.hash(1), None, "and no more");
+/// assert_eq!(identity.repr_hash(), roots[0].repr_hash());
+/// ```
+// The two refusals above are `compile_fail` doctests rather than a test that shells out to
+// cargo over a fixture crate. `cargo test` already compiles a doctest against this crate the
+// way a consumer would, so the check costs no dev-dependency, no second toolchain invocation
+// and no fixture directory, and it runs wherever the suite runs. What it buys less of is
+// precision: a `compile_fail` block passes on any compile error, including one the example
+// itself introduced. The third block is the answer to that. It is the second block's preamble
+// with the assignment taken out, and it has to compile, so an example broken for some
+// unrelated reason turns the pair red rather than leaving it green for the wrong reason.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Identity {
     /// The cell's level mask, which fixes how many hashes it has and which answers for a level.

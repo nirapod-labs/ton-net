@@ -53,6 +53,13 @@ thread_local! {
     /// Per thread rather than global because the test harness runs tests side by side, and a
     /// count shared between them would report whatever the others happened to be doing.
     static CALLS: Cell<usize> = const { Cell::new(0) };
+
+    /// Bytes asked for on this thread since the count was last cleared.
+    ///
+    /// A count of calls cannot see a reservation, because asking once for a megabyte and once
+    /// for a byte are both one call. Where the property being held is that a read takes memory
+    /// in proportion to the bag it was handed, the size is the quantity and the count is not.
+    static BYTES: Cell<usize> = const { Cell::new(0) };
 }
 
 /// The system allocator, counting every call that asks it for memory.
@@ -66,9 +73,15 @@ fn count() {
     let _ = CALLS.try_with(|counter| counter.set(counter.get() + 1));
 }
 
+/// Records the size of one request, on the same terms as [`count`].
+fn record(bytes: usize) {
+    let _ = BYTES.try_with(|counter| counter.set(counter.get().saturating_add(bytes)));
+}
+
 unsafe impl GlobalAlloc for Counting {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
         count();
+        record(layout.size());
         System.alloc(layout)
     }
 
@@ -80,6 +93,7 @@ unsafe impl GlobalAlloc for Counting {
         // A vector that outgrows itself asks for memory again, which is a cost worth counting
         // whether or not the old block could be extended in place.
         count();
+        record(new_size);
         System.realloc(ptr, layout, new_size)
     }
 }
@@ -92,6 +106,14 @@ fn calls_to_allocate<T>(body: impl FnOnce() -> T) -> (T, usize) {
     CALLS.with(|counter| counter.set(0));
     let value = body();
     let counted = CALLS.with(Cell::get);
+    (value, counted)
+}
+
+/// Runs `body` and reports how many bytes it asked the allocator for.
+fn bytes_to_allocate<T>(body: impl FnOnce() -> T) -> (T, usize) {
+    BYTES.with(|counter| counter.set(0));
+    let value = body();
+    let counted = BYTES.with(Cell::get);
     (value, counted)
 }
 
@@ -413,5 +435,53 @@ fn walking_a_dictionary_costs_one_allocation_for_each_key_it_hands_back() {
         asked <= walked + SLACK,
         "walking {walked} entries asked the allocator {asked} times, which is more than the \
          key each one hands back"
+    );
+}
+
+/// What a bag takes to read is proportional to the bag, including its root list.
+///
+/// A root list is reserved from a count the header states, before an index of it has been
+/// read. Two bounds stand in front of that reservation and they answer different questions.
+/// The cell ceiling caps it at a constant, which stops a bag naming four billion roots. It
+/// does not stop a small bag naming the ceiling, because a constant is not proportional to
+/// anything: twenty-one bytes may name a hundred and thirty thousand roots and every one of
+/// them is under the ceiling. What answers that is the byte check beside it, which holds the
+/// list to the bytes the bag actually carries for it.
+///
+/// This is measured in bytes rather than calls because the failure is one call asking for a
+/// megabyte, and a count of calls cannot tell that from one call asking for eight.
+#[test]
+fn a_small_bag_naming_many_roots_reserves_nothing_for_them() {
+    // Magic, four-byte references, one-byte offsets, one cell, 131,071 roots, no absent
+    // cells, a two-byte cell area, and then only two bytes left, which is far less than a
+    // root list of that length needs. Every field is inside its own bound; the bag is
+    // refused because it does not carry what it says it does.
+    let mut bag = Vec::from(*b"\xb5\xee\x9c\x72");
+    bag.push(0x04);
+    bag.push(0x01);
+    bag.extend_from_slice(&1u32.to_be_bytes());
+    bag.extend_from_slice(&131_071u32.to_be_bytes());
+    bag.extend_from_slice(&0u32.to_be_bytes());
+    bag.push(0x02);
+    bag.extend_from_slice(&[0x00, 0x00]);
+    assert_eq!(
+        bag.len(),
+        21,
+        "the bag is the size the reasoning above assumes"
+    );
+
+    let (read, bytes) = bytes_to_allocate(|| parse_boc(&bag));
+    assert!(
+        read.is_err(),
+        "a bag that cannot carry its root list is refused"
+    );
+
+    // A reservation for 131,071 roots is 131,071 pointers, which is a megabyte on a 64-bit
+    // target. The bound below is far under that and far over what refusing costs, so it
+    // fails on the reservation and not on an allocator that moved by a few bytes.
+    assert!(
+        bytes < 4096,
+        "refusing a 21 byte bag asked the allocator for {bytes} bytes, so the root list was \
+         reserved before the bag was held to carrying it"
     );
 }
