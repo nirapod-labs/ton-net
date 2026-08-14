@@ -85,6 +85,17 @@ impl<'a> BocView<'a> {
         self.header.has_checksum
     }
 
+    /// Whether the offset index carries a cache bit inside each of its entries.
+    ///
+    /// A bag that sets this spells an index entry as the offset with the bit riding in it,
+    /// so an entry taken for a plain offset under this flag is the offset shifted. Both
+    /// mainnet block fixtures set it. Nothing here reads the index, so it changes no read
+    /// today; it is reported because a caller that reads the index itself needs it.
+    #[must_use]
+    pub fn has_cache_bits(&self) -> bool {
+        self.header.has_cache_bits
+    }
+
     /// The number of bytes the cells themselves take, past the header and index.
     #[must_use]
     pub fn cell_area_len(&self) -> usize {

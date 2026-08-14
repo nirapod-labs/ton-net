@@ -27,6 +27,7 @@ pub(super) fn read_header(
     let flags = reader.byte()?;
     let has_index = flags & 0x80 != 0;
     let has_checksum = flags & 0x40 != 0;
+    let has_cache_bits = flags & 0x20 != 0;
     let ref_size = usize::from(flags & 0x07);
     let offset_size = usize::from(reader.byte()?);
     if !(1..=4).contains(&ref_size) {
@@ -112,6 +113,15 @@ pub(super) fn read_header(
     }
     if has_index {
         // The index only repeats where each cell starts, which this reader already knows.
+        //
+        // Its entries are `offset_size` bytes whether or not the bag sets the cache-bits
+        // flag, so skipping it takes the same width either way. What the flag changes is
+        // what an entry means: the cache bit rides inside the value rather than beside it,
+        // so an entry read as a plain offset under that flag is the offset shifted. Both
+        // mainnet block fixtures set it, so this is the ordinary case and not an exotic
+        // one. A reader that stops discarding the index has to unpack the bit before it
+        // trusts an offset, which is why the flag is carried on the header rather than
+        // read and dropped here.
         reader.take(count.saturating_mul(offset_size))?;
     }
 
@@ -137,6 +147,7 @@ pub(super) fn read_header(
         root_list,
         has_index,
         has_checksum,
+        has_cache_bits,
         cell_area,
         body_offset: reader.consumed(),
     })

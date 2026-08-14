@@ -245,6 +245,12 @@ struct Header {
     has_index: bool,
     /// Whether the bag ends in a CRC-32C checksum.
     has_checksum: bool,
+    /// Whether the offset index carries a cache bit inside each entry.
+    ///
+    /// Nothing here reads the index, so this changes no read today. It is carried because
+    /// the flag decides how an entry is spelled, and a reader that retains the index has to
+    /// know that before it takes one for an offset.
+    has_cache_bits: bool,
     /// The number of bytes the cells themselves take.
     cell_area: usize,
     /// Where the cells begin, past the header, the roots and the index.
