@@ -25,6 +25,13 @@ never published.
   address may be written in is undecided and is recorded beside that parser rather than
   settled here. `hex_decode` reads either case and refuses the leading `+` that
   `u8::from_str_radix` accepts.
+- `BocOptions::with_stored_hashes`, which writes each cell's own hashes and
+  depths ahead of its data, the form the parser has always read and checked. Off
+  by default: it makes a bag larger and buys nothing to a reader that recomputes,
+  this crate's parser checking each stored copy against what the cell's contents
+  give and refusing a disagreement either way. A whole block uses this per-cell
+  form on some of its cells, 44 of the 1428 in the two block fixtures; this writes
+  it on every cell.
 
 - `ParseOptions`, with `parse_boc_with`, `BocView::open_with` and
   `LazyBoc::open_with` beside the existing three. It carries the cell ceiling a
@@ -55,6 +62,11 @@ never published.
 
 ### Changed
 
+- `BocOptions` is `non_exhaustive` and carries a third field. A caller who
+  spelled `BocOptions { index, crc32c }` writes `BocOptions::default()` with the
+  new `with_index`, `with_checksum` and `with_stored_hashes` setters instead, or
+  assigns the fields. The marker is what keeps a fourth option from breaking a
+  caller the same way a second time.
 - `apply_update` and `may_apply` rebuild through a library reference on an
   update's new side instead of refusing it. A library reference names code by
   hash and stands in for no subtree, and one sits in the state update of a

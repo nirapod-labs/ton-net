@@ -18,7 +18,7 @@
 //! state whose two subtrees are pruned, so they are also the only fixtures where exotic
 //! cells and stored hashes appear in the same bag.
 
-use ton_net_cell::{parse_boc, serialize_boc, BocView, Cell, CellError};
+use ton_net_cell::{parse_boc, serialize_boc, serialize_boc_with, BocView, Cell, CellError};
 
 /// A masterchain block, and the basechain block the same head named.
 const MASTERCHAIN: &str = include_str!("../fixtures/block-masterchain.hex");
@@ -257,5 +257,64 @@ fn a_block_written_back_out_keeps_its_identity_without_the_stored_hashes() {
             original.len(),
             written.len()
         );
+    }
+}
+
+/// The writer emits the form the parser has always read, and the bytes say so.
+///
+/// A round trip cannot stand in for this. It holds the writer to something, since a flag set
+/// over a run that is not there fails to parse, but it cannot separate a writer that honoured
+/// the option from one that ignored it: a bag with no stored hashes is a valid bag.
+///
+/// What separates the two is a byte count nothing in the writer decides: the cell area has to
+/// grow by exactly one hash and one depth per level each distinct cell's mask makes
+/// significant, and one of each besides. That figure is taken from the cells here, so a run
+/// missed, doubled, or written at the wrong length fails. The cell area is compared rather
+/// than the whole bag because a longer body can widen the header's offset field, which is
+/// framing rather than stored hashes.
+#[test]
+fn a_bag_written_with_stored_hashes_grows_by_exactly_what_its_cells_call_for() {
+    use std::collections::HashSet;
+
+    use ton_net_cell::BocOptions;
+
+    for (what, text) in [("masterchain", MASTERCHAIN), ("basechain", BASECHAIN)] {
+        let roots = parse_boc(&unhex(text)).expect("the block parses");
+
+        let plain = serialize_boc(&roots).expect("the plain form writes");
+        let stored = serialize_boc_with(&roots, &BocOptions::default().with_stored_hashes(true))
+            .expect("the stored form writes");
+
+        // A bag stores each distinct cell once, so the walk counts each once too.
+        let mut seen: HashSet<[u8; 32]> = HashSet::new();
+        let mut stack: Vec<Cell> = roots.clone();
+        let mut owed = 0usize;
+        while let Some(cell) = stack.pop() {
+            if !seen.insert(*cell.repr_hash()) {
+                continue;
+            }
+            owed += (cell.level_mask().count_ones() as usize + 1) * (32 + 2);
+            stack.extend(cell.refs().iter().cloned());
+        }
+
+        let plain_area = BocView::open(&plain)
+            .expect("the plain form opens")
+            .cell_area_len();
+        let stored_area = BocView::open(&stored)
+            .expect("the stored form opens")
+            .cell_area_len();
+
+        assert_eq!(
+            stored_area - plain_area,
+            owed,
+            "{what}: the cell area grew by {} where its {} cells call for {owed}",
+            stored_area - plain_area,
+            seen.len()
+        );
+
+        // And the tree that comes back is the tree that went out, which is the half the
+        // reader already enforces by refusing a stored hash it disagrees with.
+        let again = parse_boc(&stored).expect("the stored form parses back");
+        assert_eq!(again[0].repr_hash(), roots[0].repr_hash(), "{what}");
     }
 }
