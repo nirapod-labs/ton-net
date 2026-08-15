@@ -26,8 +26,8 @@ and release-plz owns the bump, the tag, and the publish. SemVer is measured agai
 the observable API and the wire behavior, so a proof-verification change is breaking
 and an internal refactor is not.
 
-The version today is 0.3.0, the first published release. v0.1.0 and v0.2.0 are git
-tags that were never published. Before 1.0.0 every minor release can break in every
+The version today is 0.4.2. v0.3.0 was the first published release, and v0.1.0
+and v0.2.0 are git tags that were never published. Before 1.0.0 every minor release can break in every
 ecosystem this ships to, so a consumer pins to a minor and upgrades on purpose. The
 milestone numbers below are the build order; the published version stays on the 0.x
 line until the freeze at 1.0.0.
