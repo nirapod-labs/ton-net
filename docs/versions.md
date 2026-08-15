@@ -11,16 +11,16 @@ breaking release.
 Two numbers describe a build. They are independent and answer different questions.
 
 - The **library version** is a single SemVer string. It answers whether an upgrade is
-  API-compatible. Today it is `0.3.0`, declared once in the `[workspace.package]` table of
+  API-compatible. Today it is `0.4.2`, declared once in the `[workspace.package]` table of
   the root `Cargo.toml`.
 - The **verification epoch** is a monotonic integer. It answers whether an upgrade changed
-  what the library accepts as proven. Today it is `1`, the value of `VERIFY_EPOCH` in
+  what the library accepts as proven. Today it is `2`, the value of `VERIFY_EPOCH` in
   `crates/ton-net/src/lib.rs`.
 
 ## One version, in lockstep
 
 Every workspace crate carries the version by inheritance. The root `Cargo.toml` declares
-`version = "0.3.0"` once in `[workspace.package]`, and each crate takes it with
+`version = "0.4.2"` once in `[workspace.package]`, and each crate takes it with
 `version.workspace = true`. This covers the six library crates (`ton-net-tl`,
 `ton-net-cell`, `ton-net-block`, `ton-net-adnl`, `ton-net-lite`, `ton-net`) and the Node
 binding crate (`ton-net-node`). The internal dependency edges in `[workspace.dependencies]`

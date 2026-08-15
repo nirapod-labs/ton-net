@@ -475,9 +475,9 @@ binary size, or the plain read-and-build API.
 
 The read path is built and runs on mainnet: the TL codec, ADNL over TCP, the liteserver
 query layer for account reads, cell and proof verification, and key-block sync with the
-two-thirds signature check. The current crate version is 0.3.0. The current milestone
-brings the cell engine to full capability, builders and dictionaries and usage trees and
-Merkle-proof creation, not parsing alone.
+two-thirds signature check. The current crate version is 0.4.2. The cell engine reached
+full capability in 0.4.0, builders and dictionaries and usage trees and Merkle-proof
+creation, not parsing alone.
 
 The following are designed and sequenced but not yet in the code. The order is
 dependency-first, which places the write path early and the TVM last. Each is described

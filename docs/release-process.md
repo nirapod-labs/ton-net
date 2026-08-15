@@ -16,7 +16,7 @@ halves of it. The governing decision is
 Every workspace crate carries a single version through workspace inheritance. The
 version is declared once, in the `[workspace.package]` table of the root
 `Cargo.toml`, and each crate takes it with `version.workspace = true`. The version
-today is `0.3.0`.
+today is `0.4.2`.
 
 That one version rides every artifact the library publishes:
 
