@@ -292,7 +292,7 @@ its arguments does not invent a spelling for it.
 
 ## The verification epoch
 
-`VERIFY_EPOCH` is a single integer, currently `1`, and it answers a question the
+`VERIFY_EPOCH` is a single integer, currently `2`, and it answers a question the
 package version cannot. A version says whether the API changed. It cannot say
 whether an upgrade changed what the library accepts as proven, because the accept
 and reject boundary moves independently of any signature: it can shift while
