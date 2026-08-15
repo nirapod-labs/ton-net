@@ -18,9 +18,8 @@ and what they get. A proof-of-concept is welcome and is not required.
 
 ## Supported versions
 
-Nothing is published to a registry yet. The first ordinary release is v0.3.0; from
-then on the latest release line carries fixes. Before that, `main` is the only
-supported version.
+The latest release line carries fixes. v0.3.0 was the first ordinary release, and
+the current one is v0.4.2.
 
 ## What is in scope
 
