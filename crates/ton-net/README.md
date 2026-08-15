@@ -83,10 +83,18 @@ to `Client::account_at` rather than walk on every read.
 
 ## What ships today, and what is ahead
 
-Version 0.3.0 is a trust-minimized read path, end to end: connect, sync, and read a
-proven account, with nothing trusted but the pinned block and the local clock.
-Working today are the TL codec, ADNL over TCP, the liteserver reads, the cell and
-proof engine, key-block sync, and a Node binding.
+A trust-minimized read path, end to end: connect, sync, and read a proven account,
+with nothing trusted but the pinned block and the local clock. Working today are the
+TL codec, ADNL over TCP, the liteserver reads, key-block sync, and a Node binding,
+over a cell engine wider than this client's own use of it: builders and slices as a
+pair, three dictionary shapes, Merkle proofs and updates built as well as checked,
+usage trees, virtualization, and the bag-of-cells codec.
+
+This facade re-exports the cell types its own methods answer with. The augmented and
+prefix dictionaries, the proof builders and the streaming readers are not among them,
+because no method here returns one; a program whose need is the cell engine itself
+depends on [`ton-net-cell`](https://crates.io/crates/ton-net-cell) directly. The Node
+binding is published as [`ton-net` on npm](https://www.npmjs.com/package/ton-net).
 
 The rest is committed scope, not yet built. Among the larger pieces: the write path
 and wallets, the DHT, RLDP, and the local TVM. The order they arrive in is

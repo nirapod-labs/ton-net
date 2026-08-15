@@ -3,6 +3,23 @@
 A TON network client written once in Rust, verified against validator signatures, and bound
 natively into other languages.
 
+[![crates.io](https://img.shields.io/crates/v/ton-net.svg?logo=rust)](https://crates.io/crates/ton-net)
+[![docs.rs](https://img.shields.io/docsrs/ton-net?logo=docsdotrs)](https://docs.rs/ton-net)
+[![npm](https://img.shields.io/npm/v/ton-net.svg?logo=npm)](https://www.npmjs.com/package/ton-net)
+[![Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+
+```toml
+[dependencies]
+ton-net = "0.4"
+```
+
+```bash
+npm install ton-net
+```
+
+Before 1.0.0 a minor is breaking in both ecosystems, so a consumer opts into each one. The
+[changelog](CHANGELOG.md) names what moved.
+
 ton-net is the reference Rust full TON client. It speaks TON's own client protocol directly,
 TL over ADNL, and verifies every answer against the validator signatures that committed it
 rather than trusting the server that returned it. The protocol and all of its verification are
@@ -43,26 +60,48 @@ chain, so a clock far enough behind is reported rather than quietly passed.
 
 ## What ships today
 
-Version 0.3.0 is the first registry release. It delivers a trust-minimized read path: connect
-to a liteserver over ADNL, sync to the current masterchain head, and read a proven account,
-from the Rust core or from the Node binding.
+Two things ship. A trust-minimized read path: connect to a liteserver over ADNL, sync to the
+current masterchain head, and read a proven account, from the Rust core or the Node binding.
+And the cell engine that read is built on, which stands on its own as a TON cell library for a
+program that never opens a socket.
 
-Working today:
+The read path:
 
 - the TL codec, with CRC32-IEEE constructor tags,
-- the TON cell model and the bag-of-cells codec,
-- the block and account structures decoded from cells, and Merkle-proof verification,
 - ADNL over TCP: the handshake, session-key derivation, and encrypted stream framing,
 - the liteserver query layer,
+- the block and account structures decoded from cells, and Merkle-proof verification,
 - key-block sync and the proven-read facade,
 - a Node binding over the facade.
+
+The cell engine, in `ton-net-cell`:
+
+- cells and their identity, with `Builder` and `Slice` as a pair, so what one writes the other
+  reads back in the form it went in,
+- three dictionary shapes: `Dict`, `AugDict` for `HashmapAug`, where each node carries a
+  summary of the subtree under it, and `PfxDict` for prefix maps,
+- Merkle proofs and updates, built here and anchored in `ton-net-block`: `create_proof`,
+  `create_update`, `apply_update`, `combine_updates`, `validate_update`, and `virtualize` with
+  the pruned-branch rules around it,
+- `UsageTree`, which records the cells a read touched, so a proof can be cut to them,
+- the bag-of-cells codec, including `LazyBoc` for a subtree opened on demand and `BocView` for
+  a bag read without building cells,
+- `base64_encode`, `base64_decode`, `hex_encode` and `hex_decode`, the spellings a serialized
+  bag and a cell hash travel in.
+
+The `ton-net` facade re-exports the cell types its own methods answer with, so a caller can
+name what `Cell::parse` or `Client::account_state` hands back without depending on a crate the
+facade presents as internal. It stops there on purpose: the augmented and prefix dictionaries,
+the proof builders and the streaming readers are reachable from no method the facade returns,
+so a consumer whose need is the cell engine itself depends on `ton-net-cell` rather than
+finding half of it through the facade.
 
 A first sync covers every key block published since the pinned one, over a thousand links
 against mainnet and a couple of minutes. Saving the block it ended on turns the next run into
 a single link (`Client::anchor`, `Client::connect_from`). `VERIFY_EPOCH` rises whenever the
 set of things the library accepts as proven changes, so a caller can tell an API-compatible
 upgrade that moved the accept-or-reject boundary from one that did not
-([NET-ADR-008](docs/adr/NET-ADR-008-versioning-and-bindings.md)).
+([NET-ADR-008](docs/adr/NET-ADR-008-versioning-and-bindings.md)). It is 2 today.
 
 ## What is ahead
 
@@ -148,5 +187,3 @@ any project, in any language, embed the client without a copyleft obligation. Se
 Contributions are accepted under the same license, certified with a
 [Developer Certificate of Origin](https://developercertificate.org/) sign-off. See
 [CONTRIBUTING.md](CONTRIBUTING.md).
-</content>
-</invoke>
