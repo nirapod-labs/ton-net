@@ -173,18 +173,30 @@ const epoch = epochMatch[1];
 
 // Every tracked document, rather than a list somebody has to remember to extend: a list
 // goes stale the first time a document is added, and a document nobody added to it is
-// exactly the one that would state the number and never be checked. Decision records are
-// skipped because they record a value as it was when the decision was taken, which is
-// history and not a description of this build.
-const epochProse = execFileSync("git", ["ls-files", "*.md"], {
+// exactly the one that would state the number and never be checked.
+//
+// A record is the exception, because it states a value as of when it was written and stays
+// correct at every later value. A decision record is one, and so are a release plan and the
+// changelog: appending "the current version is 0.4.0" to `docs/plan/v0.4.0.md` failed the
+// gate on a document that was right.
+const record = (rel) =>
+  rel.startsWith("docs/adr/") || rel.startsWith("docs/plan/") || rel === "CHANGELOG.md";
+
+const living = execFileSync("git", ["ls-files", "*.md"], {
   cwd: root,
   encoding: "utf8",
 })
   .split("\n")
-  .filter((rel) => rel.length > 0 && !rel.startsWith("docs/adr/"));
+  .filter((rel) => rel.length > 0 && !record(rel));
+
+// `docs/versions.md` and `docs/api-design.md`, the two documents a consumer reads for this
+// value, both write the literal as `1` rather than 1. Matching the raw line read the
+// backtick as part of the number, so the check passed corpus-wide while both stated an
+// epoch the crate had left behind.
+const unstyled = (line) => line.replace(/`/g, "");
 
 const staleEpoch = [];
-for (const rel of epochProse) {
+for (const rel of living) {
   const path = join(root, rel);
   if (!existsSync(path)) {
     continue;
@@ -195,11 +207,50 @@ for (const rel of epochProse) {
       return;
     }
     // A literal stated as the current value, in the shapes the corpus actually writes:
-    // "1 today", "is 1", "= 1".
-    const stated = line.match(/(?:\b(\d+) today\b|\bis (\d+)\b|=\s*(\d+)\b)/);
-    const found = stated && (stated[1] ?? stated[2] ?? stated[3]);
+    // "1 today", "is 1", "currently 1", "= 1".
+    const stated = unstyled(line).match(
+      /(?:\b(\d+) today\b|\bis (\d+)\b|\bcurrently (\d+)\b|=\s*(\d+)\b)/,
+    );
+    const found = stated && (stated[1] ?? stated[2] ?? stated[3] ?? stated[4]);
     if (found && found !== epoch) {
       staleEpoch.push(`${rel}:${index + 1} says ${found}, the crate ships ${epoch}`);
+    }
+  });
+}
+
+// The version had it worse: the reconciliation above covers the manifests, which no human
+// writes, and nothing covered the prose, which is the only place a reader meets the number.
+// Four documents stated 0.3.0 across three releases.
+//
+// A bare version literal cannot be the trigger, because most of them are correct history.
+// "v0.3.0 is the first published version" stays true at every later version, and a check
+// that failed on it would be turned off within a release.
+//
+// Sharing a line with today or current is not enough either, and the corpus says why: the
+// release sequence opens on where the project "stands today to v1.0.0", a target rather
+// than a state, and names the two unpublished tags one clause after stating the current
+// version. A line carries a currency claim and correct history at once. So the version has
+// to be what the claim is about, which in every shape the corpus writes means it follows an is:
+// "the version today is X", "today it is X", "the current crate version is X". A number
+// reached by to, and, or are is left alone.
+//
+// A currency claim phrased some third way is invisible here.
+const staleVersion = [];
+for (const rel of living) {
+  const path = join(root, rel);
+  if (!existsSync(path)) {
+    continue;
+  }
+  const lines = readFileSync(path, "utf8").split("\n");
+  lines.forEach((line, index) => {
+    const plain = unstyled(line);
+    if (!/\b(?:today|current)\b/i.test(plain)) {
+      return;
+    }
+    for (const [, stated] of plain.matchAll(/\bis\s+v?(\d+\.\d+\.\d+)\b/g)) {
+      if (stated !== version) {
+        staleVersion.push(`${rel}:${index + 1} says ${stated}, the crates are at ${version}`);
+      }
     }
   });
 }
@@ -221,6 +272,15 @@ if (staleEpoch.length > 0) {
   console.error(
     "the constant is the source of truth; a document that states a number states this one",
   );
+  process.exit(1);
+}
+
+if (staleVersion.length > 0) {
+  console.error(`a document states a stale version as the current one (the crates are at ${version}):`);
+  for (const line of staleVersion) {
+    console.error(`  - ${line}`);
+  }
+  console.error("a line that says today or current carries the version the crates carry");
   process.exit(1);
 }
 
