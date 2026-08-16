@@ -54,14 +54,14 @@ it.
 
 `tl` and `cell` are the two roots and name no other module. `cell` is independent of the
 wire codec: the cell model belongs to TON's data layer, not to any one protocol. The old
-block layer is two modules now, `tlb` for decoding and `proof` for checking; both sit on
-the two roots, and they also name each other, which is what splitting one crate into two
-modules made visible. `adnl` sits on the codec, `lite` on the transport and the codec,
+block layer is two modules now, `tlb` for decoding and `proof` for checking. `tlb` sits on
+`cell` alone; `proof` sits on `cell`, on `tl` and on `tlb`, because a check reads what a
+decode produced. `adnl` sits on the codec, `lite` on the transport and the codec,
 and the facade on all of them.
 
 The direction is checked rather than assumed. `scripts/check-layers.mjs` reads the source
-text of `cell`, `tlb`, `proof` and `tl` and refuses any of them naming `adnl`, `lite` or
-`client`, naming tokio or getrandom, or reaching the socket, the filesystem, the process,
+text of `cell`, `tlb`, `proof` and `tl` and refuses any of them writing `crate::adnl`,
+`crate::lite` or `crate::client`, naming tokio or getrandom, or reaching the socket, the filesystem, the process,
 the environment, a thread or a clock. A manifest could never have shown the last of those,
 because `std` needs no dependency edge. `lite` is held separately to not naming `cell`.
 Every refusal is proved against probes built to trip it, and the same reading asserts the

@@ -227,13 +227,13 @@ it can be shared without copying.
 
 The layers are flat modules under `core/src`, not nested crates, and the edges between
 them run one way. Two modules name no other and sit at the foundation. Each higher
-module names only modules below it, and the facade at the top reaches the four it
+module names only modules below it, and the facade at the top reaches the five it
 needs. The binding depends only on `ton-net`.
 
 ```
 bindings   ton-net-node    Node.js binding      -> ton-net
 
-facade     root + client   API and block-sync   -> lite, adnl, proof, tlb
+facade     root + client   API and block-sync   -> lite, adnl, proof, tlb, cell
 
 client     lite            liteserver reads     -> adnl, tl
 
@@ -245,16 +245,16 @@ foundation tl              TL codec             (names no other module)
 ```
 
 Every arrow points down this ladder, and no module below the facade names anything
-above it. One pair on the same rung names each other: `tlb` decodes a block header
-through a Merkle proof `proof` checks, and `proof` reads the structures `tlb` decodes.
-They were one crate before the collapse, so the ladder is stated as one direction
-rather than as an acyclic graph, and it is that direction the build checks.
+above it. The two on the same rung run one way as well: `proof` reads the structures
+`tlb` decodes, and nothing in `tlb` names `proof`. Nothing mechanical holds that one,
+because the check refuses only the layers above, so the ladder is stated as one
+direction rather than as an acyclic graph, and it is that direction the build checks.
 
 `scripts/check-layers.mjs` is what holds it. Reading a dependency graph was the wrong
 instrument, because `std` needs no dependency edge and a socket opened inside a
 foundation layer would have compiled with nothing to notice. The check reads the source
-text of the four deciding layers instead and refuses any of them naming `adnl`, `lite`
-or `client`, naming tokio or getrandom, or reaching the socket, the filesystem, the
+text of the four deciding layers instead and refuses any of them writing `crate::adnl`,
+`crate::lite` or `crate::client`, naming tokio or getrandom, or reaching the socket, the filesystem, the
 process, the environment, a thread or a clock. `lite` is held separately to not naming
 `cell`, because a liteserver answer leaves that layer as the bytes it arrived as. Every
 refusal is run first against probes built to trip it, and the same reading has to find

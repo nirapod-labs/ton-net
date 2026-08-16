@@ -191,19 +191,23 @@ currency a child exposes to its parent.
 
 **What the layer names became.** Each of the five lower crates is a module of the same name
 inside `ton-net`, except that the block crate's two halves are now two modules. `core/src/lib.rs`
-declares `adnl`, `cell`, `client`, `lite`, `proof`, `tl` and `tlb` public, and `address`,
-`codec`, `config`, `error` and `verified` private and re-exported at the root. `tlb` holds
+declares `adnl`, `cell`, `client`, `lite`, `proof`, `tl` and `tlb` public. `address`,
+`config`, `error` and `verified` are private modules whose one escaping type each is
+re-exported at the root; `codec` is private and exports nothing, because a CRC-16 and a
+base64 reader are what the address and config parsers need rather than a surface. `tlb` holds
 what `ton-net-block` decoded, the account, block, coins and shard structures; `proof` holds
 what it checked, the chain walk, the validator handling and the signature rule. The facade is
 no longer a crate but the root plus `client`, whose children are `client/proof.rs` and
 `client/sync.rs`.
 
 **The first half of the rejected alternative was false about the tree it was written for.**
-The claim was that a single library has no enforced layering. The six crates enforced nothing
-either, and the reason is invisible in every manifest: `std` needs no dependency edge. A
-`std::net::TcpStream` opened inside the old `ton-net-block` compiled with no manifest change
-and nothing to notice, and a `tokio` line added to that same manifest cleared every check in
-`just gate` in silence. A dependency graph was the wrong instrument, not a weakened one.
+The claim was that a single library has no enforced layering. What the six crates enforced was
+narrower than it looked, and the gap is invisible in every manifest: `std` needs no dependency
+edge. Naming one crate from another without a manifest line was a hard compile error, so the
+direction between crates was absolute. A `std::net::TcpStream` opened inside the old
+`ton-net-block` compiled with no manifest change and nothing to notice, and a `tokio` line
+added to that same manifest cleared every check in `just gate` in silence. So the graph held
+the edges it could see and was blind to the reaches that arrive without one.
 
 What replaces it is `scripts/check-layers.mjs`, which reads source text rather than manifests.
 It holds four deciding layers, `cell`, `tlb`, `proof` and `tl`, to naming nothing above them:
@@ -222,11 +226,13 @@ then has to find three edges that are supposed to be present, `tlb` reaching `ce
 rather than reporting the tree clean. That second reading is the part decision 3 never had.
 
 The check is narrower than decision 3's claim in one place worth naming. It does not refuse
-`crate::proof` from `tlb`, and the two do name each other: `core/src/tlb/block.rs` reaches
-`verify_merkle_proof` while `core/src/proof.rs` reaches the structures in `tlb`. Both halves
-were one crate before the collapse, so no edge existed there to point the wrong way, and
-splitting them into two modules is what made the pair visible. The property held today is
-that the deciding layers name nothing above them, which is a weaker statement than an acyclic
+`crate::proof` from `tlb`, so nothing mechanical holds that direction. Today the direction is
+one way: `core/src/proof.rs` reaches the structures in `tlb`, and nothing under `core/src/tlb/`
+reaches `proof` outside its own documentation. That took an edit. `Block::from_proof` refused a
+proof that did not root where it claimed, which is a decision rather than a decode, and both
+halves were one crate before the collapse so no edge there could point the wrong way; splitting
+them is what made it visible, and it moved to `proof::covered_block`. The property the check
+holds is that the deciding layers name nothing above them, which is weaker than an acyclic
 graph and is stated as the weaker one.
 
 **The second half of the alternative is true of a naive merge and false of this one.** A
