@@ -3,8 +3,8 @@
 
 // Holds each crate root to the strongest unsafe-code lint it can actually carry.
 //
-// The six library crates set `forbid(unsafe_code)`, which the compiler enforces absolutely:
-// an inner `allow` is a hard error, so nothing further is needed to keep them honest.
+// The library crate sets `forbid(unsafe_code)`, which the compiler enforces absolutely:
+// an inner `allow` is a hard error, so nothing further is needed to keep it honest.
 // The node binding cannot set it. `napi_derive` expands `#[napi]` into code carrying its
 // own `#[allow(unsafe_code)]`, and `forbid` refuses to be overruled by an expansion as
 // readily as by a hand-written attribute, so a binding root that forbids does not build
@@ -13,7 +13,7 @@
 // The binding therefore holds unsafe code, written by the macro and permitted by the
 // macro, and the lint it can carry, `deny`, is exactly the one an inner allowance defeats
 // without a diagnostic. So the property held there is narrower than the one the library
-// crates hold, and it is stated as what is actually read: the binding's own source text
+// crate holds, and it is stated as what is actually read: the binding's own source text
 // carries no `unsafe` keyword and no allowance of that lint. A macro this repository
 // defined itself could still expand to one, and nothing here would see it.
 //
@@ -31,17 +31,11 @@ import { fileURLToPath } from "node:url";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 
-// A crate root that decodes bytes from a peer, each of which forbids outright. Naming
-// them individually rather than globbing is deliberate: a new core crate should fail
-// this list until somebody decides which posture it carries.
-const FORBIDS = [
-  "crates/ton-net/src/lib.rs",
-  "crates/ton-net-adnl/src/lib.rs",
-  "crates/ton-net-block/src/lib.rs",
-  "crates/ton-net-cell/src/lib.rs",
-  "crates/ton-net-lite/src/lib.rs",
-  "crates/ton-net-tl/src/lib.rs",
-];
+// The crate root that decodes bytes from a peer, which forbids outright. It is one entry
+// today and stays a list on purpose: a second library root added to the workspace should
+// fail this until somebody decides which posture it carries, and a glob would take
+// whatever it found without anyone deciding anything.
+const FORBIDS = ["core/src/lib.rs"];
 
 // A crate root that cannot forbid, with the reason, so a failure explains itself without
 // anyone having to rediscover the macro expansion.
