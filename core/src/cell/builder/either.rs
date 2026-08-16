@@ -67,8 +67,10 @@ impl Builder {
     ///
     /// Returns [`CellError::NoRoomForRefs`] if the payload does not fit inline and the cell
     /// already holds [`MAX_REFS`] references, and [`CellError::NoRoomForBits`] if it does not
-    /// fit inline and there is no room for the discriminator either. Neither arm writes
-    /// anything in that case, so the builder is left as it was.
+    /// fit inline and there is no room for the discriminator either. The two conditions are
+    /// not exclusive, and a builder short of both reports the reference limit, since that is
+    /// the one tested first, which is the order [`Builder::store_maybe_ref`] reports them in.
+    /// Neither arm writes anything in either case, so the builder is left as it was.
     ///
     /// # Examples
     ///
