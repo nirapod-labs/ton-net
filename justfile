@@ -58,8 +58,8 @@ census:
 default-deps:
     node scripts/check-default-deps.mjs
 
-# Whether each crate root still carries the strongest unsafe-code lint it can. The six
-# library crates forbid, and the compiler needs no help holding them there. The binding
+# Whether each crate root still carries the strongest unsafe-code lint it can. The
+# library crate forbids, and the compiler needs no help holding it there. The binding
 # cannot: `napi_derive` expands an inner allowance, so a binding root that forbids fails
 # to build. It denies instead, and an allowance defeats a deny silently, so what is left
 # for a reading of the source text to close is that.
