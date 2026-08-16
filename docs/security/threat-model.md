@@ -25,11 +25,11 @@ machine in the middle that rewrites every packet is still, to the verifier, a
 server whose answers are checked or refused. The ADNL framing reduces on-path
 tampering to that same case: a flipped byte fails the per-frame checksum, and a
 desynchronized stream fails the length check, both as a `FrameError` that ends
-the call rather than as data (`crates/ton-net-adnl/src/frame.rs`).
+the call rather than as data (`core/src/adnl/frame.rs`).
 
 The asset is the correctness of what the client believes. The library holds no
 user key and persists no secret (NET-ADR-001): the network config carries only
-public data (`crates/ton-net/src/config.rs`), and the only secrets computed
+public data (`core/src/config.rs`), and the only secrets computed
 anywhere are the ephemeral per-session ADNL keys, which protect the transport and
 nothing of the user's. There is no key to exfiltrate and no balance to move. What
 an attacker can try to corrupt is the client's picture of the chain: an account's
@@ -39,9 +39,9 @@ false picture fail closed as a named error rather than pass as an answer.
 One guarantee frames the rest. A `Verified<T>` is as trustworthy as the block in
 its anchor and no more, and it has no public constructor, so a value of that type
 is a claim the type system keeps honest rather than a convention a caller can opt
-out of (`crates/ton-net/src/verified.rs`). A server-reported value is a distinct
+out of (`core/src/verified.rs`). A server-reported value is a distinct
 type, and there is no operation that turns one into the other
-(`crates/ton-net/src/lib.rs`). The sections below are the checks that stand
+(`core/src/lib.rs`). The sections below are the checks that stand
 between a server's bytes and a `Verified` value.
 
 ## The untrusted-decode boundary
@@ -51,11 +51,8 @@ unwinds on hostile input is a denial of service in whatever process embedded the
 library, so the rule is that a malformed reply returns an error and never
 panics.
 
-The rule is enforced as a lint block, identical at the top of all six crates that
-touch peer bytes (`crates/ton-net-tl/src/lib.rs`,
-`crates/ton-net-cell/src/lib.rs`, `crates/ton-net-block/src/lib.rs`,
-`crates/ton-net-adnl/src/lib.rs`, `crates/ton-net-lite/src/lib.rs`,
-`crates/ton-net/src/lib.rs`):
+The rule is enforced as one lint block at the crate root, which every module that
+touches peer bytes sits beneath (`core/src/lib.rs`):
 
 ```rust
 #![deny(
@@ -75,8 +72,8 @@ because `buf[i]` on an attacker-supplied index is the same failure spelled
 differently, so slice access goes through checked forms instead: the bag-of-cells
 reader advances with `checked_add` and `slice::get`, returning
 `CellError::Truncated` rather than reading past the end
-(`crates/ton-net-cell/src/boc.rs`, `Reader`), and frame parsing splits with
-`split_at_checked` rather than by offset (`crates/ton-net-adnl/src/frame.rs`).
+(`core/src/cell/boc.rs`, `Reader`), and frame parsing splits with
+`split_at_checked` rather than by offset (`core/src/adnl/frame.rs`).
 `unsafe` is forbidden outright, so no decode path can reach for a raw pointer to
 go faster. Arithmetic is deliberately left out of the deny set: every count these
 formats carry is bounded before it is used, and each subtraction sits within a
@@ -103,7 +100,7 @@ attack is to tamper with that proof, to substitute a placeholder for a real
 answer, or to withhold the part being read and hope the client reads silence as
 an answer. The defense is that a proof is recomputed against a hash the client
 already trusts, never read as an answer on the server's say-so
-(`crates/ton-net-block/src/proof.rs`).
+(`core/src/proof.rs`).
 
 `verify_merkle_proof` takes a cell and the root it must stand for. It requires
 the cell to be a Merkle proof (else `BlockError::NotAMerkleProof`), requires the
@@ -146,7 +143,7 @@ is the subject of the trust-anchor section below.
 
 The trust anchor moves forward by block sync: the client walks a proof chain from
 the block it trusts to the head the server reports, checking every link
-(`crates/ton-net-block/src/chain.rs`, `crates/ton-net/src/sync.rs`). The server
+(`core/src/proof/chain.rs`, `core/src/client/sync.rs`). The server
 picks the route and the client believes nothing about it. Every field of every
 link is a claim until a check settles it, including which blocks the route passes
 through and which direction it runs. Two attacks live here: forging a block the
@@ -161,7 +158,7 @@ own configuration proof, reads the destination header from its proof and require
 it to match the identity and key-block flag the link claims, rebuilds the exact
 bytes the validators signed, sums the weight of the valid signatures from
 distinct members, and requires that weight to carry the link. The threshold is
-strict and exact (`crates/ton-net-block/src/validators.rs`):
+strict and exact (`core/src/proof/validators.rs`):
 
 ```rust
 carries(weight)  =  u128::from(weight) * 3  >  u128::from(total_weight) * 2
@@ -178,7 +175,7 @@ threshold, a margin at which an `f64` comparison would be a coin toss. Below tha
 threshold the link fails with `BlockError::NotEnoughWeight`.
 
 The signed bytes are rebuilt rather than trusted (`signed_message` in `chain.rs`,
-`crates/ton-net-block/src/signature.rs`). Mainnet has used two signed forms, and a
+`core/src/proof/signature.rs`). Mainnet has used two signed forms, and a
 walk that crosses the changeover carries both. The older form signs a block
 identity outright. The newer Simplex form signs a finalize vote that names a
 candidate only by hash, so on its own it says nothing about which block it is
@@ -207,7 +204,7 @@ was served. A fully signed, genuinely committed block from last year passes ever
 check above. The block's own generation time against the local clock is the only
 freshness signal there is (NET-ADR-005). `fresh_enough` refuses a proven head
 older than the configured bound with `Error::Stale`
-(`crates/ton-net/src/sync.rs`), the bound defaulting to 600 seconds and settable
+(`core/src/client/sync.rs`), the bound defaulting to 600 seconds and settable
 through `Config::with_max_head_age`, a bound of zero refusing every head. A block
 stamped more than 300 seconds ahead of the local clock is reported as
 `Error::ClockBehind` rather than accepted, because the age measurement saturates:
@@ -221,7 +218,7 @@ is why the local clock is named as the second trusted input alongside the anchor
 Sync is the first place a server decides how much work the client does, so the
 bounds ship with it rather than as a later hardening pass, and they are read off
 the wire before any expensive work runs (NET-ADR-005,
-`crates/ton-net/src/sync.rs`). `within_bounds` inspects a reply before the cell
+`core/src/client/sync.rs`). `within_bounds` inspects a reply before the cell
 engine parses a proof or the curve arithmetic touches a signature, because
 everything it checks is a count or a length that costs nothing to read: at most
 64 links per reply, at most 1,048,576 bytes per Merkle proof, at most 1,024
@@ -238,11 +235,11 @@ Signatures are verified before duplicates are removed, which is the sound order,
 but it means a set padded with copies of one member would cost a curve operation
 per copy. `carried_weight` spends a per-link budget of twice the set size on
 verification attempts, so a set stuffed with duplicates is refused rather than
-run (`crates/ton-net-block/src/chain.rs`).
+run (`core/src/proof/chain.rs`).
 
 The cell engine carries its own bounds, because a bag of cells arrives from the
 same untrusted server and a Merkle proof is attacker-shaped by design
-(NET-ADR-010, `crates/ton-net-cell/src/boc.rs`). A parsed cell is roughly 250
+(NET-ADR-010, `core/src/cell/boc.rs`). A parsed cell is roughly 250
 bytes of live heap and the smallest one on the wire is two bytes, so without a
 bound a bag would expand by two orders of magnitude on the way in. `parse_boc`
 refuses a declared cell count past `MAX_CELLS`, which is 131,072, with
@@ -253,10 +250,10 @@ against the bytes before anything is allocated for it: the header reader refuses
 count larger than `MAX_CELLS`, then refuses a count whose minimum two bytes per
 cell exceed what remains (`CellError::Truncated`), and requires the declared cell
 area to account for exactly the bytes left, so a bag cannot claim one length and
-carry another (`crates/ton-net-cell/src/boc/header.rs`). A reference that does not
+carry another (`core/src/cell/boc/header.rs`). A reference that does not
 point strictly forward is `CellError::BadReference`, which also rules out cycles.
 Underneath all of this the ADNL frame layer refuses a frame body past 16,777,216
-bytes before any allocation follows it (`crates/ton-net-adnl/src/frame.rs`),
+bytes before any allocation follows it (`core/src/adnl/frame.rs`),
 though the real work bounds are the smaller ones above, set where the work is.
 
 ## The trust anchor, the one trusted input
@@ -266,7 +263,7 @@ from which every later fact is derived. That root cannot come from a server,
 because a server that supplied it could then invent a chain that verifies cleanly
 against it. The root is a single masterchain key block named `init_block` in the
 network config, and it is the only value a verified read takes on trust from the
-chain's side of the world (NET-ADR-005, `crates/ton-net/src/config.rs`).
+chain's side of the world (NET-ADR-005, `core/src/config.rs`).
 Everything else is earned one validator signature set at a time.
 
 The config carries two things whose trust requirements are opposite, and the code
@@ -292,7 +289,7 @@ half-checked.
 The bundled mainnet anchor is a point-in-time snapshot of what the public mainnet
 config published, at masterchain sequence number 46894135, not a block this
 library chose. Its root hash and file hash are pinned in
-`crates/ton-net/src/config.rs` and asserted by a test in that module, and
+`core/src/config.rs` and asserted by a test in that module, and
 restated in NET-ADR-005. A first sync walks forward from it, so the further it
 recedes the longer that walk runs, which makes refreshing the snapshot release
 work rather than routine upkeep. The anchor holds no secret, but it is a root of
