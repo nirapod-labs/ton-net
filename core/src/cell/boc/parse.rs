@@ -7,7 +7,9 @@ use std::num::NonZeroUsize;
 use std::sync::{Arc, OnceLock};
 
 use super::{bit_len, read_header, Header, ParseOptions, Reader, MAX_DEPTH};
-use crate::cell::cell::{summarize, Cell, CellType, Identity, Payload, Refs, Span, MAX_BITS, MAX_REFS};
+use crate::cell::cell::{
+    summarize, Cell, CellType, Identity, Payload, Refs, Span, MAX_BITS, MAX_REFS,
+};
 use crate::cell::error::CellError;
 
 /// A cell as read from the bag, with its references still as indices and its bytes still

@@ -37,11 +37,11 @@
 //! guard refuses the first link of every rotation. The set to use is the one the source
 //! key block names, and the window is not a check.
 
-use sha2::{Digest, Sha256};
 use crate::cell::{Cell, Slice};
+use sha2::{Digest, Sha256};
 
-use crate::tlb::BlockError;
 use crate::cell::{Dict, Lookup};
+use crate::tlb::BlockError;
 
 /// The configuration parameter holding the current validator set.
 const CURRENT_VALIDATORS: i32 = 34;

@@ -10,9 +10,9 @@
 //! pruned to a path, verifies against the confirmed hash; a proof built for any other root
 //! is refused.
 
+use ton_net::cell::{parse_boc, virtualize, Cell, CellType, UsageTree};
 use ton_net::proof::verify_merkle_proof;
 use ton_net::tlb::BlockError;
-use ton_net::cell::{parse_boc, virtualize, Cell, CellType, UsageTree};
 
 /// A captured masterchain account read: a confirmed block hash and the liteserver's proof.
 const MASTERCHAIN: &str = include_str!("fixtures/read-masterchain.txt");

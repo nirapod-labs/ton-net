@@ -59,7 +59,11 @@ lz4_flex = { workspace = true, optional = true }
 getrandom = { workspace = true, optional = true }
 # The native transport and the timer that bounds every call. The socket is behind the
 # `net` feature; the runtime comes from the caller.
-tokio = { workspace = true, optional = true, features = ["net", "io-util", "time"] }
+tokio = { workspace = true, optional = true, features = [
+  "net",
+  "io-util",
+  "time",
+] }
 
 [dev-dependencies]
 criterion.workspace = true

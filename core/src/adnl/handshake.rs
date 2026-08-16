@@ -22,10 +22,10 @@
 //! the one the feasibility spike completed against mainnet; the layout is fixed by the
 //! reference node, not chosen here.
 
+use crate::tl::{adnl::PublicKey, serialize};
 use aes::cipher::{KeyIvInit, StreamCipher};
 use curve25519_dalek::edwards::{CompressedEdwardsY, EdwardsPoint};
 use sha2::{Digest, Sha512};
-use crate::tl::{adnl::PublicKey, serialize};
 
 use crate::adnl::frame::SessionCiphers;
 use crate::adnl::{sha256, Aes256Ctr};

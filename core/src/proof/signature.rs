@@ -24,11 +24,11 @@
 //! variable-time double-scalar multiplication is the right primitive rather than a
 //! shortcut.
 
+use crate::tl::{serialize, signed};
 use curve25519_dalek::edwards::CompressedEdwardsY;
 use curve25519_dalek::scalar::Scalar;
 use curve25519_dalek::EdwardsPoint;
 use sha2::{Digest, Sha256, Sha512};
-use crate::tl::{serialize, signed};
 
 /// The message the older signed form covers: the identity of the block being committed.
 ///

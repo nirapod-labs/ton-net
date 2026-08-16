@@ -15,9 +15,9 @@
 //! they claim.
 
 use ton_net::proof::verify_chain;
-use ton_net::tlb::BlockError;
 use ton_net::tl::deserialize;
 use ton_net::tl::lite::{BlockIdExt, BlockLink, PartialBlockProof, SignatureSet};
+use ton_net::tlb::BlockError;
 
 /// Three forward links from masterchain 46894135 to 46920655.
 const CHAIN: &str = include_str!("fixtures/chain.hex");

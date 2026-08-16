@@ -9,6 +9,12 @@ superseded-by: none
 
 # NET-ADR-002: One audited core, a sans-I/O seam, thin bindings
 
+Where this record names six crates it describes the tree as it stood when the decision was
+taken. They are one crate now, and what the layer names became is at the end, under
+[Since acceptance](#since-acceptance). The one-core shape this record fixes is unaffected:
+the collapse took the core from six crates to one, which is the direction the decision
+already pointed.
+
 ## Context
 
 ton-net speaks the TON client protocol and verifies every answer against validator

@@ -19,10 +19,10 @@
 use crate::tl::lite::{BlockIdExt, BlockLink, PartialBlockProof, Signature, SignatureSet};
 use crate::tl::signed::CandidateBlock;
 
-use crate::tlb::Block;
-use crate::tlb::BlockError;
 use crate::proof::signature;
 use crate::proof::validators::ValidatorSet;
+use crate::tlb::Block;
+use crate::tlb::BlockError;
 
 /// The masterchain workchain id.
 const MASTERCHAIN: i32 = -1;

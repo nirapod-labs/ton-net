@@ -13,11 +13,11 @@
 //! what makes this a check: an implementation compared against itself proves only that
 //! it is consistent.
 
+use ton_net::cell::Dict;
 use ton_net::cell::Lookup;
 use ton_net::proof::ValidatorSet;
-use ton_net::tlb::{Block, BlockError};
-use ton_net::cell::Dict;
 use ton_net::tl::{deserialize, lite};
+use ton_net::tlb::{Block, BlockError};
 
 /// One forward link from the block the mainnet config pins.
 const ORDINARY: &str = include_str!("fixtures/chain.hex");

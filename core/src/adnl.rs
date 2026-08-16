@@ -37,9 +37,9 @@ pub mod transport;
 pub use connection::{AdnlConnection, AdnlError};
 pub use frame::{FrameError, SessionCiphers};
 pub use handshake::{client_handshake, Handshake, HandshakeError, HandshakeSecrets};
-pub use transport::{Transport, TransportError};
 #[cfg(feature = "net")]
 pub use transport::TcpTransport;
+pub use transport::{Transport, TransportError};
 
 /// AES-256 in counter mode with a 128-bit big-endian counter: the ADNL stream cipher,
 /// used both to wrap the handshake parameters and to frame every session byte after.
@@ -53,4 +53,3 @@ pub(crate) fn sha256(parts: &[&[u8]]) -> [u8; 32] {
     }
     hasher.finalize().into()
 }
-

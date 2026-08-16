@@ -434,7 +434,11 @@ impl crate::cell::Augmentation for Total {
         Ok(left + right)
     }
 
-    fn write(&self, extra: &u64, into: &mut crate::cell::Builder) -> Result<(), crate::cell::CellError> {
+    fn write(
+        &self,
+        extra: &u64,
+        into: &mut crate::cell::Builder,
+    ) -> Result<(), crate::cell::CellError> {
         into.store_uint(*extra, 64)?;
         Ok(())
     }
@@ -457,7 +461,11 @@ impl crate::cell::Augmentation for Ordered {
         Ok(left.wrapping_mul(31).wrapping_add(*right))
     }
 
-    fn write(&self, extra: &u64, into: &mut crate::cell::Builder) -> Result<(), crate::cell::CellError> {
+    fn write(
+        &self,
+        extra: &u64,
+        into: &mut crate::cell::Builder,
+    ) -> Result<(), crate::cell::CellError> {
         into.store_uint(*extra, 64)?;
         Ok(())
     }

@@ -16,11 +16,9 @@
 //! alignment: the balance becomes noise and the status reads as frozen. Both an account
 //! with storage extra and one without are pinned here so the ambiguity stays closed.
 
-use ton_net::proof;
-use ton_net::tlb::{
-    Account, AccountStatus, Block, BlockError, Coins, Lookup, ShardState,
-};
 use ton_net::cell::parse_boc;
+use ton_net::proof;
+use ton_net::tlb::{Account, AccountStatus, Block, BlockError, Coins, Lookup, ShardState};
 
 /// A basechain account with a balance and no code: the zero address.
 const UNINIT_ACCOUNT: &str = include_str!("fixtures/uninit-account.hex");

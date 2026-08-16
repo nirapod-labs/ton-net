@@ -3,7 +3,7 @@
 
 // Holds one version across two registries.
 //
-// The library ships as six crates on crates.io and eight packages on npm, built
+// The library ships as one crate on crates.io and eight packages on npm, built
 // from one commit but published by two toolchains that know nothing about each
 // other. Nothing mechanical keeps their version strings equal: release-plz moves
 // the Cargo side, napi moves the npm side, and neither reads the other. Left
@@ -152,7 +152,7 @@ if (fixed.length > 0) {
 }
 
 // The verification epoch is a second number with the same problem, and it is worse
-// placed to be wrong. The transcript in `crates/ton-net/tests/epoch.rs` pins the number
+// placed to be wrong. The transcript in `core/tests/epoch.rs` pins the number
 // against what the verifier accepts, so behaviour and the constant cannot come apart.
 // Nothing pins it against the prose, and the prose is where a consumer reads it: the
 // crates.io front page states it, and it is the one number that decides whether a cached
@@ -161,12 +161,12 @@ if (fixed.length > 0) {
 // So: read the constant, then refuse any living document that states a different literal
 // beside the name. Documents that record a decision as it was made are left alone, since
 // an ADR is a record rather than a description of today.
-const epochSource = join(root, "crates/ton-net/src/lib.rs");
-const epochMatch = readFileSync(epochSource, "utf8").match(
+const EPOCH_SOURCE = "core/src/lib.rs";
+const epochMatch = readFileSync(join(root, EPOCH_SOURCE), "utf8").match(
   /pub const VERIFY_EPOCH: u32 = (\d+);/,
 );
 if (!epochMatch) {
-  console.error("no VERIFY_EPOCH declaration in crates/ton-net/src/lib.rs");
+  console.error(`no VERIFY_EPOCH declaration in ${EPOCH_SOURCE}`);
   process.exit(1);
 }
 const epoch = epochMatch[1];

@@ -39,4 +39,3 @@ pub use crate::tl::lite::AccountId;
 /// The block-proof types [`LiteClient::block_proof`] answers with, re-exported from
 /// ton-net-tl so a caller need not name that crate to read a chain.
 pub use crate::tl::lite::{BlockLink, PartialBlockProof, Signature, SignatureSet};
-

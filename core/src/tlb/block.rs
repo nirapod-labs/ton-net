@@ -5,8 +5,8 @@
 
 use crate::cell::{Cell, CellType, Slice};
 
-use crate::tlb::error::BlockError;
 use crate::proof::verify_merkle_proof;
+use crate::tlb::error::BlockError;
 
 /// The constructor tag a block begins with.
 const BLOCK_TAG: u32 = 0x11ef_55aa;
