@@ -147,7 +147,7 @@ core/
 
     tlb.rs  tlb/          TON's typed structures
       account.rs  block.rs  coins.rs  shard.rs
-      message.rs message/                                        W3
+      message.rs message/
       error.rs
 
     proof.rs  proof/      the verification engine, which is what this library is for
