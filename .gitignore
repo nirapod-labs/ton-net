@@ -35,7 +35,5 @@ bindings/node/npm/*/LICENSE
 bindings/node/npm/*/NOTICE
 bindings/node/npm/*/THIRD-PARTY-LICENSES.md
 
-# Agent tooling drops a scratch directory here, and it has held a full worktree with a
-# copy of `docs/` in it. Untracked and unignored is the one state where a single
-# `git add -A` publishes that into a public repository.
+# Local tooling scratch. Not part of the project.
 .claude/
