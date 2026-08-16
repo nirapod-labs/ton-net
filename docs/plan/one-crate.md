@@ -108,7 +108,9 @@ One module, and a 32-line package sits at the top of it beside a 20,392-line one
 
 ### How much of that shape is taken, and how much is not
 
-Nine packages are listed above. The reference has 38 outside its examples, and 110,109 lines. **The nine are 49,294 of them, and the other 60,815 are two subsystems this library does not have and is not going to grow:** a TVM emulator at 43,045 lines, and a peer-to-peer stack, DHT, RLDP, overlays and QUIC, at 15,139. Neither is in scope for a client whose job is to verify what a server answers.
+Nine packages are listed above. The reference has 38 outside its examples, and 110,109 lines. **The nine are 49,294 of them.** Of the remaining 60,815, two subsystems this library does not have and is not going to grow account for 58,184: a TVM emulator at 43,045 lines, and a peer-to-peer stack, DHT, RLDP, overlays, QUIC and their key and node handling, at 15,139. Neither is in scope for a client whose job is to verify what a server answers.
+
+The last 2,631 lines are a different thing and are not out of scope, only unbuilt: three contract families at 1,343, an HTTP API client at 1,219, and hierarchical derivation at 69. The families are the growth shape named below; the HTTP client is a second transport this library has no plan for; the 69 lines are the capability the write-path plan declines on evidence, and their size is worth seeing next to the argument it took.
 
 So the shape is followed where the scope overlaps and nowhere else. What that yields, concretely:
 
