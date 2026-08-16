@@ -33,9 +33,9 @@ One library is many published artifacts, and the same version maps onto each reg
 
 - **crates.io** carries the library crate `ton-net`. Five names it no longer builds,
   `ton-net-tl`, `ton-net-cell`, `ton-net-block`, `ton-net-adnl` and `ton-net-lite`, stay
-  published at `0.4.2` and are frozen rather than yanked, because a yank breaks every
-  build that pinned one. Each is a module inside `ton-net` now, of the same name except `ton-net-block`, whose
-decoding half is `tlb` and whose checking half is `proof`
+  published at `0.4.2` rather than yanked, because a yank breaks every build that
+  pinned one. Each is a module inside `ton-net` now, of the same name except
+  `ton-net-block`, whose decoding half is `tlb` and whose checking half is `proof`
   ([NET-ADR-009](adr/NET-ADR-009-code-structure.md)), and the
   [release process](release-process.md) covers what happens to the five.
 - **npm** carries the binding as the `ton-net` package, at the same version. That package

@@ -26,8 +26,8 @@ never published.
   re-exports. `use ton_net_cell::X`, and the same for the other four names, no
   longer resolves against a current version.
 - The five retired names stay published on crates.io at `0.4.2` rather than being
-  yanked, so a build that pinned one keeps resolving. Each takes one final release
-  whose `lib.rs` is a deprecation notice naming the module that replaced it.
+  yanked, so a build that pinned one keeps resolving. What happens to them next is in
+  the release process.
 - `compress`, `json` and `parallel` are now features of `ton-net`, where they were
   features of `ton-net-cell` and the facade forwarded none of them. All three stay
   off by default and what they add is reached through `ton_net::cell`.

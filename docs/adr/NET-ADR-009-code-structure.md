@@ -192,8 +192,8 @@ currency a child exposes to its parent.
 **What the layer names became.** Each of the five lower crates is a module of the same name
 inside `ton-net`, except that the block crate's two halves are now two modules. `core/src/lib.rs`
 declares `adnl`, `cell`, `client`, `lite`, `proof`, `tl` and `tlb` public. `address`,
-`config`, `error` and `verified` are private modules whose one escaping type each is
-re-exported at the root; `codec` is private and exports nothing, because a CRC-16 and a
+`config`, `error` and `verified` are private modules whose escaping types are re-exported
+at the root; `codec` is private and exports nothing, because a CRC-16 and a
 base64 reader are what the address and config parsers need rather than a surface. `tlb` holds
 what `ton-net-block` decoded, the account, block, coins and shard structures; `proof` holds
 what it checked, the chain walk, the validator handling and the signature rule. The facade is
