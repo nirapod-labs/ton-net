@@ -377,6 +377,24 @@ mod tests {
     }
 
     #[test]
+    fn a_cell_short_of_both_reports_the_reference_limit() {
+        // The two limits overlap, so which one a caller is told about is a choice rather
+        // than a consequence. Beside `a_full_cell_refuses_both_arms_and_writes_nothing`,
+        // which holds the same bits with the references free and gets the bit limit, this
+        // pins the order the documentation states.
+        let mut builder = filled(MAX_BITS);
+        for _ in 0..MAX_REFS {
+            builder.store_ref(payload()).expect("four references fit");
+        }
+        let before = builder.clone();
+        assert!(matches!(
+            builder.store_either_ref(payload()),
+            Err(CellError::NoRoomForRefs { .. })
+        ));
+        assert_eq!(builder, before, "a refused store left the builder alone");
+    }
+
+    #[test]
     fn a_refused_maybe_leaves_no_presence_bit_behind() {
         // The order the module documentation argues for, at the one width that can tell the
         // two orders apart. One bit is free, so the presence bit would be written and the
