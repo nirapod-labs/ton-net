@@ -343,7 +343,7 @@ impl Client {
     /// masterchain the shard block holding it is derived from the masterchain state rather
     /// than taken from what the server named, and the state bytes are bound to the account
     /// the proof carries. An account the block's state does not hold comes back as
-    /// [`AccountStatus::Nonexistent`](ton_net::tlb::AccountStatus::Nonexistent), which is
+    /// [`AccountStatus::Nonexistent`](crate::tlb::AccountStatus::Nonexistent), which is
     /// a proved answer rather than a failure. An account the proof declines to cover is a
     /// failure.
     ///

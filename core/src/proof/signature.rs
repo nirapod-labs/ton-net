@@ -50,7 +50,7 @@ pub fn block_id_message(root_hash: &[u8; 32], file_hash: &[u8; 32]) -> Vec<u8> {
 /// beside the session id, so a signature raised in one consensus session cannot be
 /// replayed into another. The candidate is hashed whole and never decoded here; which
 /// block it names is a separate question, answered by
-/// [`ton_net::tl::signed::CandidateBlock`].
+/// [`crate::tl::signed::CandidateBlock`].
 #[must_use]
 pub fn simplex_message(session_id: &[u8; 32], slot: i32, candidate: &[u8]) -> Vec<u8> {
     let hash: [u8; 32] = Sha256::digest(candidate).into();

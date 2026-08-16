@@ -222,7 +222,7 @@ impl Error {
 
     /// Classifies a block-structure failure from a read that checked nothing.
     ///
-    /// The same [`BlockError`](ton_net::tlb::BlockError) means two different things
+    /// The same [`BlockError`](crate::tlb::BlockError) means two different things
     /// depending on which call produced it, and the difference is what a caller acts on.
     /// Out of the proof engine it is a server that did not prove its answer, and the
     /// conversion below says so. Out of `Client::account_reported` there was no proof to

@@ -93,7 +93,7 @@ pub struct ValidatorSet {
 impl ValidatorSet {
     /// Reads the current validator set out of a configuration dictionary.
     ///
-    /// `config` is the root of the dictionary [`crate::Block::config`] returns.
+    /// `config` is the root of the dictionary [`crate::tlb::Block::config`] returns.
     ///
     /// # Errors
     ///
