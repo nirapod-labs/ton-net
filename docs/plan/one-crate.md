@@ -268,9 +268,12 @@ Every number here was counted, and where a count is a floor rather than a measur
 
 | | count |
 |---|---:|
-| crate-path occurrences to rewrite (`ton_net_x::`) | **237** |
-| of those, cross-crate rather than self-references | **116** |
-| inside `///` or `//!` doc comments, so real compile units | 134 |
+| crate-path occurrences to rewrite, the five lower crates as `ton_net_cell::` and its four siblings | **183** |
+| of those, in Rust code | 126 |
+| of those, on a `///` or `//!` line | 55 |
+| of those, in Markdown prose | 2 |
+| of the same 183, cross-crate rather than self-references | **94** |
+| of the same 183, self-references inside the crate they name | 89 |
 | path edits needed in `bindings/node` | **0** |
 | `pub` items declared across the six crates | 451 |
 | of those, already on a private module path and therefore already unreachable | 362 |
@@ -278,10 +281,34 @@ Every number here was counted, and where a count is a floor rather than a measur
 | `pub` items reached by nothing at all, a floor on what can drop | 93 |
 | integration test targets | 17 |
 | **test target name collisions** | **1**, `mainnet`, three ways |
-| `#[test]` function names across the workspace | 569 |
+| `#[test]` and `#[tokio::test]` attribute sites across the workspace | 569 |
 | **cross-crate test-name collisions** | **0** |
 | fixture files | 16, 680,647 bytes |
 | **fixture pairs that are byte-identical and dedupe** | **4**, 101,871 bytes removed |
+
+The 183 is split twice, along two different axes, and each split covers it exactly: 126 plus 55 plus 2 by where the occurrence sits, and 94 plus 89 by whether it names its own crate. The readings run against the anchor rather than against a working tree, so they give the same answer to anyone:
+
+```sh
+# 183, the whole repository at the anchor
+git grep -o -E 'ton_net_(cell|tl|adnl|lite|block)::' 6bddcd3 | wc -l
+
+# 55 on a /// or //! line. Restricting to *.rs gives 181, so 126 are in code
+# and the remaining 2 of the 183 are Markdown prose
+git grep -n -E 'ton_net_(cell|tl|adnl|lite|block)::' 6bddcd3 -- '*.rs' \
+  | grep -E ':[0-9]+:[[:space:]]*//[/!]' \
+  | grep -o -E 'ton_net_(cell|tl|adnl|lite|block)::' | wc -l
+
+# 89 self-references, so 94 cross-crate
+for c in cell tl adnl lite block; do
+  git grep -o -E "ton_net_${c}::" 6bddcd3 -- "crates/ton-net-${c}/"
+done | wc -l
+
+# 569 test attribute sites across the workspace members
+git grep -c -E '^[[:space:]]*#\[(tokio::)?test' 6bddcd3 -- crates bindings \
+  | awk -F: '{ s += $NF } END { print s }'
+```
+
+Nine of the 183 sit in `spikes/`, which the workspace excludes and which keeps its own lockfile. They are counted because the spike reaches the crates by path and a merge breaks it, not because a workspace member reaches them.
 
 Three of these change the shape of the work.
 
