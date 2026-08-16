@@ -20,7 +20,7 @@
 
 use ton_net::cell::{Builder, Cell, CellError, Dict, Lookup, Slice};
 use ton_net::proof;
-use ton_net::tlb::{Block, ShardState};
+use ton_net::tlb::ShardState;
 
 /// One forward proof link, holding a key block's configuration.
 const CHAIN: &str = include_str!("fixtures/chain.hex");
@@ -83,7 +83,7 @@ fn samples() -> Vec<Sample> {
 /// The configuration dictionary a key block's own proof carries.
 fn config_dictionary() -> Cell {
     let link = Link::parse(CHAIN);
-    Block::from_proof(&link.config_proof, &link.from_root_hash)
+    proof::covered_block(&link.config_proof, &link.from_root_hash)
         .expect("the config proof roots at the key block")
         .config()
         .expect("a key block carries a configuration")

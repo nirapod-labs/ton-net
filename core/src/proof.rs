@@ -177,6 +177,30 @@ pub fn verify_merkle_proof<'a>(
     Ok(content)
 }
 
+/// Reads the block a Merkle proof covers, requiring the proof to root at `root_hash`.
+///
+/// This is the only way a block should be built out of bytes a server sent. The proof is
+/// checked before anything in it is read, so a server that answers about some other block
+/// fails here rather than returning a header that looks fine.
+///
+/// It sits here rather than on [`Block`] because it decides: [`crate::tlb`] reads a block
+/// that is already trusted, and refusing one is this module's job.
+///
+/// # Errors
+///
+/// Returns [`BlockError::Cell`] if the bytes are not a bag of cells,
+/// [`BlockError::Malformed`] if it holds no root, [`BlockError::NotAMerkleProof`],
+/// [`BlockError::ProofNotAnchored`] or [`BlockError::ProofInconsistent`] if the proof does
+/// not check out against `root_hash`, and [`BlockError::WrongConstructor`] if what it
+/// covers is not a block.
+pub fn covered_block(proof: &[u8], root_hash: &[u8; 32]) -> Result<Block, BlockError> {
+    let roots = parse_boc(proof)?;
+    let root = roots
+        .first()
+        .ok_or(BlockError::Malformed("a proof with no root cell"))?;
+    Block::from_cell(verify_merkle_proof(root, root_hash)?)
+}
+
 /// Finds the proof in `roots` that roots at `expected_root`, and checks it.
 ///
 /// A bag of proofs holds several roots and does not say which is which. Selecting by the

@@ -19,9 +19,8 @@
 use crate::tl::lite::{BlockIdExt, BlockLink, PartialBlockProof, Signature, SignatureSet};
 use crate::tl::signed::CandidateBlock;
 
-use crate::proof::signature;
 use crate::proof::validators::ValidatorSet;
-use crate::tlb::Block;
+use crate::proof::{covered_block, signature};
 use crate::tlb::BlockError;
 
 /// The masterchain workchain id.
@@ -54,7 +53,7 @@ pub struct ProvenBlock {
 /// to, [`BlockError::BackwardLink`] for a step this release does not check,
 /// [`BlockError::NotEnoughWeight`] if a link's signatures do not carry it,
 /// [`BlockError::UnknownSignedForm`] for a signature set of a third kind, and the proof
-/// and decode failures of [`Block::from_proof`] for a proof that does not check out.
+/// and decode failures of [`covered_block`](super::covered_block) for a proof that does not check out.
 pub fn verify_chain(
     anchor: &BlockIdExt,
     proof: &PartialBlockProof,
@@ -124,9 +123,9 @@ fn verify_link(link: &BlockLink, from: &BlockIdExt) -> Result<ProvenBlock, Block
     }
 
     let set =
-        ValidatorSet::from_config(&Block::from_proof(config_proof, &source.root_hash)?.config()?)?;
+        ValidatorSet::from_config(&covered_block(config_proof, &source.root_hash)?.config()?)?;
 
-    let header = Block::from_proof(dest_proof, &to.root_hash)?.header()?;
+    let header = covered_block(dest_proof, &to.root_hash)?.header()?;
     #[allow(
         clippy::cast_sign_loss,
         reason = "the wire carries this as int32; the domain counts it unsigned"

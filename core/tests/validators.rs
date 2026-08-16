@@ -15,9 +15,10 @@
 
 use ton_net::cell::Dict;
 use ton_net::cell::Lookup;
+use ton_net::proof;
 use ton_net::proof::ValidatorSet;
 use ton_net::tl::{deserialize, lite};
-use ton_net::tlb::{Block, BlockError};
+use ton_net::tlb::BlockError;
 
 /// One forward link from the block the mainnet config pins.
 const ORDINARY: &str = include_str!("fixtures/chain.hex");
@@ -104,7 +105,7 @@ fn unhex32(s: &str) -> [u8; 32] {
 
 /// Reads the validator set the source key block of a link names.
 fn set_of(link: &Link) -> ValidatorSet {
-    let block = Block::from_proof(&link.config_proof, &link.from.root_hash)
+    let block = proof::covered_block(&link.config_proof, &link.from.root_hash)
         .expect("the config proof roots at the key block");
     ValidatorSet::from_config(&block.config().expect("a key block carries a configuration"))
         .expect("the configuration holds a validator set")
@@ -205,7 +206,7 @@ fn a_link_header_says_what_the_link_claims() {
         let from_seqno = link.from.seqno as u32;
         assert_eq!(from_seqno, key_block);
 
-        let header = Block::from_proof(&link.dest_proof, &link.to.root_hash)
+        let header = proof::covered_block(&link.dest_proof, &link.to.root_hash)
             .expect("the destination proof roots at the destination")
             .header()
             .expect("it holds a header");
@@ -239,7 +240,7 @@ fn a_rotation_block_is_stamped_past_its_own_signing_window() {
     // such check exists. This pins the fact rather than the absence of the check.
     let link = link(ORDINARY);
     let set = set_of(&link);
-    let header = Block::from_proof(&link.dest_proof, &link.to.root_hash)
+    let header = proof::covered_block(&link.dest_proof, &link.to.root_hash)
         .expect("the proof roots")
         .header()
         .expect("it holds a header");
@@ -252,11 +253,11 @@ fn a_rotation_block_is_stamped_past_its_own_signing_window() {
 fn a_proof_for_another_block_is_refused() {
     let link = link(ORDINARY);
     assert!(matches!(
-        Block::from_proof(&link.config_proof, &link.to.root_hash),
+        proof::covered_block(&link.config_proof, &link.to.root_hash),
         Err(BlockError::ProofNotAnchored)
     ));
     assert!(matches!(
-        Block::from_proof(&link.dest_proof, &link.from.root_hash),
+        proof::covered_block(&link.dest_proof, &link.from.root_hash),
         Err(BlockError::ProofNotAnchored)
     ));
 }
@@ -267,7 +268,8 @@ fn a_header_proof_does_not_answer_for_the_configuration() {
     // configuration must say the proof does not cover it. Reading a pruned branch as an
     // empty one is how a partial proof would otherwise pass for a complete answer.
     let link = link(ORDINARY);
-    let block = Block::from_proof(&link.dest_proof, &link.to.root_hash).expect("the proof roots");
+    let block =
+        proof::covered_block(&link.dest_proof, &link.to.root_hash).expect("the proof roots");
     assert!(matches!(block.config(), Err(BlockError::NotCovered)));
 
     // The destination is itself a key block, so this is not the header saying no. The
@@ -285,7 +287,7 @@ fn a_config_proof_covers_only_the_parameter_it_answers_for() {
     const CURRENT_VALIDATORS: i32 = 34;
 
     let link = link(ORDINARY);
-    let block = Block::from_proof(&link.config_proof, &link.from.root_hash).expect("it roots");
+    let block = proof::covered_block(&link.config_proof, &link.from.root_hash).expect("it roots");
     let config = block.config().expect("a key block carries a configuration");
 
     let params = Dict::from_root(Some(config), 32).expect("a 32-bit dictionary");
@@ -326,7 +328,7 @@ fn a_flipped_byte_anywhere_in_a_proof_is_refused() {
     for at in (0..link.config_proof.len()).step_by(211) {
         let mut bytes = link.config_proof.clone();
         bytes[at] ^= 0x01;
-        let read = Block::from_proof(&bytes, &link.from.root_hash)
+        let read = proof::covered_block(&bytes, &link.from.root_hash)
             .and_then(|block| block.config())
             .and_then(|config| ValidatorSet::from_config(&config));
         assert!(read.is_err(), "a proof with byte {at} flipped was accepted");
@@ -340,7 +342,7 @@ fn a_truncated_proof_is_refused_rather_than_read() {
     let link = link(ORDINARY);
     for cut in [0, 1, 64, link.config_proof.len() / 2] {
         assert!(
-            Block::from_proof(&link.config_proof[..cut], &link.from.root_hash).is_err(),
+            proof::covered_block(&link.config_proof[..cut], &link.from.root_hash).is_err(),
             "a proof cut to {cut} bytes was accepted"
         );
     }

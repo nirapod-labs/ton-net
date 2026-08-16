@@ -108,14 +108,14 @@ fn the_chain_crosses_a_validator_set_rotation() {
     // Without a rotation the set is read once and reused, and a test would say nothing
     // about whether the set is rechosen per link. Reading the set each link names and
     // requiring them to differ is what makes the end-to-end test above mean something.
+    use ton_net::proof;
     use ton_net::proof::ValidatorSet;
-    use ton_net::tlb::Block;
 
     let proof = chain();
     let mut rounds = Vec::new();
     for step in &proof.steps {
         let (_, from, _, _, config_proof, _) = forward!(step);
-        let block = Block::from_proof(config_proof, &from.root_hash).expect("it roots");
+        let block = proof::covered_block(config_proof, &from.root_hash).expect("it roots");
         let set = ValidatorSet::from_config(&block.config().expect("a key block")).expect("a set");
         rounds.push(set.utime_since);
     }
