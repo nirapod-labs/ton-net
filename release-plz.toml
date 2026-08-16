@@ -2,9 +2,9 @@
 # SPDX-FileCopyrightText: 2026 Nirapod Labs
 
 [workspace]
-# One changelog for the library, not one per crate. The crates share a version and
-# are released together, so six near-identical files would say the same thing six
-# times and none of them would be the one a reader is looking for.
+# One changelog for the library, not one per crate. The library and its binding share a
+# version and are released together, so a second near-identical file would say the same
+# thing twice and neither would be the one a reader is looking for.
 changelog_path = "./CHANGELOG.md"
 
 # The changelog is written rather than generated, and this was tried both ways
