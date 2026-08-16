@@ -234,11 +234,9 @@ for (const rel of living) {
 // "the version today is X", "today it is X", "the current crate version is X". A number
 // reached by to, and, or are is left alone.
 //
-// A stage line is the third way the corpus writes one, and it went stale for three releases
-// under the reading above: "in flight on top of v0.3.0" carries neither today nor current nor
-// an is, so nothing looked at it while the crates moved to 0.4.2 and the stage it described
-// shipped. So the trigger takes in flight as well, and the version may be reached by on top
-// of as well as by is.
+// A stage line is the third way the corpus writes one, and it carries neither today nor
+// current nor an is. So the trigger takes in flight as well as today and current, and the
+// version may be reached by on top of as well as by is.
 //
 // A stage line that names an older version is not by itself wrong, which is why the trigger
 // and not the literal is what decides. "shipped in v0.4.0" is history and stays true at every
