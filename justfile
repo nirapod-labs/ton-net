@@ -76,10 +76,14 @@ notices:
 notices-check: notices
     git diff --stat --exit-code THIRD-PARTY-LICENSES.md
 
-# The sans-I/O core, on a target with no threads, no sockets and no clock. The
-# transport crates are expected to fail this until the browser transport lands.
+# The sans-I/O core, on a target with no threads, no sockets and no clock. What that
+# covers is wider than the three crates this used to name: the core is now everything the
+# `net` feature does not gate, so the build reaches `Verified`, address parsing, the
+# config reader and the offline proof check as well as the cells, the typed structures and
+# the TL codec. The socket and the per-session randomness are what `net` holds, and they
+# are the whole of what turning it off leaves out.
 wasm:
-    cargo build --target wasm32-unknown-unknown -p ton-net-tl -p ton-net-cell -p ton-net-block
+    cargo build --target wasm32-unknown-unknown --no-default-features
 
 # What the hot paths cost, over committed fixtures, so it runs offline.
 bench:
