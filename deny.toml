@@ -46,7 +46,7 @@ allow = [
 [bans]
 multiple-versions = "deny"
 # Each duplicate is named on its own rather than covered by a tree, so that adding a
-# seventh entry is a decision somebody makes. A `skip-tree` over the crypto stack would
+# sixth entry is a decision somebody makes. A `skip-tree` over the crypto stack would
 # have swallowed the syn entry below without saying so.
 skip = [
   # The RustCrypto stack sits at two generations in every artifact this project ships,
