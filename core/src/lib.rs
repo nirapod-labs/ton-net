@@ -74,6 +74,39 @@ println!("reported balance: {}", reported.value().balance);
 //! guarantee than one whose clock is right. A clock far enough behind is reported rather
 //! than obeyed, so the check never silently stops running.
 //!
+//! # What is at the root
+//!
+//! [`Client`] is the way in and [`Config`] is what it takes. [`Address`] parses what a
+//! person writes, [`Verified`] and [`ServerReported`] say which kind of answer came back,
+//! and [`verify_account`] is the same check as a standalone function for bytes that
+//! arrived some other way.
+//!
+//! The cell types beside them are the closure of one rule: a type a method on a
+//! re-exported cell type answers with is named here too, so a caller never has to reach
+//! past the root to use what the root handed them. An [`Account`] carries its code and data
+//! as [`Cell`]s, and from a [`Cell`] that reaches a [`Slice`] from [`Cell::parse`], an
+//! [`Identity`] from [`Cell::identity`], a [`Builder`] from [`Cell::to_builder`], a
+//! [`CellType`] from [`Cell::cell_type`], and a [`CellError`] from every read that can
+//! fail. A [`Slice`] adds the [`Dict`] that [`Slice::load_dict`] answers with, the
+//! [`Lookup`], [`DictEntry`] and [`DictIter`] a dictionary is read through, and the
+//! [`MsgAddress`] that [`Slice::load_address`] reads. [`MsgAddress`] is the wire form an
+//! address takes inside a message, which is not [`Address`]: that one is the form a person
+//! writes.
+//!
+//! [`parse_boc`] and [`serialize_boc`] are here because [`AccountState`] hands a proof and
+//! a state back as raw bag bytes, so a root with [`Cell::to_boc`] and no [`parse_boc`]
+//! could write a bag out and not read one in. [`MAX_CELLS`] and [`MAX_DEPTH`] are the
+//! bounds a parse refuses past; [`MAX_BITS`] and [`MAX_REFS`] are the bounds one cell holds
+//! within.
+//!
+//! **The rule curates, it does not gate.** What it leaves out is a level down and public:
+//! the augmented and prefix dictionaries, the proof builders and the streaming readers are
+//! reachable from no method on a type this list returns, so they are not at the root, and a
+//! consumer whose need is the cell engine names [`cell`] and has all of it. The one thing
+//! genuinely not at the root is [`BlockError`](tlb::BlockError): [`Account::decode`]
+//! answers with it, and a root-level caller reads that failure through the `From`
+//! conversion into [`Error`] rather than by naming it.
+//!
 //! [`Client::account`] reads against that block, so it is the read to reach for.
 //! [`Client::account_at`] proves against a block the caller names, and
 //! [`Client::account_reported`] checks nothing at all. The safe one is the one with the
@@ -140,63 +173,33 @@ mod verified;
 pub const VERIFY_EPOCH: u32 = 2;
 
 pub use address::Address;
-pub use client::verify_account;
-#[cfg(feature = "net")]
-#[cfg_attr(docsrs, doc(cfg(feature = "net")))]
-pub use client::Client;
-#[cfg(feature = "net")]
-#[cfg_attr(docsrs, doc(cfg(feature = "net")))]
-pub use client::SyncReport;
 pub use config::Config;
 pub use error::{Error, ErrorCode};
 pub use verified::Verified;
 
-/// The read response types, defined in [`lite`] and surfaced here.
-pub use crate::lite::{AccountState, BlockIdExt, MasterchainInfo, ServerReported};
+// The three entry points are inlined so the root page describes them where a reader lands.
+// A plain `pub use` renders as a bare line in the re-exports table with no description,
+// which is where the way into the library was sitting, weighted like a bound constant.
+#[doc(inline)]
+pub use client::verify_account;
+#[cfg(feature = "net")]
+#[cfg_attr(docsrs, doc(cfg(feature = "net")))]
+#[doc(inline)]
+pub use client::Client;
+#[cfg(feature = "net")]
+#[cfg_attr(docsrs, doc(cfg(feature = "net")))]
+#[doc(inline)]
+pub use client::SyncReport;
 
-/// The decoded chain structures, defined in [`tlb`] and [`proof`] and surfaced here.
+pub use crate::lite::{AccountState, BlockIdExt, MasterchainInfo, ServerReported};
 pub use crate::proof::AccountRead;
 pub use crate::tlb::{Account, AccountStatus, Coins};
 
-/// The cell model a decoded account carries, defined in [`cell`] and surfaced here.
-///
-/// The list is the closure of one rule over the cell model: a type a method on a
-/// re-exported cell type answers with is nameable here, or that method is unusable
-/// through the facade. An [`Account`] carries its code and data as [`Cell`]s, and from a
-/// [`Cell`] the answers this reaches are a [`Slice`] from [`Cell::parse`], an
-/// [`Identity`] from [`Cell::identity`], a [`Builder`] from [`Cell::to_builder`], and a
-/// [`CellError`] from every read that can fail. Types a cell answers with that need no
-/// name of their own, a `Vec<u8>` from [`Cell::to_boc`] and a `String` from
-/// [`Cell::dump`], are outside it. A
-/// [`Slice`] adds the [`Dict`] that [`Slice::load_dict`] answers with, the [`Lookup`],
-/// [`DictEntry`] and [`DictIter`] that a dictionary is read through, and the
-/// [`MsgAddress`] that [`Slice::load_address`] reads.
-///
-/// [`MsgAddress`] is the wire form an address takes inside a message, which is not
-/// [`Address`]: that one is the form a person writes and a caller parses.
-///
-/// The block layer is not closed the same way. [`Account::decode`] answers with a
-/// [`BlockError`](tlb::BlockError), which the root does not name, so a caller reads that
-/// failure through the `From` conversion into [`Error`] rather than by naming it. Closing
-/// that is a separate decision about which layer's error a consumer sees.
-///
-/// What the rule does not pull in is still reachable, one level down. The augmented and
-/// prefix dictionaries, the proof builders and the streaming readers are reachable from no
-/// method on a type this list returns, so they are not at the root; a consumer whose need
-/// is the cell engine names [`cell`] and has all of it.
+pub use crate::cell::{parse_boc, serialize_boc, MAX_BITS, MAX_CELLS, MAX_DEPTH, MAX_REFS};
 pub use crate::cell::{
     Builder, Cell, CellError, CellType, Dict, DictEntry, DictIter, Identity, Lookup, MsgAddress,
     Slice,
 };
-
-/// The bag-of-cells codec, defined in [`cell`] and surfaced here.
-///
-/// [`Client::account_state`] hands a proof and a state back as raw bag bytes, and
-/// [`AccountState`] documents them as such, so a facade with [`Cell::to_boc`] and no
-/// [`parse_boc`] can write a bag out and cannot read one in. [`MAX_CELLS`] and
-/// [`MAX_DEPTH`] are the bounds a parse refuses past; [`MAX_BITS`] and [`MAX_REFS`] are
-/// the bounds one cell holds within.
-pub use crate::cell::{parse_boc, serialize_boc, MAX_BITS, MAX_CELLS, MAX_DEPTH, MAX_REFS};
 
 // The README ships to crates.io and cannot be replaced once a version is published,
 // so its examples are compiled here rather than trusted. Doc-only: this does not
