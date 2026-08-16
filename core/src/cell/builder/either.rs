@@ -164,6 +164,8 @@ impl Builder {
 
 #[cfg(test)]
 mod tests {
+    use core::mem::discriminant;
+
     use crate::cell::{Builder, Cell, CellError, MAX_BITS, MAX_REFS};
 
     /// Sixty-four bits of payload, wide enough that the boundary is not a rounding artifact
@@ -338,7 +340,23 @@ mod tests {
                     maybe.build().expect("well formed"),
                     "the two forms disagreed at header {header}"
                 ),
-                (Err(_), Err(_)) => {}
+                // The by-hand form has spent its presence bit by the time it fails, which
+                // is the order the module documentation rejects, so only the method's
+                // builder is asserted untouched. What the two are held to together is the
+                // kind of refusal, since a caller distinguishing a full cell from a cell
+                // out of references would otherwise get a different answer from each.
+                (Err(by_hand), Err(by_method)) => {
+                    assert_eq!(
+                        discriminant(&by_hand),
+                        discriminant(&by_method),
+                        "the two forms refused differently at header {header}"
+                    );
+                    assert_eq!(
+                        maybe,
+                        filled(header),
+                        "a refused `Maybe` left the builder alone at header {header}"
+                    );
+                }
                 (by_hand, by_method) => panic!(
                     "one form stored and the other refused at header {header}: \
                      {by_hand:?} against {by_method:?}"
