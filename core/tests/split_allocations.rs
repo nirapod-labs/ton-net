@@ -110,9 +110,9 @@ const A_LEAF: usize = 1 << 10;
 /// A bag whose leaves are one wave and whose forks are the waves above it.
 ///
 /// Every leaf carries its own position, so no two cells of a level are equal and none of them is
-/// folded together when the bag is written. The forks take four children each, so the leaf wave
-/// is four times the one over it and is the only wave whose width the dispatch has anything to
-/// decide about.
+/// folded together when the bag is written. The forks take four children each, save the last of
+/// a level four does not divide, which takes what is left. So the leaf wave is around four times
+/// the one over it and is the only wave whose width the dispatch has anything to decide about.
 fn fan_bag(leaves: usize) -> Vec<u8> {
     let mut level: Vec<Cell> = (0..leaves)
         .map(|index| {
