@@ -162,10 +162,20 @@ mod tests {
         builder.store_bit(true).expect("one bit fits");
         let cell = builder.build().expect("well formed");
 
+        // The slice is bound to a name so the cursor is observable after the failure. What
+        // it holds is the weaker of the two rules a composite read can take: the bit is
+        // gone, so a caller that retries against the same slice reads the payload's first
+        // bit as a discriminator rather than the discriminator again.
+        let mut slice = cell.parse();
         assert!(matches!(
-            cell.parse().load_either_ref(),
+            slice.load_either_ref(),
             Err(CellError::NotEnoughRefs)
         ));
+        assert_eq!(
+            slice.remaining_bits(),
+            0,
+            "the discriminator was consumed before the reference was missed"
+        );
     }
 
     #[test]
@@ -217,6 +227,33 @@ mod tests {
             };
             assert_eq!(read_back, payload(), "at header {header}");
         }
+    }
+
+    #[test]
+    fn just_over_a_clear_bit_leaves_the_cursor_on_the_payload() {
+        // The combination the writer produces whenever the payload fits, and the one where
+        // a cursor off by a bit still reads something: the payload starts at the third bit
+        // and nothing in the encoding says so. The bits are laid down by hand rather than
+        // through the writer, so a reader agreeing with a writer that is wrong the same way
+        // does not pass here.
+        let mut builder = Builder::new();
+        builder.store_bit(true).expect("the presence bit fits");
+        builder.store_bit(false).expect("the discriminator fits");
+        builder
+            .store_uint(0x0123_4567_89ab_cdef, 64)
+            .expect("64 bits fit");
+        let cell = builder.build().expect("well formed");
+
+        let mut slice = cell.parse();
+        assert_eq!(
+            slice.load_maybe_either_ref().expect("both bits read"),
+            Some(EitherRef::Inline)
+        );
+        assert_eq!(slice.remaining_bits(), 64, "the payload is still ahead");
+        assert_eq!(
+            slice.load_uint(64).expect("the payload reads"),
+            0x0123_4567_89ab_cdef
+        );
     }
 
     #[test]
