@@ -345,9 +345,9 @@ impl Waves {
 /// large next to the cost of starting one, and NET-ADR-012 forbids stating the ratio as a
 /// duration taken on one machine, so none is stated. Its second job is to keep the
 /// captured fixtures on the counted path: no bag under twice this many cells splits, and
-/// the gate that reads the fixtures counts on the thread it runs on. What a split costs is
-/// counted by a second gate, over bags cut around twice this width rather than captured, on
-/// every thread the split reaches.
+/// the gate that reads the fixtures, `tests/allocations.rs`, counts on the thread it runs
+/// on. What a split costs is counted by a second gate, `tests/split_allocations.rs`, over
+/// bags cut around twice this width rather than captured, on every thread the split reaches.
 const CELLS_PER_WORKER: usize = 1024;
 
 /// How many threads this machine reports, or one where it reports none.
