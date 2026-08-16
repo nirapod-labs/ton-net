@@ -5,12 +5,15 @@
 //!
 //! `#[ignore]` so the hermetic suite never reaches the network; the network CI job runs
 //! it with `--ignored`. It reads the masterchain head and the Elector account's state,
-//! the two reads the facade exposes, over a real ADNL session.
+//! the two reads the facade exposes, over a real ADNL session, and it offers one
+//! deliberately unsendable message to see what a mainnet server makes of the request.
 
+use std::fmt::Write as _;
 use std::time::Duration;
 
-use ton_net::adnl::TcpTransport;
-use ton_net::lite::{AccountId, LiteClient};
+use ton_net::adnl::{AdnlConnection, TcpTransport};
+use ton_net::lite::{AccountId, LiteClient, LiteError};
+use ton_net::tl::{lite, serialize};
 
 const SERVER: &str = "5.9.10.47:19949";
 const SERVER_KEY: &str = "9f85439d2094b92a639c2c9493d7b740e39dea8d08b525986d39d6dd69e7f309";
@@ -68,4 +71,75 @@ async fn reads_the_masterchain_head_and_the_elector_account() {
         "the elector has a nonempty state"
     );
     eprintln!("elector state bytes: {}", account.value().state.len());
+}
+
+fn hex(bytes: &[u8]) -> String {
+    bytes.iter().fold(String::new(), |mut out, b| {
+        let _ = write!(out, "{b:02x}");
+        out
+    })
+}
+
+/// Offers a body that is not a bag of cells and reports what mainnet answered.
+///
+/// Nothing is sent and no value moves: four bytes that cannot be parsed as a message
+/// are refused before the server has anything to broadcast. The point of running it
+/// against a live server is the half a scheme reading cannot settle. A constructor id
+/// derived from the scheme is a hypothesis about what a server will call these bytes,
+/// and the refusal being about the *body* rather than about the request is what says
+/// the hypothesis was right, because a request whose id no server knows is refused
+/// before any body is looked at.
+///
+/// The exchange it prints is the source of the constants the hermetic wire test in
+/// `core/src/lite/client.rs` asserts against.
+#[tokio::test]
+#[ignore = "hits a live mainnet liteserver; run with --ignored in the network job"]
+async fn a_mainnet_server_reads_the_send_request_and_refuses_the_body() {
+    let transport = match TcpTransport::connect(SERVER).await {
+        Ok(transport) => transport,
+        Err(e) => {
+            eprintln!("skipping: {SERVER} unreachable: {e}");
+            return;
+        }
+    };
+
+    // Driven one layer below `LiteClient` so the answer bytes are visible. What the
+    // client would do with them is the assertion underneath.
+    let mut connection = AdnlConnection::connect(transport, &unhex32(SERVER_KEY))
+        .await
+        .expect("handshake completes");
+
+    let body = vec![0xde, 0xad, 0xbe, 0xef];
+    let request = serialize(lite::SendMessage { body: body.clone() });
+    let query = serialize(lite::Query {
+        data: request.clone(),
+    });
+    let answer = tokio::time::timeout(Duration::from_secs(10), connection.query(&query))
+        .await
+        .expect("sendMessage answers in time")
+        .expect("the query completes");
+
+    eprintln!("mainnet sendMessage request: {}", hex(&request));
+    eprintln!("mainnet sendMessage answer:  {}", hex(&answer));
+
+    let error = ton_net::tl::deserialize::<lite::Error>(&answer)
+        .expect("an unsendable body is refused, so the answer is a liteServer.error");
+    let message = String::from_utf8_lossy(&error.message);
+    assert!(
+        message.contains("ext-message") || message.contains("external message"),
+        "the refusal names the message rather than the request: {message}"
+    );
+
+    // The same exchange through the client, which is the path a caller takes.
+    let transport = TcpTransport::connect(SERVER).await.expect("reconnects");
+    let mut client = LiteClient::connect(transport, &unhex32(SERVER_KEY))
+        .await
+        .expect("handshake completes");
+    let result = tokio::time::timeout(Duration::from_secs(10), client.send_message(&body))
+        .await
+        .expect("sendMessage answers in time");
+    assert!(
+        matches!(result, Err(LiteError::LiteServer { .. })),
+        "a refused body is a plain server error, not a duplicate: {result:?}"
+    );
 }
