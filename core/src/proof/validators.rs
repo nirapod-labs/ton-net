@@ -165,7 +165,7 @@ impl ValidatorSet {
         Self::from_cell(entry.slice()?.load_ref()?)
     }
 
-    /// Reads a validator set from the cell one of those two parameters holds.
+    /// Reads a validator set from the cell configuration parameter 34 or 35 holds.
     ///
     /// The two carry the same shape, so this reads either and nothing here distinguishes
     /// them. Which one a configuration answers with is
