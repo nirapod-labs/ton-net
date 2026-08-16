@@ -36,12 +36,19 @@ the one-core, thin-surface arrangement of NET-ADR-002: the protocol and the
 verification live in the Rust core, and what a consumer imports by default is a
 narrow window onto it.
 
-The re-exported surface, grouped by the module each type is defined in:
+Two things are public, and they are not the same thing. The modules are public
+because a layer has to stay reachable; the names below them are re-exported to the
+crate root because a caller should not have to name a layer to do the ordinary
+work. What follows lists both, the modules first and then, module by module, what
+the root lifts out of each.
 
+The re-exported surface, and the modules it is drawn from:
+
+- The modules, seven of them, each reached by naming it: `adnl`, `cell`, `client`,
+  `lite`, `proof`, `tl` and `tlb`. A module is public, not re-exported.
 - From the root and `client`: `Client`, `Config`, `Address`, `Error`, `ErrorCode`,
   `Verified`, `SyncReport`, the free function `verify_account`, and the constant
-  `VERIFY_EPOCH`. `Client` and `SyncReport` are the two that need the socket, so
-  they are the two the `net` feature gates.
+  `VERIFY_EPOCH`.
 - From `lite`: `ServerReported`, `BlockIdExt`, `MasterchainInfo`,
   `AccountState`.
 - From `tlb` and `proof`: `Account`, `AccountStatus`, `AccountRead`, `Coins`.
@@ -49,6 +56,12 @@ The re-exported surface, grouped by the module each type is defined in:
   `Builder`, `CellError`, `Dict`, `DictEntry`, `DictIter`, `Lookup` and
   `MsgAddress`; and the bag codec, `parse_boc`, `serialize_boc`, `MAX_CELLS`,
   `MAX_DEPTH`, `MAX_BITS` and `MAX_REFS`.
+- Nothing from `adnl` or `tl`. The wire codec and the transport are what the layers
+  above them are for, and a consumer who needs one names the module.
+
+`Client` and `SyncReport` are the two names that need the socket, so they are the
+two the `net` feature gates. That is a feature rather than an export, which is why
+it is written here and not in the list.
 
 Which types the cell layer contributes is decided by a rule rather than by
 taste, because a closed facade is a promise that fails quietly otherwise. A
