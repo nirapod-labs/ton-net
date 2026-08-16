@@ -218,7 +218,14 @@ Two corrections to what gets gated, both from reading the sources rather than fr
 
 ## 6. The collisions dissolve, but one of them was a real finding
 
-Seven basenames appear twice across the six `src` trees: `address.rs`, `client.rs`, `codec.rs`, `error.rs`, `lib.rs`, `proof.rs`, `snake.rs`. Five land under a different parent and cost nothing: `cell/codec.rs` beside `codec.rs`, `cell/error.rs` beside `tlb/error.rs` beside `error.rs`, `lite/client.rs` beside `client.rs`, `cell/builder/snake.rs` beside `cell/slice/snake.rs`, four `address.rs` under four parents. `lib.rs` is not a collision at all: one survives as the crate root and the other five dissolve into the module bodies they became.
+Seven basenames repeat across the six `src` trees, and four of them repeat more than twice: `lib.rs` six times, `address.rs`, `error.rs` and `proof.rs` three times each, `client.rs`, `codec.rs` and `snake.rs` twice each.
+
+```sh
+git ls-tree -r --name-only 6bddcd3 -- crates \
+  | grep -E '^crates/[^/]+/src/.*\.rs$' | xargs -n1 basename | sort | uniq -cd
+```
+
+Five land under a different parent and cost nothing: `cell/codec.rs` beside `codec.rs`, `cell/error.rs` beside `tlb/error.rs` beside `error.rs`, `lite/client.rs` beside `client.rs`, `cell/builder/snake.rs` beside `cell/slice/snake.rs`, and three `address.rs` under three parents, which the wallet's own address module in section 4's tree makes four once it is built. `lib.rs` is not a collision at all: one survives as the crate root and the other five dissolve into the module bodies they became.
 
 **Two of the seven cost something, and an earlier draft of this plan got both wrong.**
 
