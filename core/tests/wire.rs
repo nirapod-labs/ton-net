@@ -170,6 +170,14 @@ fn constructor_ids_match_scheme() {
             "liteServer.getAccountState id:tonNode.blockIdExt account:liteServer.accountId = liteServer.AccountState",
         ),
         (
+            first4(&serialize(lite::SendMessage { body: vec![] })),
+            "liteServer.sendMessage body:bytes = liteServer.SendMsgStatus",
+        ),
+        (
+            first4(&serialize(lite::SendMsgStatus { status: 0 })),
+            "liteServer.sendMsgStatus status:int = liteServer.SendMsgStatus",
+        ),
+        (
             first4(&serialize(masterchain_info())),
             "liteServer.masterchainInfo last:tonNode.blockIdExt state_root_hash:int256 init:tonNode.zeroStateIdExt = liteServer.MasterchainInfo",
         ),
@@ -302,6 +310,20 @@ fn types_round_trip() {
         time
     );
 
+    let send = lite::SendMessage {
+        body: b"not a bag of cells".to_vec(),
+    };
+    assert_eq!(
+        deserialize::<lite::SendMessage>(&serialize(&send)).unwrap(),
+        send
+    );
+
+    let status = lite::SendMsgStatus { status: 1 };
+    assert_eq!(
+        deserialize::<lite::SendMsgStatus>(&serialize(&status)).unwrap(),
+        status
+    );
+
     let proof = partial_block_proof();
     assert_eq!(
         deserialize::<lite::PartialBlockProof>(&serialize(&proof)).unwrap(),
@@ -406,6 +428,8 @@ fn decode_never_panics_on_arbitrary_bytes() {
         let _ = deserialize::<lite::BlockLink>(&buf);
         let _ = deserialize::<lite::SignatureSet>(&buf);
         let _ = deserialize::<lite::GetBlockProof>(&buf);
+        let _ = deserialize::<lite::SendMessage>(&buf);
+        let _ = deserialize::<lite::SendMsgStatus>(&buf);
         let _ = deserialize::<signed::Vote>(&buf);
         let _ = deserialize::<signed::DataToSign>(&buf);
     }

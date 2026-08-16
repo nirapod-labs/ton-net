@@ -8,6 +8,12 @@
 //! the proof bytes set aside in [`ServerReported`] rather than mixed into the value.
 //! Each is `#[non_exhaustive]` so fields can be added before 1.0 without a breaking
 //! change.
+//!
+//! One type here is not a read at all. [`Accepted`] is what a server says back when it
+//! is offered a message, and it is kept apart from the read wrapper rather than folded
+//! into it, because an acknowledgement and a value read out of the chain are different
+//! kinds of thing and a wrapper that carried both would say something slightly false
+//! about one of them.
 
 /// A value a liteserver returned without a checked proof.
 ///
@@ -70,6 +76,63 @@ impl<T> ServerReported<T> {
             value,
             proof: self.proof,
         })
+    }
+}
+
+/// One liteserver's acknowledgement that it took an external message.
+///
+/// This is a third result shape beside [`ServerReported`] and
+/// [`Verified`](crate::Verified), and it is a separate type because a send is neither
+/// kind of read. There is no chain value inside it to reach, so it offers no `value` and
+/// no `try_map` of its own, and nothing turns one into a [`Verified`](crate::Verified):
+/// that wrapper's constructor is crate-private and it carries no map, so the type an
+/// acknowledgement cannot reach is the proven one.
+///
+/// **The unverified wrapper is not sealed the same way**, and the difference is worth
+/// naming rather than glossed. [`ServerReported::try_map`] bounds neither what it maps
+/// to nor what it maps from, so a caller holding any reported value can put an `Accepted`
+/// inside one and hold a `ServerReported<Accepted>` whose proof bytes belong to the read
+/// it was mapped from. Nothing in this library produces that value and nothing consumes
+/// it, so what the shape offers a caller is a mislabel of their own making rather than a
+/// route from an acknowledgement to a read.
+///
+/// **What an acknowledgement establishes.** This is an external fact about how a
+/// liteserver behaves, not a property this tree checks, and it is written here because
+/// it is the whole meaning of the value. The server that answered parsed the message,
+/// resolved the account it addresses, ran it against that account in a state the server
+/// itself holds, and the contract accepted it. A refusal at any of those stages comes
+/// back as an error rather than as this value.
+///
+/// **What it does not establish is everything after that point.** Acceptance is not
+/// inclusion. The server undertakes to propagate the message and answers before it has
+/// done so, so whether the message reached a collator, whether a collator selected it,
+/// and whether the block that took it was finalized are three further questions on
+/// which this value is silent. It is also one server's word, checked against nothing.
+///
+/// What settles a send is reading its consequence back out of the chain, which is a
+/// proven account read and not this.
+#[derive(Debug, Clone)]
+#[non_exhaustive]
+pub struct Accepted {
+    status: i32,
+}
+
+impl Accepted {
+    /// Records that a server acknowledged a message with `status`.
+    pub(crate) fn new(status: i32) -> Self {
+        Self { status }
+    }
+
+    /// The integer the server sent with its acknowledgement.
+    ///
+    /// The protocol fixes no meaning for any particular value, and the reference node
+    /// writes `1` at the single site where it builds this response, so on that
+    /// implementation the number repeats what the value's existence already says. It is
+    /// carried because a server is free to answer with a different one, and discarding
+    /// it here would leave a caller no way to see that it had.
+    #[must_use]
+    pub fn status(&self) -> i32 {
+        self.status
     }
 }
 
@@ -186,4 +249,20 @@ pub struct AccountState {
     /// The account state, as raw bag-of-cells bytes. Empty for an account that does not
     /// exist at the block.
     pub state: Vec<u8>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Accepted;
+
+    // The reference node writes 1 at its one construction site, so 1 is the value that
+    // tells a carried integer apart from nothing at all: an accessor answering a
+    // constant reads the same as an accessor answering the field. The values away from
+    // 1 are what the claim on `status` rests on.
+    #[test]
+    fn an_acknowledgement_carries_the_integer_the_server_sent() {
+        assert_eq!(Accepted::new(1).status(), 1);
+        assert_eq!(Accepted::new(0).status(), 0);
+        assert_eq!(Accepted::new(-7).status(), -7);
+    }
 }

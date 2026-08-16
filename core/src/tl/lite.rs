@@ -118,6 +118,30 @@ pub struct GetBlockProof {
     pub target_block: Option<BlockIdExt>,
 }
 
+/// The `liteServer.sendMessage` request: hand a server an external message to offer to
+/// the network. It answers with a [`SendMsgStatus`].
+///
+/// This is the only request in this module that asks a server to do something rather
+/// than to report something, and the difference reaches the wire in a way worth naming:
+/// a server deduplicates these on a hash of the whole serialized request, so two calls
+/// carrying identical [`body`](Self::body) bytes are one offer inside the bounded recent
+/// window that server keeps, and a second arriving inside it comes back as an error
+/// rather than a status. The window is bounded on both a clock and a capacity, so the
+/// same bytes offered again after it has moved on are a fresh offer. That is an external
+/// fact about the reference node's liteserver, and it is stated here because the bytes
+/// this type lays out are what that hash is taken over.
+///
+/// The key is the request, not the message inside it: the same node deduplicates a
+/// message arriving over its broadcast path by hashing the message bytes alone. Two
+/// paths, two keys, so what is written here holds on this one and is not a property of
+/// the node.
+#[derive(TlRead, TlWrite, Debug, Clone, PartialEq, Eq)]
+#[tl(boxed, id = 0x690ad482)]
+pub struct SendMessage {
+    /// The external message, as a serialized bag of cells.
+    pub body: Vec<u8>,
+}
+
 /// One validator's signature, in the `liteServer.signature` bare form.
 #[derive(TlRead, TlWrite, Debug, Clone, PartialEq, Eq)]
 pub struct Signature {
@@ -308,6 +332,23 @@ pub struct AccountState {
     pub proof: Vec<u8>,
     /// The account state, as raw `BoC` bytes.
     pub state: Vec<u8>,
+}
+
+/// The `liteServer.sendMsgStatus` response: a server's acknowledgement of a
+/// [`SendMessage`].
+///
+/// The protocol declares [`status`](Self::status) as a signed integer and fixes no
+/// meaning for any particular value. The reference node has one site that builds this
+/// response and it writes `1` there; every other outcome of a send leaves that node as
+/// an [`Error`] instead, so on that implementation the arrival of this response is the
+/// whole of the information and the integer repeats it. A different server is free to
+/// answer with a different number, which is why the field is carried rather than
+/// asserted away.
+#[derive(TlRead, TlWrite, Debug, Clone, PartialEq, Eq)]
+#[tl(boxed, id = 0x3950e597)]
+pub struct SendMsgStatus {
+    /// The status the server reported.
+    pub status: i32,
 }
 
 /// The `liteServer.error` response: an error a liteserver returns in place of a

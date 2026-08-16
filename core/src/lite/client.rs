@@ -7,7 +7,16 @@ use crate::adnl::{AdnlConnection, Transport};
 use crate::tl::lite as wire;
 use crate::tl::{deserialize, serialize, TlRead, TlWrite};
 
-use crate::lite::types::{AccountState, BlockIdExt, MasterchainInfo, ServerReported};
+use crate::lite::types::{Accepted, AccountState, BlockIdExt, MasterchainInfo, ServerReported};
+
+/// The phrase a server writes when it refuses a send it has already been given.
+///
+/// The reference node raises that refusal with no error code of its own, so the code it
+/// arrives under is the same zero every other uncoded error on this path carries and
+/// tells the two apart from nothing. The text is the only part that distinguishes it,
+/// and it is matched as a substring because the node prefixes the phrase with a sentence
+/// naming the operation before it reaches the wire.
+const DUPLICATE_SEND: &str = "duplicate message";
 
 /// A read client for one liteserver.
 ///
@@ -33,6 +42,27 @@ pub enum LiteError {
         /// The liteserver error code.
         code: i32,
         /// The human-readable error message.
+        message: String,
+    },
+
+    /// The server refused a send because it had already been given the same request.
+    ///
+    /// Kept apart from [`LiteServer`](Self::LiteServer) because it reads like a failure
+    /// and is not one: see [`send_message`](LiteClient::send_message) for what it does
+    /// and does not establish about the earlier offer.
+    ///
+    /// **The scope of the recognition is one implementation's wording.** A server that
+    /// phrases the refusal differently arrives as [`LiteServer`](Self::LiteServer)
+    /// instead, which is where every refusal arrived before this variant existed, so
+    /// the cost of missing one is the behaviour that already stood.
+    #[error("the liteserver had already taken this request: {message}")]
+    DuplicateSend {
+        /// The error code the server sent, carried unchanged. It did not take part in
+        /// recognizing the error and is kept so that nothing downstream has to invent
+        /// one for an error the server did put a code on.
+        code: i32,
+        /// The message the server sent, kept verbatim rather than replaced, because the
+        /// wording is the only evidence there is that this is what it is.
         message: String,
     },
 
@@ -117,6 +147,47 @@ impl<T: Transport> LiteClient<T> {
         ))
     }
 
+    /// Offers an external message to the network through this server.
+    ///
+    /// `boc` is a finished external message, serialized as a bag of cells. Nothing here
+    /// builds one, reads one, or checks that the bytes are a message at all: this layer
+    /// cannot name a cell, so what it hands over is whatever the caller composed. The
+    /// answer is an [`Accepted`], whose documentation is where the meaning of a
+    /// successful send is written out, and it is deliberately not a read.
+    ///
+    /// **One error on this path means the opposite of what it reads as.** A server
+    /// refuses a request it has already been given, and the refusal arrives as an
+    /// ordinary liteserver error. Reading it as a failure is the expensive mistake
+    /// available here, because a caller whose own retry produced it would report a
+    /// failure for a message that had already been taken. It comes back as
+    /// [`LiteError::DuplicateSend`] instead, so the judgement is made once, here, rather
+    /// than by a text comparison at each call site.
+    ///
+    /// **What that refusal establishes, at its exact scope.** These are external facts
+    /// about liteserver behaviour rather than anything this tree checks. On this path the
+    /// server deduplicates on a hash of the whole serialized request, not the message
+    /// inside it, because the same node keys its broadcast path on the message bytes
+    /// instead. So it is these exact bytes that are compared, and the comparison covers a
+    /// bounded recent window rather than all of history. Within that window an identical
+    /// request reached this server and the server did not refuse it. That is less than
+    /// saying the earlier offer succeeded: an entry is recorded before the
+    /// message is run and removed again if the run fails, so a second request arriving
+    /// while the first is still being run is refused as a duplicate too. Nothing about
+    /// inclusion follows from it either, for the reason [`Accepted`] gives.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LiteError::DuplicateSend`] if the server recognized the request as one
+    /// it had already taken, [`LiteError::LiteServer`] for any other error the server
+    /// returns, [`LiteError::Decode`] if the answer does not decode, or
+    /// [`LiteError::Adnl`] on a transport or framing failure.
+    pub async fn send_message(&mut self, boc: &[u8]) -> Result<Accepted, LiteError> {
+        let request = wire::SendMessage { body: boc.to_vec() };
+        let answer = self.connection.query(&build_query(request)).await?;
+        let status: wire::SendMsgStatus = decode_answer(&answer).map_err(name_a_duplicate)?;
+        Ok(Accepted::new(status.status))
+    }
+
     /// Asks the server to prove a chain from a block the caller trusts to a later one.
     ///
     /// The answer is a run of links, each one a step the caller has to check. It comes
@@ -179,6 +250,20 @@ where
         });
     }
     Ok(deserialize::<R>(answer)?)
+}
+
+/// Renames a server error that is a duplicate refusal, and leaves every other error be.
+///
+/// It is applied on the send path alone rather than inside [`decode_answer`], because
+/// the refusal is raised by one request and a reading that covered the others would be
+/// wider than the fact under it.
+fn name_a_duplicate(error: LiteError) -> LiteError {
+    match error {
+        LiteError::LiteServer { code, message } if message.contains(DUPLICATE_SEND) => {
+            LiteError::DuplicateSend { code, message }
+        }
+        other => other,
+    }
 }
 
 #[cfg(test)]
@@ -271,6 +356,103 @@ mod tests {
             target_block: Some((&block).into()),
         });
         assert_eq!(&hex(&query[..4]), "df068c79");
+    }
+
+    // A real mainnet exchange, captured against the liteserver `mainnet_lite.rs` dials.
+    // The body offered is four bytes that are not a bag of cells, so the server took the
+    // request, failed to read a message out of the body, and refused; nothing was
+    // broadcast and no value moved. What the pair pins is the half a scheme reading
+    // cannot. A constructor id computed from a scheme line is a hypothesis about what a
+    // server will call these bytes, and a refusal that names the *body* is what settles
+    // it, because a request under an id the server does not know is refused before any
+    // body is looked at and answers something else.
+    const MAINNET_SEND_REQUEST: &str = "82d40a6904deadbeef000000";
+    const MAINNET_SEND_ANSWER: &str = "48e1a9bb000000006963616e6e6f74206170706c792065787465726e616c206d65737361676520746f2063757272656e74207374617465203a2063616e6e6f7420646573657269616c697a65206261672d6f662d63656c6c733a20696e76616c6964206865616465722c206572726f7220300000";
+    const MAINNET_SEND_REFUSAL: &str =
+        "cannot apply external message to current state : cannot deserialize bag-of-cells: invalid header, error 0";
+
+    #[test]
+    fn send_message_wire_lays_out_the_request_the_way_mainnet_took_it() {
+        let body = serialize(wire::SendMessage {
+            body: vec![0xde, 0xad, 0xbe, 0xef],
+        });
+
+        // Constructor id, then the body as a TL bytes field: one length byte, the four
+        // bytes, then three of padding to the next four-byte boundary.
+        assert_eq!(hex(&body), MAINNET_SEND_REQUEST);
+        assert_eq!(&body[..4], [0x82, 0xd4, 0x0a, 0x69]);
+        assert_eq!(body.len(), 4 + 1 + 4 + 3);
+
+        // The envelope is the same one every other request travels in.
+        let query = build_query(wire::SendMessage {
+            body: vec![0xde, 0xad, 0xbe, 0xef],
+        });
+        // Query id, then one length byte for a twelve-byte payload, then the request
+        // itself and three bytes of padding.
+        assert_eq!(&hex(&query[..4]), "df068c79");
+        assert_eq!(query[4], 12);
+        assert_eq!(hex(&query[5..5 + body.len()]), MAINNET_SEND_REQUEST);
+    }
+
+    #[test]
+    fn send_message_wire_reads_the_answer_mainnet_gave_that_request() {
+        // The server refused the body rather than the request, which is what shows it
+        // understood the request. A wrong constructor id is refused before any body is
+        // looked at and answers something else entirely.
+        let answer = unhex(MAINNET_SEND_ANSWER);
+        let result: Result<wire::SendMsgStatus, _> = decode_answer(&answer);
+        let Err(LiteError::LiteServer { code, message }) = result else {
+            panic!("the captured answer is a liteserver error");
+        };
+        assert_eq!(code, 0);
+        assert_eq!(message, MAINNET_SEND_REFUSAL);
+
+        // And that refusal is not the one that means the opposite of what it reads as.
+        assert!(matches!(
+            name_a_duplicate(LiteError::LiteServer { code, message }),
+            LiteError::LiteServer { .. }
+        ));
+    }
+
+    #[test]
+    fn a_duplicate_refusal_is_named_rather_than_left_as_a_failure() {
+        // The wording the reference node reaches the wire with: the phrase it raises,
+        // behind the sentence it prefixes onto it before answering.
+        let error = LiteError::LiteServer {
+            code: 0,
+            message: "cannot send external message : duplicate message".to_owned(),
+        };
+        let named = name_a_duplicate(error);
+        assert!(matches!(
+            named,
+            LiteError::DuplicateSend { code: 0, ref message }
+                if message == "cannot send external message : duplicate message"
+        ));
+    }
+
+    #[test]
+    fn every_other_refusal_stays_a_plain_server_error() {
+        // The failure direction that matters. A real refusal read as a duplicate would
+        // report a message as taken when the server threw it away, so the match has to
+        // be narrow enough to leave the neighbouring refusals of the same request alone,
+        // including one that shares the error code and the word.
+        for message in [
+            MAINNET_SEND_REFUSAL,
+            "cannot apply external message to current state : bad signature",
+            "external message too large, rejecting",
+            "too many external messages to address 0:0000",
+            "duplicate external message broadcast",
+            "not ready",
+        ] {
+            let named = name_a_duplicate(LiteError::LiteServer {
+                code: 0,
+                message: message.to_owned(),
+            });
+            assert!(
+                matches!(named, LiteError::LiteServer { .. }),
+                "`{message}` must stay a plain server error"
+            );
+        }
     }
 
     #[test]
