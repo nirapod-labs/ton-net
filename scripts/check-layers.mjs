@@ -16,10 +16,10 @@
 // decide over bytes already in hand. None of them may name the transport above it
 // (`adnl`, `lite`, `client`), name tokio or getrandom, or reach the socket, the
 // filesystem, the process, the environment, a thread or the clock. Three module names
-// rather than five: `sync` and `send` live under `client`, so refusing the parent refuses
-// them with it. `lite` sits above the wire and below the cells, and it may not name `cell`
-// either, because a liteserver answer leaves that layer as the bytes it arrived as and is
-// opened above it.
+// rather than five: `sync` and the client's own `proof` live under `client`, so refusing
+// the parent refuses them with it. `lite` sits above the wire and below the cells, and it
+// may not name `cell` either, because a liteserver answer leaves that layer as the bytes
+// it arrived as and is opened above it.
 //
 // The absence is read twice, and the second reading is the only thing that makes the
 // first one mean anything. A matcher that matches nothing passes an absence check for
@@ -53,7 +53,7 @@ const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const DECIDES_WITHOUT = [
   ["crate::adnl", "the transport sits above this layer"],
   ["crate::lite", "the query wire sits above this layer"],
-  ["crate::client", "the facade sits above this layer, and `sync` and `send` sit under it"],
+  ["crate::client", "the facade sits above this layer, and `sync` and its `proof` sit under it"],
   ["tokio", "a layer that decides over bytes already in hand holds no runtime"],
   ["getrandom", "the per-session randomness is drawn at the I/O edge and nowhere else"],
   ["std::net", "the socket belongs to the transport"],
