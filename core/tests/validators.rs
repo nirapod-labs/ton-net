@@ -3,10 +3,12 @@
 
 //! The block header and the validator set, read from captured mainnet proofs.
 //!
-//! The fixtures are whole `liteServer.getBlockProof` answers, each one forward link, so
-//! a test reaches the proofs the way the library will: out of a server's reply rather
-//! than out of a hand-cut blob. Each link carries a proof of its source key block's
-//! configuration and a proof of its destination's header.
+//! The fixtures are whole `liteServer.getBlockProof` answers, so a test reaches the
+//! proofs the way the library will: out of a server's reply rather than out of a
+//! hand-cut blob. Every forward link in one carries a proof of its source key block's
+//! configuration and a proof of its destination's header. Most tests below read the
+//! first link of a fixture and nothing turns on which; the one asserting a property of
+//! every captured configuration reads every link of every fixture instead.
 //!
 //! Every expected validator set below was read from tonapi.io on 2026-07-21, at the same
 //! masterchain sequence number, and is recorded here rather than recomputed. That is
@@ -38,11 +40,20 @@ const CURRENT_VALIDATORS: i32 = 34;
 /// The parameter holding the temporary one, which answers wherever it is present.
 const CURRENT_TEMP_VALIDATORS: i32 = 35;
 
-/// One forward link from the block the mainnet config pins.
+/// Three forward links from the block the mainnet config pins, crossing one rotation.
 const ORDINARY: &str = include_str!("fixtures/chain.hex");
+
+/// The first of those three links, captured on its own.
+const ORDINARY_ONE_LINK: &str = include_str!("fixtures/one-link-ordinary.hex");
 
 /// One forward link across the block where mainnet changed its signed form.
 const SIMPLEX: &str = include_str!("fixtures/one-link-simplex.hex");
+
+/// Every capture this file reads, for the checks that hold over all of them.
+const FIXTURES: [&str; 3] = [ORDINARY, ORDINARY_ONE_LINK, SIMPLEX];
+
+/// How many forward links those captures hold between them.
+const CAPTURED_LINKS: usize = 5;
 
 /// The round key block 46894135 names, as tonapi.io reports it.
 ///
@@ -83,7 +94,8 @@ struct Link {
     config_proof: Vec<u8>,
 }
 
-fn link(text: &str) -> Link {
+/// Every forward link a fixture holds, in order.
+fn links(text: &str) -> Vec<Link> {
     let hex: String = text
         .lines()
         .filter(|line| !line.starts_with('#'))
@@ -95,23 +107,32 @@ fn link(text: &str) -> Link {
         .collect();
 
     let proof: lite::PartialBlockProof = deserialize(&bytes).expect("the fixture decodes");
-    match proof.steps.into_iter().next().expect("one step") {
-        lite::BlockLink::Forward {
-            from,
-            to,
-            to_key_block,
-            dest_proof,
-            config_proof,
-            ..
-        } => Link {
-            from,
-            to,
-            to_key_block,
-            dest_proof,
-            config_proof,
-        },
-        other => panic!("expected a forward link, got {other:?}"),
-    }
+    proof
+        .steps
+        .into_iter()
+        .map(|step| match step {
+            lite::BlockLink::Forward {
+                from,
+                to,
+                to_key_block,
+                dest_proof,
+                config_proof,
+                ..
+            } => Link {
+                from,
+                to,
+                to_key_block,
+                dest_proof,
+                config_proof,
+            },
+            other => panic!("expected a forward link, got {other:?}"),
+        })
+        .collect()
+}
+
+/// The first forward link a fixture holds.
+fn link(text: &str) -> Link {
+    links(text).into_iter().next().expect("at least one step")
 }
 
 fn unhex32(s: &str) -> [u8; 32] {
@@ -380,29 +401,38 @@ fn a_config_proof_covers_only_the_parameter_it_answers_for() {
 }
 
 #[test]
-fn a_captured_configuration_shows_parameter_35_absent_rather_than_pruned() {
+fn every_captured_configuration_shows_parameter_35_absent_rather_than_pruned() {
     // The set in force is parameter 35 where the configuration carries it and 34
     // otherwise, so reading 34 is licensed by a covered absence of 35 and by nothing
     // else. A server sending the smallest proof that answers the question covers the
-    // walk to 35 exactly because it selected the set the same way, and every capture in
-    // this tree shows that: 35 absent, not pruned. This is what keeps the preference
-    // from turning live mainnet proofs into refusals, and it is the half of the rule
-    // that captured bytes can settle.
-    for text in [ORDINARY, SIMPLEX] {
-        let config = config_of(&link(text));
-        assert!(matches!(
-            config
-                .get(&CURRENT_TEMP_VALIDATORS.to_be_bytes())
-                .expect("the lookup runs"),
-            Lookup::Absent
-        ));
-        assert!(matches!(
-            config
-                .get(&CURRENT_VALIDATORS.to_be_bytes())
-                .expect("the lookup runs"),
-            Lookup::Found(_)
-        ));
+    // walk to 35 exactly because it selected the set the same way, and every
+    // configuration captured here shows that: 35 absent, not pruned.
+    //
+    // What this settles is a property of the captured bytes, not of the code. Deleting
+    // the preference leaves it green; what would go red is `chain.rs`, which verifies
+    // every link of the same captures against the set each configuration names. The
+    // count is asserted so a capture added and not read here is caught rather than
+    // quietly left outside the word every.
+    let mut checked = 0;
+    for text in FIXTURES {
+        for link in links(text) {
+            let config = config_of(&link);
+            assert!(matches!(
+                config
+                    .get(&CURRENT_TEMP_VALIDATORS.to_be_bytes())
+                    .expect("the lookup runs"),
+                Lookup::Absent
+            ));
+            assert!(matches!(
+                config
+                    .get(&CURRENT_VALIDATORS.to_be_bytes())
+                    .expect("the lookup runs"),
+                Lookup::Found(_)
+            ));
+            checked += 1;
+        }
     }
+    assert_eq!(checked, CAPTURED_LINKS, "not every capture was read");
 }
 
 #[test]
