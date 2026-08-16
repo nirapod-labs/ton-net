@@ -19,8 +19,8 @@
 //
 // Two counts in this tree have a machine-readable answer, and those are the two here:
 //
-//   1. the re-export list in docs/api-design.md against crates/ton-net/src/lib.rs,
-//      which is the surface a consumer imports, and
+//   1. the re-export list in docs/api-design.md against core/src/lib.rs, which is the
+//      surface a consumer imports, and
 //   2. a prose count of a crate's Cargo features, in tracked markdown or in a
 //      comment, against the features that crate's manifest declares.
 //
@@ -87,7 +87,7 @@ if (crates.length === 0) {
 // of one set and only one of them is compiled. Other documents mention a type in
 // passing; this is the one place checked, because a list is a census and a mention
 // is not.
-const FACADE_SOURCE = "crates/ton-net/src/lib.rs";
+const FACADE_SOURCE = "core/src/lib.rs";
 const FACADE_DOC = "docs/api-design.md";
 const FACADE_ANCHOR = "The re-exported surface";
 
