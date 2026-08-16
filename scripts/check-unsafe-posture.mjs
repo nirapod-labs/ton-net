@@ -3,24 +3,24 @@
 
 // Holds each crate root to the strongest unsafe-code lint it can actually carry.
 //
-// The six core crates set `forbid(unsafe_code)`, which the compiler enforces absolutely:
+// The six library crates set `forbid(unsafe_code)`, which the compiler enforces absolutely:
 // an inner `allow` is a hard error, so nothing further is needed to keep them honest.
 // The node binding cannot set it. `napi_derive` expands `#[napi]` into code carrying its
 // own `#[allow(unsafe_code)]`, and `forbid` refuses to be overruled by an expansion as
 // readily as by a hand-written attribute, so a binding root that forbids does not build
 // at all. Eighteen errors, every one of them E0453 raised inside the macro.
 //
-// Two facts follow from that, and the second is why this file exists. The binding
-// contains unsafe code, written by the macro and permitted by the macro. And the lint it
-// can carry, `deny`, is exactly the one an inner `allow` defeats without a diagnostic.
-// So the property worth holding there is narrower than the one the core crates hold, and
-// it has to be stated as what it is: no unsafe code that a person wrote, as opposed to
-// none at all.
+// The binding therefore holds unsafe code, written by the macro and permitted by the
+// macro, and the lint it can carry, `deny`, is exactly the one an inner allowance defeats
+// without a diagnostic. So the property held there is narrower than the one the library
+// crates hold, and it is stated as what is actually read: the binding's own source text
+// carries no `unsafe` keyword and no allowance of that lint. A macro this repository
+// defined itself could still expand to one, and nothing here would see it.
 //
-// The absence is read twice. A matcher that matches nothing passes an absence check for
-// free, so each pattern is also run against a probe built to trip it, and a pattern that
-// fails to match its own probe is reported as a broken reading rather than a clean tree.
-// That discipline is copied from `scripts/check-default-deps.mjs`.
+// Each pattern runs against probes built to trip it before the tree is read, because a
+// matcher that matches nothing passes an absence check for free. That is weaker evidence
+// than the second reading in `scripts/check-default-deps.mjs`, which runs over the real
+// tree with the features turned on; the probes here are string literals in this file.
 //
 //   node scripts/check-unsafe-posture.mjs
 
@@ -47,33 +47,48 @@ const FORBIDS = [
 // anyone having to rediscover the macro expansion.
 const DENIES = [["bindings/node/src/lib.rs", "napi_derive expands an inner allow"]];
 
-// Rust has no block-comment nesting rule that a regex handles well, so only line comments
-// are stripped. A block comment holding the literal text of an unsafe attribute would be
-// reported; that is the direction to err in.
+// Line comments only, and it misreads in both directions rather than one. A block comment
+// quoting the literal text of an unsafe attribute is reported, which is the harmless way
+// to be wrong. A `//` inside a string literal truncates the rest of that line, so an
+// `unsafe` written after one on the same line is not seen, which is not harmless. Anything
+// stronger needs a parser rather than a pattern.
 const code = (source) => source.replace(/\/\/[^\n]*/g, "");
 
-// Each pattern carries the text it must match, so the reading is proved before it is
-// trusted to have found nothing.
+// Each pattern carries every shape it must match, so the reading is proved before it is
+// trusted to have found nothing. `expect` sits beside `allow` because it defeats a deny
+// exactly as quietly, and `extern` and `static` sit beside `fn` because an `unsafe extern
+// "C" fn` is the shape a hand-written N-API export takes, which an earlier revision of
+// this file read straight past.
 const HAND_WRITTEN = [
   {
-    what: "an allow of the unsafe-code lint",
-    pattern: /#!?\[\s*allow\s*\([^)]*\bunsafe_code\b/,
-    probe: "#[allow(unsafe_code)]",
+    what: "an allowance of the unsafe-code lint",
+    pattern: /#!?\[\s*(?:allow|expect)\s*\([^)]*\bunsafe_code\b/,
+    probes: ["#[allow(unsafe_code)]", "#![expect(unsafe_code)]", "#[allow(dead_code, unsafe_code)]"],
   },
   {
-    what: "an unsafe block, function, implementation or trait",
-    pattern: /\bunsafe\s*(\{|fn\b|impl\b|trait\b)/,
-    probe: "unsafe { }",
+    what: "an unsafe block, function, external item, implementation, trait or static",
+    pattern: /\bunsafe\s*(?:\{|fn\b|extern\b|impl\b|trait\b|static\b)/,
+    probes: [
+      "unsafe { }",
+      "unsafe fn f() {}",
+      'unsafe extern "C" fn f() {}',
+      "unsafe impl Send for T {}",
+      "unsafe trait T {}",
+      "unsafe static mut X: u8 = 0;",
+    ],
   },
 ];
 
 const problems = [];
 
-// Reading two, run first: a pattern that cannot find its own probe proves nothing about a
-// tree it reports clean.
-for (const { what, pattern, probe } of HAND_WRITTEN) {
-  if (!pattern.test(probe)) {
-    problems.push(`the reading for ${what} does not match its own probe, so it proves nothing`);
+// Run first: a pattern that cannot find its own probe proves nothing about a tree it goes
+// on to report clean. The attribute readings below carry no probe because each asserts a
+// presence rather than an absence, and a presence check that reads nothing fails loudly.
+for (const { what, pattern, probes } of HAND_WRITTEN) {
+  for (const probe of probes) {
+    if (!pattern.test(probe)) {
+      problems.push(`the reading for ${what} does not match \`${probe}\`, so it proves nothing`);
+    }
   }
 }
 
@@ -128,5 +143,5 @@ if (problems.length > 0) {
 }
 
 console.error(
-  `${FORBIDS.length} crate root(s) forbid unsafe code; ${sources.length} binding source(s) carry none a person wrote`,
+  `${FORBIDS.length} library crate root(s) forbid unsafe code; ${sources.length} binding source file(s) carry no unsafe keyword and no allowance of the lint`,
 );

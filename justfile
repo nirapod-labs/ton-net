@@ -54,10 +54,10 @@ default-deps:
     node scripts/check-default-deps.mjs
 
 # Whether each crate root still carries the strongest unsafe-code lint it can. The six
-# core crates forbid, and the compiler needs no help holding them there. The binding
-# cannot: `napi_derive` expands an inner allow, so a binding root that forbids fails to
-# build. It denies instead, and a hand-written allow defeats a deny silently, which is
-# the one gap left for a reading of the source text to close.
+# library crates forbid, and the compiler needs no help holding them there. The binding
+# cannot: `napi_derive` expands an inner allowance, so a binding root that forbids fails
+# to build. It denies instead, and an allowance defeats a deny silently, so what is left
+# for a reading of the source text to close is that.
 unsafe-posture:
     node scripts/check-unsafe-posture.mjs
 
