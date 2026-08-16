@@ -69,8 +69,8 @@ than a configured bound is refused ([NET-ADR-005]).
 Not built yet, all of it committed scope: the write path and wallets, the full TL-B
 type set, the full liteserver method set and a connection pool, ADNL over UDP and the
 DHT, RLDP, overlays and QUIC, the local TVM, contract helpers, and an HTTP fallback
-([NET-ADR-003]). The in-flight work on top of v0.3.0 is the cell engine's final
-capability, which is Milestone 1.
+([NET-ADR-003]). The cell engine's final capability shipped in v0.4.0, and the
+in-flight work on top of v0.4.2 is the write path.
 
 ## Standing gates
 
@@ -97,8 +97,8 @@ only the check it adds.
 
 At a glance:
 
-1. The cell engine to full capability (current).
-2. The write path and wallets.
+1. The cell engine to full capability.
+2. The write path and wallets (current).
 3. The full TL-B type set.
 4. The liteserver method set and a connection pool.
 5. ADNL over UDP and the DHT.
@@ -109,7 +109,7 @@ At a glance:
 
 ### Milestone 1: The cell engine to full capability
 
-Status: in flight on top of v0.3.0.
+Status: shipped in v0.4.0.
 
 Delivers: the cell model at full capability, so a consumer can build and read any TON
 structure and a wallet can build the cells a message needs. The pieces [NET-ADR-003]
@@ -128,6 +128,8 @@ compression is behind the `compress` feature off the default build ([NET-ADR-009
 [NET-ADR-010]).
 
 ### Milestone 2: The write path and wallets
+
+Status: in flight on top of v0.4.2.
 
 Delivers: a trust-minimized read-and-send client. It constructs an external message,
 sends it with confirmation, and can follow a transaction to its result, and it carries

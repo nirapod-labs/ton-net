@@ -136,8 +136,10 @@ every binding: the handshake aborts on the degenerate all-zero shared secret (RF
 6.1), so no socket kind and no language can open a session on a secret an onlooker can also
 derive.
 
-The write path first touches key material through the signer seam, where a caller supplies a
-callback and the library never sees a key, and that seam is fixed in NET-ADR-003. This record
+The write path first touches key material through the signer seam, where a caller supplies the
+signing operation and the library never holds or sees a key, and that seam is fixed in
+NET-ADR-003. It is a value boundary rather than a callback, which keeps the sans-I/O split
+above from having to answer a sync-or-async question at the one place a key is nearby. This record
 fixes the code shape and does not change the custody position.
 
 ## Verification

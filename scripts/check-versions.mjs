@@ -234,7 +234,13 @@ for (const rel of living) {
 // "the version today is X", "today it is X", "the current crate version is X". A number
 // reached by to, and, or are is left alone.
 //
-// A currency claim phrased some third way is invisible here.
+// A stage line is the third way the corpus writes one, and it carries neither today nor
+// current nor an is. So the trigger takes in flight as well as today and current, and the
+// version may be reached by on top of as well as by is.
+//
+// A stage line that names an older version is not by itself wrong, which is why the trigger
+// and not the literal is what decides. "shipped in v0.4.0" is history and stays true at every
+// later version; it says nothing about now, matches no trigger, and is never read here.
 const staleVersion = [];
 for (const rel of living) {
   const path = join(root, rel);
@@ -244,10 +250,10 @@ for (const rel of living) {
   const lines = readFileSync(path, "utf8").split("\n");
   lines.forEach((line, index) => {
     const plain = unstyled(line);
-    if (!/\b(?:today|current)\b/i.test(plain)) {
+    if (!/\b(?:today|current|in[- ]flight)\b/i.test(plain)) {
       return;
     }
-    for (const [, stated] of plain.matchAll(/\bis\s+v?(\d+\.\d+\.\d+)\b/g)) {
+    for (const [, stated] of plain.matchAll(/\b(?:is|on top of)\s+v?(\d+\.\d+\.\d+)\b/g)) {
       if (stated !== version) {
         staleVersion.push(`${rel}:${index + 1} says ${stated}, the crates are at ${version}`);
       }
@@ -280,7 +286,9 @@ if (staleVersion.length > 0) {
   for (const line of staleVersion) {
     console.error(`  - ${line}`);
   }
-  console.error("a line that says today or current carries the version the crates carry");
+  console.error(
+    "a line that says today, current or in flight carries the version the crates carry",
+  );
   process.exit(1);
 }
 

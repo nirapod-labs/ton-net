@@ -429,10 +429,12 @@ randomness described under State and storage.
 The write path is designed to preserve this and is planned, not present. When it lands, its
 custody posture is that the library broadcasts already-signed bytes: `sendMessage` carries
 an external message the caller built, and signing happens behind a signer seam so key
-material stays outside the library. The library never sees a key on the write path any more
-than it does on the read path. Until that path ships, sending a transaction is out of scope
-for the code, and this section describes an intended boundary rather than an implemented
-one.
+material stays outside the library. That seam is a value boundary rather than a callback,
+so a signature crosses inward and the library invokes nothing. The library never holds or
+sees a key on the write path any more than it does on the read path, and that sentence is
+stated of the facade's whole dependency closure rather than of one crate. Until that path
+ships, sending a transaction is out of scope for the code, and this section describes an
+intended boundary rather than an implemented one.
 
 ## Trust boundary
 
