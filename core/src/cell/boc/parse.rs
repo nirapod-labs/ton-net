@@ -396,9 +396,22 @@ type WaveOutcomes<T> = Vec<(usize, Result<Option<T>, CellError>)>;
 
 /// Hands a wave to several threads, or reports that it is not wide enough to be worth it.
 ///
-/// The workers read the cells already held and write nothing, so what comes back is the
-/// same list of outcomes the wave would have produced here, against the index each came
-/// from.
+/// The workers read the cells already held and write nothing of the graph, so what comes
+/// back is the same list of outcomes the wave would have produced here, against the index
+/// each came from.
+///
+/// The outcomes go straight into one buffer of the wave's own length rather than into a
+/// list per worker that is then joined into one. The two are cut by the same arithmetic
+/// over slices of the same length, so worker k writes exactly the outcomes of the cells it
+/// was handed and no two workers hold overlapping slices, which is what makes the writes
+/// disjoint and lets the borrow checker see that they are. `chunks_mut` is what carries
+/// that, rather than a pointer the crate root would refuse: it splits the buffer once and
+/// no chunk is reachable from any other.
+///
+/// The buffer is filled with a placeholder outcome and overwritten, because a wave is cut
+/// into as many chunks as `wave.chunks` yields and every slot of every chunk is written
+/// before it is read. `Ok(None)` is the placeholder, which asks nothing of `T` and is the
+/// same value a cell whose child produced nothing would leave there anyway.
 ///
 /// A wave with no cells is refused along with the widths one worker takes. The share
 /// below is the width divided among the workers, which is zero cells there, and a wave cut
@@ -420,29 +433,30 @@ where
         return None;
     }
     let each = wave.len().div_ceil(workers);
-    Some(std::thread::scope(|scope| {
+    let mut produced: WaveOutcomes<T> = Vec::new();
+    produced.resize_with(wave.len(), || (0, Ok(None)));
+    std::thread::scope(|scope| {
         let running: Vec<_> = wave
             .chunks(each)
-            .map(|part| {
+            .zip(produced.chunks_mut(each))
+            .map(|(part, slots)| {
                 scope.spawn(move || {
-                    part.iter()
-                        .map(|&index| (index, one(index, held)))
-                        .collect::<Vec<_>>()
+                    for (slot, &index) in slots.iter_mut().zip(part) {
+                        *slot = (index, one(index, held));
+                    }
                 })
             })
             .collect();
-        running
-            .into_iter()
-            .flat_map(|worker| {
-                // A worker runs what this thread would run, which returns its failures
-                // rather than unwinding. One that unwound anyway is carried on to the
-                // caller, which is what the same fault on this thread would have done.
-                worker
-                    .join()
-                    .unwrap_or_else(|unwound| std::panic::resume_unwind(unwound))
-            })
-            .collect()
-    }))
+        for worker in running {
+            // A worker runs what this thread would run, which returns its failures rather
+            // than unwinding. One that unwound anyway is carried on to the caller, which is
+            // what the same fault on this thread would have done.
+            worker
+                .join()
+                .unwrap_or_else(|unwound| std::panic::resume_unwind(unwound));
+        }
+    });
+    Some(produced)
 }
 
 /// A build without the `parallel` feature keeps every wave on this thread.
