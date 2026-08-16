@@ -45,11 +45,16 @@ versions:
 census:
     node scripts/check-surface-census.mjs
 
-# Whether the cell engine's optional dependencies are still optional. `test` already
-# compiles and runs the default build, so the narrow thing left unchecked is that lz4_flex
-# and serde_json stay out of it. Naming either feature in a `default` list puts its crate in
-# every build with nothing failing, which is the silent mutation this catches; dropping the
-# `optional` line alone is caught by cargo, which refuses the manifest.
+# Whether an optional dependency is still pulled by its feature and by nothing else.
+# `test` compiles and runs the default build already, so what is left unchecked is which
+# crates that build carries. lz4_flex is out of it, because `compress` is not a default
+# feature. getrandom and tokio are out only with `--no-default-features`, because `net`
+# is one, and saying they were out of the default build would be false. serde_json is
+# read the other way, as a presence with the features off: the config reader parses JSON
+# on the ungated path, so putting that reader behind a feature is what this refuses.
+# Naming a feature in a `default` list puts its crate in every build with nothing
+# failing, which is the silent mutation here; dropping the `optional` line alone is
+# caught by cargo, which refuses the manifest.
 default-deps:
     node scripts/check-default-deps.mjs
 
