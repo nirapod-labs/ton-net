@@ -365,25 +365,24 @@ proptest! {
             builder.store_either_ref(payload.clone()).map(|_| ())
         };
 
-        match stored {
-            Err(_) => prop_assert_eq!(builder, before, "a refused store wrote something"),
-            Ok(()) => {
-                let cell = builder.build().unwrap();
-                let mut slice = cell.parse();
-                slice.skip_bits(usize::from(header)).unwrap();
-                let arm = if behind_a_presence_bit {
-                    slice.load_maybe_either_ref().unwrap().expect("a payload was written")
-                } else {
-                    slice.load_either_ref().unwrap()
-                };
-                // Inline leaves the cursor on the payload and says nothing about its
-                // width, so what stands for the payload is the whole of the rest.
-                let read_back = match arm {
-                    crate::cell::EitherRef::Inline => slice.to_cell().unwrap(),
-                    crate::cell::EitherRef::Ref(cell) => cell.clone(),
-                };
-                prop_assert_eq!(read_back, payload);
-            }
+        if stored.is_err() {
+            prop_assert_eq!(builder, before, "a refused store wrote something");
+        } else {
+            let cell = builder.build().unwrap();
+            let mut slice = cell.parse();
+            slice.skip_bits(usize::from(header)).unwrap();
+            let arm = if behind_a_presence_bit {
+                slice.load_maybe_either_ref().unwrap().expect("a payload was written")
+            } else {
+                slice.load_either_ref().unwrap()
+            };
+            // Inline leaves the cursor on the payload and says nothing about its width,
+            // so what stands for the payload is the whole of the rest.
+            let read_back = match arm {
+                crate::cell::EitherRef::Inline => slice.to_cell().unwrap(),
+                crate::cell::EitherRef::Ref(cell) => cell.clone(),
+            };
+            prop_assert_eq!(read_back, payload);
         }
     }
 }
