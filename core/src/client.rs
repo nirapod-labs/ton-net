@@ -9,7 +9,10 @@ pub mod proof;
 // which is a thing a target with no clock cannot answer. Both reasons point the same way,
 // so it is gated with the socket rather than beside the standalone check.
 #[cfg(feature = "net")]
-pub mod sync;
+mod sync;
+
+#[cfg(feature = "net")]
+pub use sync::SyncReport;
 
 #[cfg(feature = "net")]
 use std::fmt;
@@ -20,8 +23,6 @@ use std::time::Duration;
 
 #[cfg(feature = "net")]
 use crate::adnl::TcpTransport;
-#[cfg(feature = "net")]
-use crate::client::sync::SyncReport;
 #[cfg(feature = "net")]
 use crate::lite::{
     AccountId, AccountState, BlockIdExt, BlockLink, LiteClient, LiteError, MasterchainInfo,

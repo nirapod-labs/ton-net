@@ -3,8 +3,11 @@
 
 //! Reading a bag's cells into a graph, once its header has been checked.
 
+#[cfg(feature = "parallel")]
 use std::num::NonZeroUsize;
-use std::sync::{Arc, OnceLock};
+use std::sync::Arc;
+#[cfg(feature = "parallel")]
+use std::sync::OnceLock;
 
 use super::{bit_len, read_header, Header, ParseOptions, Reader, MAX_DEPTH};
 use crate::cell::cell::{
@@ -345,15 +348,21 @@ impl Waves {
 /// the allocation gate counts on the thread it runs on.
 const CELLS_PER_WORKER: usize = 1024;
 
-/// How many threads this machine reports, or one where it reports none or the build has
-/// no thread to spawn.
+/// How many threads this machine reports, or one where it reports none.
+///
+/// The attribute rather than the `cfg!` macro, because the macro leaves the body in every
+/// build: a target with no threads would carry the call and reach it only through a
+/// condition that is always false, which is a capability compiled in for nothing.
+#[cfg(feature = "parallel")]
 fn parallelism() -> usize {
-    if cfg!(feature = "parallel") {
-        static CORES: OnceLock<usize> = OnceLock::new();
-        *CORES.get_or_init(|| std::thread::available_parallelism().map_or(1, NonZeroUsize::get))
-    } else {
-        1
-    }
+    static CORES: OnceLock<usize> = OnceLock::new();
+    *CORES.get_or_init(|| std::thread::available_parallelism().map_or(1, NonZeroUsize::get))
+}
+
+/// One worker, which is what a build with no thread to spawn has.
+#[cfg(not(feature = "parallel"))]
+fn parallelism() -> usize {
+    1
 }
 
 /// How many threads a wave of `width` cells is split across.

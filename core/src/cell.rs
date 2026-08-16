@@ -64,6 +64,11 @@
 
 mod boc;
 mod builder;
+// `cell::cell` stutters and is kept rather than renamed. The engine is one nested tree
+// rather than ten modules promoted to the crate root, so the inner name is the cell
+// type's own module and renaming it would be a cosmetic edit through the largest tree in
+// the library. No reader types the path: `Cell` is re-exported here and at the root.
+#[allow(clippy::module_inception)]
 mod cell;
 mod codec;
 mod dict;
