@@ -134,9 +134,9 @@ impl ValidatorSet {
     /// Reads the validator set in force out of a configuration dictionary.
     ///
     /// `config` is the root of the dictionary [`crate::tlb::Block::config`] returns.
-    /// Parameter 35 answers where the configuration shows it, and parameter 34 only
-    /// where the configuration shows 35 absent. See the
-    /// [module documentation](self) for why absent and pruned are not the same answer.
+    /// Parameter 35 answers where the configuration shows it, and parameter 34 only where
+    /// the configuration shows 35 absent. See the [module documentation](self) for why
+    /// absent and pruned are not the same answer.
     ///
     /// # Errors
     ///

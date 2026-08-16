@@ -28,16 +28,15 @@ mod trace;
 /// answers at level zero with the hash of what it replaced.
 ///
 /// It is the only mask this crate writes on a pruned branch, and that is narrower than what
-/// a branch may arrive carrying. The cell
-/// model gives a branch one hash and depth per level it marks, `compute` in `cell/hash.rs`
-/// reads them all, and `classify` in `boc/parse.rs` sizes a branch's body from however many
-/// levels its mask marks, so a branch marking two arrives from the network and parses:
-/// `tests/fixtures/account-proof.hex` carries a pair of them, standing for a block's old and
-/// new states under two Merkle cells. Writing one takes a second level's hash and depth, which
-/// a Merkle cell standing over another Merkle cell produces, and that is the running
-/// virtualization offset
-/// `merkle.rs` defers until a structure this client reads calls for one. Until then a wider
-/// constructor would have no caller to fix its arithmetic against.
+/// a branch may arrive carrying. The cell model gives a branch one hash and depth per level
+/// it marks, `compute` in `cell/hash.rs` reads them all, and `classify` in `boc/parse.rs`
+/// sizes a branch's body from however many levels its mask marks, so a branch marking two
+/// arrives from the network and parses: `tests/fixtures/account-proof.hex` carries a pair
+/// of them, standing for a block's old and new states under two Merkle cells. Writing one
+/// takes a second level's hash and depth, which a Merkle cell standing over another Merkle
+/// cell produces, and that is the running virtualization offset `merkle.rs` defers until a
+/// structure this client reads calls for one. Until then a wider constructor would have no
+/// caller to fix its arithmetic against.
 const PRUNED_AT_LEVEL_ONE: u8 = 0b001;
 
 /// A record of the cells a read touched, over the tree it read.

@@ -180,10 +180,9 @@ pub fn serialize_boc(roots: &[Cell]) -> Result<Vec<u8>, CellError> {
 /// Serializes a cell graph as a bag of cells, choosing what to write beyond the cells.
 ///
 /// This is [`serialize_boc`] with what is written beyond the cells under the caller's
-/// control. A bag
-/// with an index states where each cell begins, and a bag with a checksum can be refused on
-/// the way back in if it is corrupt. Multiple roots are written by passing more than one:
-/// the shared cells beneath them are still stored once.
+/// control. A bag with an index states where each cell begins, and a bag with a checksum
+/// can be refused on the way back in if it is corrupt. Multiple roots are written by
+/// passing more than one: the shared cells beneath them are still stored once.
 ///
 /// # Errors
 ///
