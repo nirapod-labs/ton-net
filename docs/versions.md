@@ -1,6 +1,6 @@
 # Versioning
 
-ton-net is one library published as many artifacts: six Rust crates on crates.io, a
+ton-net is one library published as many artifacts: one Rust crate on crates.io, a
 Node binding on npm, and a per-platform package for every target that binding builds.
 It releases on its own cadence, and a consumer pins the version it depends on
 ([NET-ADR-001](adr/NET-ADR-001-purpose-and-priorities.md)). This document is the concrete
@@ -15,23 +15,28 @@ Two numbers describe a build. They are independent and answer different question
   the root `Cargo.toml`.
 - The **verification epoch** is a monotonic integer. It answers whether an upgrade changed
   what the library accepts as proven. Today it is `2`, the value of `VERIFY_EPOCH` in
-  `crates/ton-net/src/lib.rs`.
+  `core/src/lib.rs`.
 
 ## One version, in lockstep
 
 Every workspace crate carries the version by inheritance. The root `Cargo.toml` declares
 `version = "0.4.2"` once in `[workspace.package]`, and each crate takes it with
-`version.workspace = true`. This covers the six library crates (`ton-net-tl`,
-`ton-net-cell`, `ton-net-block`, `ton-net-adnl`, `ton-net-lite`, `ton-net`) and the Node
-binding crate (`ton-net-node`). The internal dependency edges in `[workspace.dependencies]`
-pin the same version, so a crate resolves only against its own generation. There is one
-changelog for the library, [`CHANGELOG.md`](../CHANGELOG.md), not one per crate.
+`version.workspace = true`. Two crates take it: the library crate `ton-net`, whose
+manifest is `core/Cargo.toml`, and the Node binding crate `ton-net-node`. The binding's
+edge to the library in `[workspace.dependencies]` pins the same version, so it resolves
+only against its own generation. There is one changelog for the library,
+[`CHANGELOG.md`](../CHANGELOG.md).
 
 ## One version, per registry
 
 One library is many published artifacts, and the same version maps onto each registry.
 
-- **crates.io** carries the six library crates.
+- **crates.io** carries the library crate `ton-net`. Five names it no longer builds,
+  `ton-net-tl`, `ton-net-cell`, `ton-net-block`, `ton-net-adnl` and `ton-net-lite`, stay
+  published at `0.4.2` and are frozen rather than yanked, because a yank breaks every
+  build that pinned one. Each is a module of the same name inside `ton-net` now
+  ([NET-ADR-009](adr/NET-ADR-009-code-structure.md)), and the
+  [release process](release-process.md) covers what happens to the five.
 - **npm** carries the binding as the `ton-net` package, at the same version. That package
   ships no native binary of its own. It lists seven per-platform packages under the
   `@nirapod-labs` scope as optional dependencies, each pinned exact at the library version,
@@ -70,7 +75,7 @@ A caller that stored the epoch a result was verified under compares it against t
 value. When the current value is higher, the caller re-verifies rather than trusting a result
 an older set of rules produced. Nothing else in the API answers that.
 
-The boundary is pinned in the build as a transcript. `crates/ton-net/tests/epoch.rs` runs the
+The boundary is pinned in the build as a transcript. `core/tests/epoch.rs` runs the
 public verifier over one captured masterchain read, ten edits of it and one legal
 re-encoding of it, and compares the
 verdicts against a fixed text whose first line is the epoch. The number and the boundary it
