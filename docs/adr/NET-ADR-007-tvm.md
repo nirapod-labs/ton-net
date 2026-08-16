@@ -9,6 +9,11 @@ superseded-by: none
 
 # NET-ADR-007: The local TVM, and the differential harness that grades it
 
+Where this record says the TVM would be a crate it describes the tree as it stood when the
+decision was taken. Six library crates are now one, so the unit is a module; that and the
+record's one path anchor are at the end, under [Since acceptance](#since-acceptance). Every
+decision here stands, and the TVM is still unbuilt.
+
 ## Context
 
 ton-net verifies every answer against validator signatures rather than trusting a server
@@ -152,3 +157,24 @@ When the TVM is built, its correctness is a standing differential check rather t
 
 None of these checks runs today. There is no `tvm` crate in the tree, so this section describes
 the gate the first opcode is written against, not a suite that passes now.
+
+## Since acceptance
+
+The six library crates are one crate, `ton-net`, whose source is `core/src` (NET-ADR-009). Where
+a record of this vintage carries a `crates/ton-net-x/src/y.rs` anchor it reads `core/src/x/y.rs`,
+with `ton-net-block` the one exception: its decoding half is `tlb` and its checking half is
+`proof`. This record carries one anchor and it is neither. Decision 1's
+`crates/ton-net/src/verified.rs` reads `core/src/verified.rs`, where `Verified<T>` still has a
+`pub(crate)` constructor and no public one, which is the whole of what decision 1 borrows from
+it. A reader of this record lands in the crate root's own module and never in the block crate's
+two halves.
+
+The record's absence claim holds and its noun does not. There is no `tvm` module either:
+`core/src/lib.rs` declares `adnl`, `cell`, `client`, `lite`, `proof`, `tl` and `tlb` public,
+`address`, `codec`, `config`, `error` and `verified` private, and nothing named `tvm`. So where
+this record says the `tvm` crate does not exist, read the `tvm` module, and the sentence is as
+true as it was.
+
+Decision 5 is untouched by any of this. The crates it admits, the pairing curve and the secp
+curve, are published dependencies rather than members of this workspace, so the collapse does
+not reach them and NET-ADR-004's single-copy rule governs them exactly as written.
