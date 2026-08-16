@@ -12,13 +12,31 @@
 //! masterchain sequence number, and is recorded here rather than recomputed. That is
 //! what makes this a check: an implementation compared against itself proves only that
 //! it is consistent.
+//!
+//! Two tests here are **constructed rather than captured**, and each says so at its own
+//! head. They cover the preference for configuration parameter 35 over 34. Every cell
+//! they use is mainnet's, but the arrangement is this file's, because mainnet does not
+//! produce the arrangement: the deployed governance contract rotates the next set
+//! straight into 34 and writes 35 nowhere, and parameter 35 is absent from the
+//! configuration at every block captured here and from the mainnet configuration read on
+//! 2026-08-16. A capture would additionally establish that a real configuration carrying
+//! the parameter decodes and verifies end to end; nothing offline reaches that.
 
+use ton_net::cell::Builder;
+use ton_net::cell::Cell;
 use ton_net::cell::Dict;
 use ton_net::cell::Lookup;
+use ton_net::cell::UsageTree;
 use ton_net::proof;
 use ton_net::proof::ValidatorSet;
 use ton_net::tl::{deserialize, lite};
 use ton_net::tlb::BlockError;
+
+/// The parameter holding the standing validator set.
+const CURRENT_VALIDATORS: i32 = 34;
+
+/// The parameter holding the temporary one, which answers wherever it is present.
+const CURRENT_TEMP_VALIDATORS: i32 = 35;
 
 /// One forward link from the block the mainnet config pins.
 const ORDINARY: &str = include_str!("fixtures/chain.hex");
@@ -101,6 +119,35 @@ fn unhex32(s: &str) -> [u8; 32] {
         .map(|i| u8::from_str_radix(&s[i * 2..i * 2 + 2], 16).expect("hex"))
         .collect();
     bytes.try_into().expect("32 bytes")
+}
+
+/// The configuration dictionary the source key block of a link carries.
+fn config_of(link: &Link) -> Dict {
+    let block = proof::covered_block(&link.config_proof, &link.from.root_hash)
+        .expect("the config proof roots at the key block");
+    let config = block.config().expect("a key block carries a configuration");
+    Dict::from_root(Some(config), 32).expect("a 32-bit dictionary")
+}
+
+/// The cell a configuration parameter sits behind, where the proof covers it.
+fn param_cell(config: &Dict, index: i32) -> Cell {
+    config
+        .get(&index.to_be_bytes())
+        .expect("the lookup runs")
+        .found()
+        .expect("the proof covers the parameter")
+        .slice()
+        .expect("the entry is a slice")
+        .load_ref()
+        .expect("a parameter sits behind a reference")
+        .clone()
+}
+
+/// A configuration dictionary value: one reference to the parameter's own cell.
+fn param_value(cell: Cell) -> Builder {
+    let mut value = Builder::new();
+    value.store_ref(cell).expect("one reference fits");
+    value
 }
 
 /// Reads the validator set the source key block of a link names.
@@ -316,6 +363,129 @@ fn a_config_proof_covers_only_the_parameter_it_answers_for() {
         ValidatorSet::from_cell(&param).expect("it is a validator set"),
         set_of(&link)
     );
+}
+
+#[test]
+fn a_captured_configuration_shows_parameter_35_absent_rather_than_pruned() {
+    // The set in force is parameter 35 where the configuration carries it and 34
+    // otherwise, so reading 34 is licensed by a covered absence of 35 and by nothing
+    // else. A server sending the smallest proof that answers the question covers the
+    // walk to 35 exactly because it selected the set the same way, and every capture in
+    // this tree shows that: 35 absent, not pruned. This is what keeps the preference
+    // from turning live mainnet proofs into refusals, and it is the half of the rule
+    // that captured bytes can settle.
+    for text in [ORDINARY, SIMPLEX] {
+        let config = config_of(&link(text));
+        assert!(matches!(
+            config
+                .get(&CURRENT_TEMP_VALIDATORS.to_be_bytes())
+                .expect("the lookup runs"),
+            Lookup::Absent
+        ));
+        assert!(matches!(
+            config
+                .get(&CURRENT_VALIDATORS.to_be_bytes())
+                .expect("the lookup runs"),
+            Lookup::Found(_)
+        ));
+    }
+}
+
+#[test]
+fn parameter_35_answers_where_the_configuration_carries_it() {
+    // **A constructed fixture.** Both parameter cells below are mainnet bytes, taken
+    // from the two captured rounds, and so is the configuration dictionary they sit in.
+    // What is constructed is the placement: mainnet's own governance contract rotates
+    // the next set straight into 34 and writes 35 nowhere, so no captured key block
+    // carries the parameter and this arrangement of real cells is as close as an
+    // offline test reaches. What it does not establish is that a mainnet configuration
+    // carrying 35 decodes and verifies end to end, which only a capture would.
+    let a = link(ORDINARY);
+    let b = link(SIMPLEX);
+    let round_b = config_of(&b);
+
+    let mut edited = config_of(&a);
+    edited
+        .set(
+            &CURRENT_TEMP_VALIDATORS.to_be_bytes(),
+            &param_value(param_cell(&round_b, CURRENT_VALIDATORS)),
+        )
+        .expect("the parameter fits");
+
+    // The two rounds are twelve million blocks apart and share no set, so answering
+    // with round B's out of round A's own configuration can only be the preference
+    // firing. Reading 34 would answer with round A's, which is the defect this pins.
+    let read = ValidatorSet::from_config(edited.root().expect("an edited root"))
+        .expect("the configuration holds a validator set");
+    assert_eq!(read, set_of(&b));
+    assert_ne!(read, set_of(&a));
+
+    // And with 35 taken out again the same dictionary answers with 34, so the fallback
+    // is a fallback rather than a second reading of the same parameter.
+    assert!(edited
+        .remove(&CURRENT_TEMP_VALIDATORS.to_be_bytes())
+        .expect("the removal runs"));
+    assert_eq!(
+        ValidatorSet::from_config(edited.root().expect("a root")).expect("it reads"),
+        set_of(&a)
+    );
+}
+
+#[test]
+fn a_pruned_parameter_35_is_refused_rather_than_read_as_an_absent_one() {
+    // **A constructed fixture**, on the arrangement of real cells the test above
+    // builds: a configuration carrying both parameters, proved down to the walk to 34
+    // alone. That is what a server selecting the set by reading 34 and nothing else
+    // would send, and against it the walk to 35 answers neither found nor absent.
+    //
+    // Nothing in such a proof rules out the 35 standing behind the pruned branch, so
+    // reading 34 would be deriving a set the block never signed under, in silence. The
+    // refusal names the proof rather than the configuration, which is the difference
+    // between a server that answered a narrower question and a configuration that has
+    // nothing in it.
+    //
+    // The narrowing has to be built rather than captured for a second reason on top of
+    // the one above: in a captured configuration 34 and 35 are adjacent keys reached
+    // through one edge, so covering 34 covers the absence of 35 as a side effect and no
+    // real proof this tree holds can put a pruned branch on that walk.
+    let a = link(ORDINARY);
+    let b = link(SIMPLEX);
+    let mut config = config_of(&a);
+    config
+        .set(
+            &CURRENT_TEMP_VALIDATORS.to_be_bytes(),
+            &param_value(param_cell(&config_of(&b), CURRENT_VALIDATORS)),
+        )
+        .expect("the parameter fits");
+    let root = config.root().expect("an edited configuration has a root");
+
+    let mut usage = UsageTree::new(root.clone());
+    assert!(
+        usage.mark_path(&param_cell(&config, CURRENT_VALIDATORS)),
+        "the walk to 34 is in the tree"
+    );
+    let narrowed = Dict::from_root(Some(usage.prune().expect("the tree prunes")), 32)
+        .expect("a 32-bit dictionary");
+
+    assert!(matches!(
+        narrowed
+            .get(&CURRENT_TEMP_VALIDATORS.to_be_bytes())
+            .expect("the lookup runs"),
+        Lookup::Pruned
+    ));
+    assert!(matches!(
+        ValidatorSet::from_config(narrowed.root().expect("a root")),
+        Err(BlockError::NotCovered)
+    ));
+
+    // The walk to 34 survives the narrowing, so the refusal above is the preference
+    // declining an uncovered 35 rather than the pruning having taken 34 away with it.
+    assert!(matches!(
+        narrowed
+            .get(&CURRENT_VALIDATORS.to_be_bytes())
+            .expect("the lookup runs"),
+        Lookup::Found(_)
+    ));
 }
 
 #[test]
