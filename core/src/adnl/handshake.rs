@@ -88,7 +88,7 @@ pub fn client_handshake(
     secrets: &HandshakeSecrets,
 ) -> Result<Handshake, HandshakeError> {
     // The server key id is sha256 of the key in its TL pub.ed25519 form, which is the
-    // constructor id (little-endian) followed by the 32 key bytes. ton-net-tl owns that
+    // constructor id (little-endian) followed by the 32 key bytes. The tl module owns that
     // id, so it is not repeated here.
     let server_key_id = sha256(&[&serialize(PublicKey { key: *server_key })]);
 

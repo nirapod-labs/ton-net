@@ -13,7 +13,7 @@ use crate::cell::error::CellError;
 
 /// An account address, as a message carries it.
 ///
-/// Two of the four wire forms are read here, and the block crate's account reader already
+/// Two of the four wire forms are read here, and the account reader in [`crate::tlb`] already
 /// steps over a third, so this enum is expected to grow arms and adding them must not
 /// break a caller's `match`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

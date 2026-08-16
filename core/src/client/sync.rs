@@ -13,7 +13,7 @@
 //! **The anchor is always a key block, never the head.** That single rule is what removes
 //! backward links from the picture. A backward link exists so a client whose known block
 //! is not a key block can reach the last key block before it; a client whose anchor is
-//! always a key block never needs one, which is why `ton-net-block` refuses one by name
+//! always a key block never needs one, which is why [`crate::proof`] refuses one by name
 //! rather than checking it. The head a sync proves is handed back for the read that
 //! wanted it and then dropped, because keeping it would mean starting the next sync from
 //! a block no chain can continue from.

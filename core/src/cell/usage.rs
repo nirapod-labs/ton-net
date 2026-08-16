@@ -11,7 +11,7 @@
 //! The pruned tree hashes to the same root as the whole. A pruned branch answers at level
 //! zero with the hash of the subtree it replaced, so a parent hashes the same whether it
 //! holds the subtree or the branch, and that holds up to the root. Checking the pruned tree
-//! against a root reached some trusted way is then what the block crate's proof engine does.
+//! against a root reached some trusted way is then what [`crate::proof`] does.
 //!
 //! [`prune`]: UsageTree::prune
 

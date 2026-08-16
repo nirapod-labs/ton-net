@@ -60,10 +60,6 @@ pub enum BlockError {
     #[error("the proof chain has a backward link, which this release does not verify")]
     BackwardLink,
 
-    /// A signature set is of a form this release does not know.
-    #[error("a signature set of a form this release does not know")]
-    UnknownSignedForm,
-
     /// The valid signatures on a link do not carry more than two thirds of the weight of
     /// the set that had to sign it.
     #[error("signatures carry {carried} of {total}, short of two thirds")]

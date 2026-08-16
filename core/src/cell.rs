@@ -46,8 +46,6 @@
 //! and refuses a bag past [`MAX_CELLS`] or [`MAX_DEPTH`], a reference that does not
 //! point strictly forward, or a cell whose descriptors and data disagree.
 //!
-//! This is an internal crate of the ton-net client.
-//!
 //! # Examples
 //!
 //! ```

@@ -18,9 +18,7 @@
 //!
 //! [`AdnlConnection`] speaks the ADNL message layer: it wraps a query with an id and
 //! matches the answer. The liteserver methods that build the query and decode the answer
-//! live in ton-net-lite.
-//!
-//! This is an internal crate of the ton-net client.
+//! live in [`crate::lite`].
 
 use sha2::{Digest, Sha256};
 

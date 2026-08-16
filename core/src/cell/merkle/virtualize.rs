@@ -30,7 +30,7 @@ const COVERED_DEPTH: usize = COVERED_HASH + 32;
 /// proof is consistent with itself, that the content attached hashes to the root and depth
 /// the proof claims for it. Content read this way still has to have its hash checked
 /// against a root reached some trusted way, which is what `verify_merkle_proof` in the
-/// block crate adds on top.
+/// [`crate::proof::verify_merkle_proof`] adds on top.
 ///
 /// # Errors
 ///

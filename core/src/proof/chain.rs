@@ -52,8 +52,9 @@ pub struct ProvenBlock {
 /// Returns [`BlockError::ChainBroken`] if the run does not connect the blocks it claims
 /// to, [`BlockError::BackwardLink`] for a step this release does not check,
 /// [`BlockError::NotEnoughWeight`] if a link's signatures do not carry it,
-/// [`BlockError::UnknownSignedForm`] for a signature set of a third kind, and the proof
-/// and decode failures of [`covered_block`](super::covered_block) for a proof that does not check out.
+/// and the proof and decode failures of [`covered_block`] for a proof that does not check
+/// out. A signature set of a third form is refused one layer down, by the codec, as
+/// [`TlError`](crate::tl::TlError)`::UnknownConstructor`.
 pub fn verify_chain(
     anchor: &BlockIdExt,
     proof: &PartialBlockProof,

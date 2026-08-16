@@ -5,7 +5,7 @@
 //!
 //! A proof is the inverse of virtualizing one: it wraps an ordinary tree, the branches to
 //! withhold already pruned, in a proof cell carrying the tree's own hash and depth. The
-//! block crate's engine then accepts it against the root the tree hashes to.
+//! verification engine then accepts it against the root the tree hashes to.
 
 use super::covering_cell;
 use crate::cell::cell::{Cell, CellType};
@@ -15,7 +15,7 @@ use crate::cell::error::CellError;
 ///
 /// The proof holds `content` as its one reference, with the content's own level-zero hash
 /// and depth stored in its data. It is the inverse of [`virtualize`](super::virtualize):
-/// virtualizing the result gives `content` back, and the block crate's proof engine accepts
+/// virtualizing the result gives `content` back, and [`crate::proof`] accepts
 /// it against the root `content` hashes to.
 ///
 /// `content` is the tree the proof reveals, an ordinary tree with the branches to withhold

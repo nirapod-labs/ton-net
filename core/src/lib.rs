@@ -175,7 +175,7 @@ pub use crate::cell::{
     Slice,
 };
 
-/// The bag-of-cells codec, defined in ton-net-cell and surfaced here.
+/// The bag-of-cells codec, defined in [`cell`] and surfaced here.
 ///
 /// [`Client::account_state`] hands a proof and a state back as raw bag bytes, and
 /// [`AccountState`] documents them as such, so a facade with [`Cell::to_boc`] and no

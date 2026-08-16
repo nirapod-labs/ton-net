@@ -17,7 +17,7 @@
 /// verified state.
 ///
 /// The raw proof bytes the server sent are kept by [`proof`](Self::proof), so the layer
-/// above can check them without another round trip. That is what `ton-net-block` does,
+/// above can check them without another round trip. That is what [`crate::proof`] does,
 /// and it is why the `ton-net` facade can hand back a proved value while the calls here
 /// still hand back this one.
 #[derive(Debug, Clone)]

@@ -7,7 +7,7 @@
 //! randomness from the operating system, drives the sans-I/O handshake and framing over
 //! a [`Transport`], and runs the ADNL message layer: it wraps a query with a fresh id,
 //! sends it, and reads frames until the answer to that id comes back. The liteserver
-//! methods that build the query bytes and decode the answer live in ton-net-lite.
+//! methods that build the query bytes and decode the answer live in [`crate::lite`].
 
 use crate::tl::{adnl, deserialize, serialize};
 
@@ -127,7 +127,7 @@ impl<T: Transport> AdnlConnection<T> {
 
     /// Runs one query and returns the answer bytes.
     ///
-    /// `query` is the payload to carry, the liteserver query bytes ton-net-lite builds.
+    /// `query` is the payload to carry, the liteserver query bytes [`crate::lite`] builds.
     /// It is wrapped in an `adnl.message.query` with a fresh random id, sealed into a
     /// frame, and sent; frames are then read until an `adnl.message.answer` echoes that
     /// id, and its answer bytes are returned. An empty confirmation frame is skipped.

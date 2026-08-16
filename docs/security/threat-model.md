@@ -183,8 +183,9 @@ for; the client reads the candidate that travels with the set and requires it to
 name the link's destination, otherwise real signatures lifted from one block
 would carry another. The session id is signed alongside the vote, so a signature
 raised in one consensus session cannot be replayed into another. A set of any
-third form is refused by name as `BlockError::UnknownSignedForm`, never read as
-one of these. The ed25519 rule itself is libsodium's
+third form is refused one layer down, by the codec, as
+`TlError::UnknownConstructor`: the decoded type carries exactly these two forms,
+so a third never reaches the check that would have to reject it. The ed25519 rule itself is libsodium's
 `crypto_sign_verify_detached`, the rule the network uses: canonical `A`, `R`, and
 `S`, neither `A` nor `R` of small order, `S` below the group order, and the
 equation compared without cofactor slack. Being stricter would refuse a signature

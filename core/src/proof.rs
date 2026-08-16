@@ -26,8 +26,8 @@
 //!
 //! Where that hash comes from decides what the check is worth: a client that asks the
 //! same server for the anchor has proved nothing. Deriving it instead from a single
-//! pinned key block is block sync, which is [`crate::proof::chain::verify_chain`] in this same
-//! crate, and which the facade above runs before it calls in here.
+//! pinned key block is block sync, which is [`verify_chain`], and which
+//! [`Client::sync`](crate::Client::sync) runs before it calls in here.
 //!
 //! # The chain
 //!

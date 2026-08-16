@@ -9,7 +9,7 @@
 //!
 //! Every response here is the server's word. This crate decodes it and checks nothing,
 //! neither the Merkle proofs nor the validator signatures a liteserver returns.
-//! Verification belongs to `ton-net-block`, over the types decoded here.
+//! Verification belongs to [`crate::proof`], over the types decoded here.
 
 use tl_proto::{TlRead, TlWrite};
 

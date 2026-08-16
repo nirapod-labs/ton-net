@@ -8,7 +8,7 @@
 //! covers the ADNL message envelope ([`adnl`]), the liteserver query and response
 //! types ([`lite`]), and the messages a validator signature covers ([`signed`]).
 //! It performs no I/O, and it checks nothing: a decoded response is the server's
-//! word until `ton-net-block` verifies it.
+//! word until [`crate::proof`] checks it.
 //!
 //! A boxed type carries a four-byte constructor id: the CRC32-IEEE of its TL scheme
 //! line, written little-endian on the wire. A bare type, used only as a field of
@@ -25,8 +25,6 @@
 //! assert_eq!(bytes, [0x2e, 0xe6, 0xb5, 0x89]);
 //! ```
 //!
-//! It is an internal crate of the ton-net client. Most consumers use the `ton-net`
-//! facade rather than this crate directly.
 
 pub mod adnl;
 pub mod lite;
