@@ -19,8 +19,8 @@
 use crate::tl::lite::{BlockIdExt, BlockLink, PartialBlockProof, Signature, SignatureSet};
 use crate::tl::signed::CandidateBlock;
 
-use crate::tlb::block::Block;
-use crate::tlb::error::BlockError;
+use crate::tlb::Block;
+use crate::tlb::BlockError;
 use crate::proof::signature;
 use crate::proof::validators::ValidatorSet;
 
@@ -191,7 +191,6 @@ fn signed_message(set: &SignatureSet, to: &BlockIdExt) -> Result<Vec<u8>, BlockE
             }
             Ok(signature::simplex_message(session_id, *slot, candidate))
         }
-        _ => Err(BlockError::UnknownSignedForm),
     }
 }
 

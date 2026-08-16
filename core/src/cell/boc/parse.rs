@@ -978,7 +978,7 @@ mod tests {
 
     /// The captured mainnet account proof, read from the fixture the hostile corpus
     /// mutates so that the parity gate and that corpus work over one real bag.
-    const PROOF_HEX: &str = include_str!("../../tests/fixtures/account-proof.hex");
+    const PROOF_HEX: &str = include_str!("../../../tests/fixtures/account-proof.hex");
 
     /// How many levels of forks the fan bag carries above its leaves.
     ///

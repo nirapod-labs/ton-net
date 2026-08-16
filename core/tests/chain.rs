@@ -14,7 +14,8 @@
 //! chain that fails for the wrong reason is a chain whose checks are not doing what
 //! they claim.
 
-use ton_net_block::{verify_chain, BlockError};
+use ton_net::proof::verify_chain;
+use ton_net::tlb::BlockError;
 use ton_net::tl::deserialize;
 use ton_net::tl::lite::{BlockIdExt, BlockLink, PartialBlockProof, SignatureSet};
 
@@ -107,7 +108,8 @@ fn the_chain_crosses_a_validator_set_rotation() {
     // Without a rotation the set is read once and reused, and a test would say nothing
     // about whether the set is rechosen per link. Reading the set each link names and
     // requiring them to differ is what makes the end-to-end test above mean something.
-    use ton_net_block::{Block, ValidatorSet};
+    use ton_net::proof::ValidatorSet;
+    use ton_net::tlb::Block;
 
     let proof = chain();
     let mut rounds = Vec::new();

@@ -26,9 +26,8 @@
 
 use std::collections::HashMap;
 
-use ton_net_block::{
-    proof, verify_account, AccountRead, AccountStatus, BlockError, Coins, Lookup, ShardState,
-};
+use ton_net::proof::{self, verify_account, AccountRead};
+use ton_net::tlb::{AccountStatus, BlockError, Coins, Lookup, ShardState};
 use ton_net::cell::{parse_boc, Cell, CellType};
 
 /// A masterchain account: the zero address, which is deployed and holds a balance.

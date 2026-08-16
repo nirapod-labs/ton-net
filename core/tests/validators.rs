@@ -13,7 +13,9 @@
 //! what makes this a check: an implementation compared against itself proves only that
 //! it is consistent.
 
-use ton_net_block::{Block, BlockError, Lookup, ValidatorSet};
+use ton_net::cell::Lookup;
+use ton_net::proof::ValidatorSet;
+use ton_net::tlb::{Block, BlockError};
 use ton_net::cell::Dict;
 use ton_net::tl::{deserialize, lite};
 

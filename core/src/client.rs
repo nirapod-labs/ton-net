@@ -18,7 +18,7 @@ use crate::lite::{
     PartialBlockProof, ServerReported,
 };
 
-use crate::client::sync::{self, SyncReport};
+use crate::client::sync::SyncReport;
 use crate::{Address, Config, Error, Verified};
 
 /// The deadline for one read, after which the call returns [`Error::Timeout`].

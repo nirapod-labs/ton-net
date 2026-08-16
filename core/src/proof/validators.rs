@@ -40,7 +40,7 @@
 use sha2::{Digest, Sha256};
 use crate::cell::{Cell, Slice};
 
-use crate::tlb::error::BlockError;
+use crate::tlb::BlockError;
 use crate::cell::{Dict, Lookup};
 
 /// The configuration parameter holding the current validator set.

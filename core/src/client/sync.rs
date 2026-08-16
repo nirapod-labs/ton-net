@@ -92,9 +92,6 @@ pub fn within_bounds(reply: &PartialBlockProof) -> Result<(), Error> {
                 state_proof,
                 ..
             } => (dest_proof, state_proof, None),
-            // An unknown link is refused when it is checked, which is where the error
-            // naming it belongs. Nothing here can measure one.
-            _ => continue,
         };
         for proof in [dest_proof, other] {
             if proof.len() > MAX_PROOF_BYTES {

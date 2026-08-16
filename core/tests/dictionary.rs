@@ -18,7 +18,8 @@
 //! The tests live beside the block fixtures because that is where a real dictionary can
 //! be reached; what they exercise is `ton_net::cell::Dict`.
 
-use ton_net_block::{proof, Block, ShardState};
+use ton_net::proof;
+use ton_net::tlb::{Block, ShardState};
 use ton_net::cell::{Builder, Cell, CellError, Dict, Lookup, Slice};
 
 /// One forward proof link, holding a key block's configuration.

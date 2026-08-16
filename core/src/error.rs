@@ -283,7 +283,6 @@ impl From<crate::lite::LiteError> for Error {
             LiteError::Adnl(adnl) => adnl.into(),
             LiteError::LiteServer { code, message } => Self::LiteServer { code, message },
             LiteError::Decode(decode) => Self::Decode(decode.to_string()),
-            other => Self::Decode(other.to_string()),
         }
     }
 }
