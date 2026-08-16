@@ -170,17 +170,17 @@ bindings/node/            unchanged, still its own crate
 
 `crates/` goes away with the last thing in it. A directory named for a plurality, holding one, says something about the project that has stopped being true.
 
-### The facade is a package, not a scatter, and an earlier draft got that wrong
+### The facade is a package, not a scatter
 
-That draft put `client.rs`, `sync.rs`, `send.rs`, `proof.rs` and the wallet at the crate root as loose files. It is worth saying why that is wrong, because the reason is not taste.
+The shape being refused is `client.rs`, `sync.rs`, `send.rs`, `proof.rs` and the wallet at the crate root as loose files. It is worth saying why that fails, because the reason is not taste.
 
-**The language refuses it.** `src/proof.rs` and `src/proof/` are not two modules in Rust, they are one: the file is the module's body and the directory holds its children. So a root `proof.rs` carrying the facade's fifty-two-line check and a root `proof/` carrying the three-hundred-line engine are the same name twice, and no re-export resolves that. Section 6 counted `proof.rs` among the basenames that dissolve under different parents. Under the flattened tree it did not dissolve, and the tree hid it.
+**The language refuses it.** `src/proof.rs` and `src/proof/` are not two modules in Rust, they are one: the file is the module's body and the directory holds its children. So a root `proof.rs` carrying the facade's fifty-two-line check and a root `proof/` carrying the three-hundred-line engine are the same name twice, and no re-export resolves that. Section 6 counts `proof.rs` among the basenames that dissolve under different parents. At the crate root it does not dissolve, and a flat tree hides that it did not.
 
 Grouping the facade under `client/` is also the closer adoption, not the looser one: the shape being followed has one client package, and its own table above puts 4,549 lines in it. So `client/proof.rs` beside `proof/`, and the collision is gone because the parents are genuinely different rather than drawn that way.
 
 ### Two places this departs from the shape it follows, and why
 
-**The cell engine stays one nested tree rather than being promoted to the crate root.** An earlier draft promoted its ten modules to the root, on the reasoning that they are 70.6% of the library. That was wrong: it scatters `boc/`, `dict/`, `merkle/` and `slice/` across the same level as `client.rs` and `config.rs`, mixing an engine with a facade. The reference keeps its equivalent as one package and that is the better call.
+**The cell engine stays one nested tree rather than being promoted to the crate root.** Promoting its ten modules to the root has an argument behind it, that they are 70.6% of the library, and the argument does not survive the result: it scatters `boc/`, `dict/`, `merkle/` and `slice/` across the same level as `client.rs` and `config.rs`, mixing an engine with a facade. The reference keeps its equivalent as one package and that is the better call.
 
 It costs one stutter. `src/cell/cell.rs` is real, so `ton_net_cell::cell::Cell` becomes `crate::cell::cell::Cell` internally. A reader never types it, because `lib.rs` re-exports `Cell` at the root and always has, but the internal paths carry it and renaming a module to avoid it would be a cosmetic edit inside the largest tree in the library.
 
@@ -188,7 +188,7 @@ It costs one stutter. `src/cell/cell.rs` is real, so `ton_net_cell::cell::Cell` 
 
 Here it is `proof/`, holding `chain`, `validators` and `signature` beside the engine body, because verifying every answer rather than trusting the server is what this library is for and it should be one named thing a reader can find. That is the one place the shape is refused rather than adapted, and the reason is a difference in what the two libraries are: a general client where proof is a feature, against a client where proof is the product. `ton-net-block` today mixes it with the typed structures; `tlb/` and `proof/` separate them.
 
-**`account.rs` goes to `tlb/`, once.** An earlier draft listed it under both, which cannot be: there is one `crates/ton-net-block/src/account.rs` and it is a decoder, `Account`, `AccountStatus`, `skip_address`, `load_status`. The account *check* is not a file at all, it is `verify_account` inside `crates/ton-net-block/src/proof.rs:255`, and it travels with the engine body.
+**`account.rs` goes to `tlb/`, once.** It cannot sit under both `tlb/` and `proof/`: there is one `crates/ton-net-block/src/account.rs` and it is a decoder, `Account`, `AccountStatus`, `skip_address`, `load_status`. The account *check* is not a file at all, it is `verify_account` inside `crates/ton-net-block/src/proof.rs:255`, and it travels with the engine body.
 
 ### One placement question the shape answers outright
 
@@ -227,11 +227,11 @@ git ls-tree -r --name-only 6bddcd3 -- crates \
 
 Five land under a different parent and cost nothing: `cell/codec.rs` beside `codec.rs`, `cell/error.rs` beside `tlb/error.rs` beside `error.rs`, `lite/client.rs` beside `client.rs`, `cell/builder/snake.rs` beside `cell/slice/snake.rs`, and three `address.rs` under three parents, which the wallet's own address module in section 4's tree makes four once it is built. `lib.rs` is not a collision at all: one survives as the crate root and the other five dissolve into the module bodies they became.
 
-**Two of the seven cost something, and an earlier draft of this plan got both wrong.**
+**Two of the seven cost something, and neither cost is visible from the basename alone.**
 
-**`proof.rs` was counted as free and is not.** Section 4 carries the correction: a root `proof.rs` and a root `proof/` are one module in this language, not two, so the facade's check and the engine collided under the flattened tree the draft drew. The facade moves into `client/` and the parents become genuinely different. Two functions named `verify_account` survive that move, at `proof::verify_account` returning `BlockError` and `client::proof::verify_account` returning `Error`, and they survive because two error types survive. That is an adapter, not a duplicate, and it is one line.
+**`proof.rs` is not free.** A root `proof.rs` and a root `proof/` are one module in this language, not two, so at the crate root the facade's check and the engine are the same name and no different parent separates them. Section 4 is where that is settled: the facade moves into `client/` and the parents become genuinely different. Two functions named `verify_account` survive that move, at `proof::verify_account` returning `BlockError` and `client::proof::verify_account` returning `Error`, and they survive because two error types survive. That is an adapter, not a duplicate, and it is one line.
 
-**The other is two base64 decoders in one library.** That draft said to merge them behind a differential, and to treat disagreement as a bug the migration found. They disagree, and it is not a bug: each rule is deliberate and each has a test pinning it.
+**The other is two base64 decoders in one library.** The move that suggests itself is to merge them behind a differential and treat any disagreement as a bug the migration found. They do disagree, and it is not a bug: each rule is deliberate and each has a test pinning it.
 
 - `crates/ton-net-cell/src/codec.rs:37` **refuses** the URL-safe alphabet, pinned by `base64_refuses_the_url_safe_alphabet` at `:362`. A bag of cells and a cell hash travel in standard base64, and accepting a second spelling of the same bytes would give one bag two encodings.
 - `crates/ton-net/src/codec.rs:14-16` **accepts both**, pinned by `base64_decodes_the_url_safe_alphabet` at `:157` and `both_alphabets_spell_one_value` at `:176`. It serves config keys, which are standard, and user-friendly addresses, which are URL-safe.
