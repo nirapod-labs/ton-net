@@ -39,7 +39,7 @@ fn the_cell_engine_is_here() {
     let mut builder = Builder::new();
     builder.store_uint(0xab, 8).unwrap();
     let cell: Cell = builder.build().unwrap();
-    let bag: Vec<u8> = serialize_boc(&[cell.clone()]).unwrap();
+    let bag: Vec<u8> = serialize_boc(std::slice::from_ref(&cell)).unwrap();
     let roots: Vec<Cell> = parse_boc(&bag).unwrap();
     assert_eq!(roots[0].hash(), cell.hash());
 
@@ -47,7 +47,7 @@ fn the_cell_engine_is_here() {
     assert_eq!(slice.load_uint(8).unwrap(), 0xab);
 
     // The proof machinery is a cell concern and travels with the engine.
-    let tree = UsageTree::new(cell.clone());
+    let tree = UsageTree::new(cell);
     let _ = tree.prove();
 
     // And the error a read fails with is nameable without a socket.
@@ -66,8 +66,9 @@ fn the_typed_structures_are_here() {
 
     // Named rather than exercised: these need bytes a fixture would supply, and this file
     // reads no fixture. Naming them is what proves they are reachable.
-    let _: Option<fn(&[u8]) -> Result<Block, BlockError>> = None;
-    let _: Option<fn(&[u8]) -> Result<ShardState, BlockError>> = None;
+    let _ = Block::from_cell;
+    let _ = ShardState::from_cell;
+    let _: fn(&BlockError) -> String = |e| e.to_string();
 }
 
 /// The verification engine, including the standalone check the root re-exports.
@@ -76,13 +77,14 @@ fn the_proof_engine_is_here() {
     // A signature over nothing verifies as false rather than failing to link.
     assert!(!signature::verify(&[0; 32], b"", &[0; 64]));
 
-    let _: Option<fn(&AccountRead<'_>) -> Result<Account, BlockError>> = Some(verify_account);
-    let _: Option<fn(&Cell) -> Result<ValidatorSet, BlockError>> = Some(ValidatorSet::from_config);
-    // `verify_chain` takes wire types; naming it is what this line is for.
+    // The rest take bytes a fixture would supply, so naming them is what proves they are
+    // reachable. The two `verify_account`s are named separately on purpose: they differ
+    // only in error type, and the root's is the one that must survive without `net`.
+    let _ = verify_account;
     let _ = verify_chain;
-
-    // The root's own check, at the root's error type, is not behind the feature either.
-    let _: Option<fn(&AccountRead<'_>) -> Result<Account, Error>> = Some(ton_net::verify_account);
+    let _ = ValidatorSet::from_config;
+    let _ = AccountRead::masterchain;
+    let _ = ton_net::verify_account;
 }
 
 /// Address parsing and the configuration reader.
@@ -103,6 +105,6 @@ fn the_reader_and_the_parser_are_here() {
 fn the_trust_vocabulary_is_here() {
     // `Verified` has no public constructor by design, so what is asserted is that the name
     // resolves and carries its parameter, not that one can be built here.
-    let _: Option<fn(Verified<Account>) -> Account> = Some(Verified::into_value);
+    let _ = Verified::<Account>::into_value;
     assert_eq!(VERIFY_EPOCH, 2);
 }
