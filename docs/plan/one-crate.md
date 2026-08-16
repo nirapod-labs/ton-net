@@ -278,8 +278,9 @@ Every number here was counted, and where a count is a floor rather than a measur
 | of the same 183, self-references inside the crate they name | 89 |
 | path edits needed in `bindings/node` | **0** |
 | `pub` items declared across the six crates | 451 |
-| of those, already on a private module path and therefore already unreachable | 362 |
-| **`pub` items that genuinely lose a boundary** | **89** |
+| of those, on a private module path, where the keyword names nothing outside the crate | 368 |
+| of those, declared at a crate root rather than inside any module | 1, `VERIFY_EPOCH` |
+| **`pub` items that genuinely lose a boundary** | **82** |
 | `pub` items reached by nothing at all, a floor on what can drop | 93 |
 | integration test targets | 17 |
 | **test target name collisions** | **1**, `mainnet`, three ways |
@@ -312,11 +313,43 @@ git grep -c -E '^[[:space:]]*#\[(tokio::)?test' 6bddcd3 -- crates bindings \
 
 Nine of the 183 sit in `spikes/`, which the workspace excludes and which keeps its own lockfile. They are counted because the spike reaches the crates by path and a merge breaks it, not because a workspace member reaches them.
 
+The `pub` rows split the same way, and the reading is one regex over declarations. Fields are excluded because a field's reach is its type's, and `pub use` is excluded because a re-export is not a declaration:
+
+```sh
+pub_decl='^[[:space:]]*pub (fn|struct|enum|trait|const|static|type|mod|async fn|unsafe fn) '
+
+# 451. The same reading per crate gives cell 273, tl 32, adnl 22,
+# lite 16, block 66 and ton-net 42, which sum to it
+git grep -h -E "$pub_decl" 6bddcd3 -- 'crates/*/src/*.rs' | wc -l
+
+# which root modules are public, which is what splits the 451
+git grep -n -E '^[[:space:]]*(pub )?mod ' 6bddcd3 -- 'crates/*/src/lib.rs'
+
+# 368 on a private module path: the three crates whose every root module is
+# private, and ton-net-block's five that are, with the crate roots left out
+git grep -h -E "$pub_decl" 6bddcd3 \
+  -- 'crates/ton-net-cell/src/' 'crates/ton-net-lite/src/' 'crates/ton-net/src/' \
+     'crates/ton-net-block/src/' ':!crates/ton-net-block/src/chain.rs' \
+     ':!crates/ton-net-block/src/proof.rs' ':!crates/ton-net-block/src/signature.rs' \
+     ':!crates/ton-net-block/src/validators.rs' ':!crates/*/src/lib.rs' | wc -l
+
+# 82 on a public one: ton-net-tl and ton-net-adnl entire, and ton-net-block's
+# four public modules with the four pub mod lines that declare them
+git grep -h -E "$pub_decl" 6bddcd3 \
+  -- 'crates/ton-net-tl/src/' 'crates/ton-net-adnl/src/' \
+     'crates/ton-net-block/src/chain.rs' 'crates/ton-net-block/src/proof.rs' \
+     'crates/ton-net-block/src/signature.rs' 'crates/ton-net-block/src/validators.rs' \
+     'crates/ton-net-block/src/lib.rs' | wc -l
+
+# the 451st, declared at a crate root rather than inside any module
+git grep -n -E "$pub_decl" 6bddcd3 -- 'crates/*/src/lib.rs' | grep -v 'pub mod'
+```
+
 Three of these change the shape of the work.
 
 **The binding needs no edits.** `bindings/node/src/lib.rs` names `ton_net::` twenty-three times and names none of the five lower crates. It moves through this migration untouched.
 
-**The visibility work is 89 items, not 451.** `ton-net-cell`, `ton-net-lite` and `ton-net` declare every root module private, so 362 of the 451 `pub` items are already unreachable from outside their crate and changing their keyword is cosmetic. The items that genuinely lose a boundary sit in the three crates that declare `pub mod` at their root: `ton-net-tl` (32), `ton-net-adnl` (22), and `ton-net-block`'s four public modules (28).
+**The visibility work is 82 items, not 451.** `ton-net-cell`, `ton-net-lite` and `ton-net` declare every root module private, and `ton-net-block` declares five of its nine that way, so 368 of the 451 `pub` items sit on a private module path and the keyword names nothing outside the crate by that path. The 82 that genuinely lose a boundary sit in the three crates that declare `pub mod` at their root: `ton-net-tl` (32), `ton-net-adnl` (22), and `ton-net-block`'s four public modules together with the four `pub mod` lines that declare them (28). **The two parts leave a residual of one, which is named rather than adjusted away:** 368 plus 82 is 450, and the 451st is `pub const VERIFY_EPOCH` at `crates/ton-net/src/lib.rs:117`, the only one of the 451 declared at a crate root rather than inside a module. It is on no private path and it is public in the merged crate too, so it belongs in neither column.
 
 **The 93 that nothing reaches are not all free to drop.** Some are named in a `pub use` list and are therefore published API with no in-tree user, so removing them is a breaking change to a published crate rather than a cleanup. And the 93 is a floor: 49 of the items counted as reached have names too generic for a grep to separate a real call from a collision (`new`, `len`, `parse`, `hash`, `verify`), so the true figure is higher and needs type information to settle.
 
