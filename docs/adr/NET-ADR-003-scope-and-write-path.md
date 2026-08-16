@@ -9,6 +9,11 @@ superseded-by: none
 
 # NET-ADR-003: Client scope, and the write path
 
+Where this record counts crates it describes the tree as it stood when the decision was taken.
+Six library crates are now one, and what that leaves standing is at the end, under
+[Since acceptance](#since-acceptance). The surface this record fixes, the write path within it,
+and the five invariant trust properties are unaffected.
+
 ## Context
 
 NET-ADR-001 fixes what ton-net is for, and NET-ADR-002 fixes the architecture that carries
@@ -171,3 +176,27 @@ The out-of-scope boundary is observable as an absence: no crate serves DHT value
 peers, exchanges full blocks as a participant, or produces blocks. The write path's floor is
 observable when it is built, as a real transfer sent and then read back in a proven account read
 (NET-ADR-001).
+
+## Since acceptance
+
+The six library crates are one crate, `ton-net`, whose source is `core/src` (NET-ADR-009). Where
+a record of this vintage carries a `crates/ton-net-x/src/y.rs` anchor it reads `core/src/x/y.rs`,
+with `ton-net-block` the one exception: its decoding half is `tlb` and its checking half is
+`proof`. This record carries no anchor of either kind. Its Verification list was pointed at
+`core/` in place rather than left to that mapping, so what a reader follows there resolves
+today: `core/src/verified.rs` gives `Verified<T>` a `pub(crate)` constructor and no public one,
+and `core/src/client/sync.rs` is where the stale-head and clock refusals live, under `client`
+rather than beside it.
+
+What the collapse leaves stale is the crate as a unit of count, in two places.
+
+The fifth invariant of decision 3 reads "every crate that decodes bytes from a peer". There is
+one, and the deny block and the unsafe-code forbid sit once at the top of `core/src/lib.rs`,
+which the Verification list already records. The invariant is unchanged in what it requires; the
+plural is what has gone.
+
+The absence sentence closing the Verification section reads "no crate serves DHT values to other
+peers, exchanges full blocks as a participant, or produces blocks". Read it as no module:
+`core/src/lib.rs` declares `adnl`, `cell`, `client`, `lite`, `proof`, `tl` and `tlb` public and
+nothing else, and none of them is any of those three things. The boundary is observable the same
+way it was, one level down.
