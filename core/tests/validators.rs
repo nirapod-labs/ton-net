@@ -15,12 +15,12 @@
 //!
 //! Two tests here are **constructed rather than captured**, and each says so at its own
 //! head. They cover the preference for configuration parameter 35 over 34. Every cell
-//! they use is mainnet's, but the arrangement is this file's, because mainnet does not
-//! produce the arrangement: the deployed governance contract rotates the next set
-//! straight into 34 and writes 35 nowhere, and parameter 35 is absent from the
-//! configuration at every block captured here and from the mainnet configuration read on
-//! 2026-08-16. A capture would additionally establish that a real configuration carrying
-//! the parameter decodes and verifies end to end; nothing offline reaches that.
+//! they use is mainnet's; the arrangement is this file's, because no capture of the
+//! arrangement was available to take. Parameter 35 is absent from the configuration of
+//! every key block captured here, and from the mainnet and testnet configurations read
+//! on 2026-08-16. What a capture would additionally establish is that a real
+//! configuration carrying the parameter decodes and verifies end to end, and nothing
+//! offline reaches that.
 
 use ton_net::cell::Builder;
 use ton_net::cell::Cell;
@@ -395,9 +395,8 @@ fn a_captured_configuration_shows_parameter_35_absent_rather_than_pruned() {
 fn parameter_35_answers_where_the_configuration_carries_it() {
     // **A constructed fixture.** Both parameter cells below are mainnet bytes, taken
     // from the two captured rounds, and so is the configuration dictionary they sit in.
-    // What is constructed is the placement: mainnet's own governance contract rotates
-    // the next set straight into 34 and writes 35 nowhere, so no captured key block
-    // carries the parameter and this arrangement of real cells is as close as an
+    // What is constructed is the placement: no captured key block here carries 35, and
+    // none was found to capture, so this arrangement of real cells is as close as an
     // offline test reaches. What it does not establish is that a mainnet configuration
     // carrying 35 decodes and verifies end to end, which only a capture would.
     let a = link(ORDINARY);

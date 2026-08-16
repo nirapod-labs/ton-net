@@ -9,11 +9,20 @@
 //! Two configuration parameters can hold the round in force. Parameter 34 is the
 //! standing set and parameter 35 the temporary one, and the rule is **35 when the
 //! configuration carries it, 34 otherwise**, with nothing else conditioning the choice:
-//! not the block's generation time, and not the window either set names. Reading 34
-//! unconditionally is wrong precisely where it costs most, since 35 is what a rotation
-//! installs, and it is wrong quietly: the set that comes back is a real set that simply
-//! did not sign this block, so the weight threshold is missed rather than the parameter
-//! refused, and the refusal arrives under the wrong name.
+//! not the block's generation time, and not the window either set names. That is the
+//! selection the reference implementation's configuration accessor performs, and the
+//! reason to copy it is that a set read from the wrong parameter fails quietly: what
+//! comes back is a real set that simply did not sign the block in hand, so the weight
+//! threshold is missed rather than the parameter refused, and the refusal arrives under
+//! a name that sends a reader looking at signatures.
+//!
+//! **Parameter 35 is not what a mainnet rotation installs**, which is worth saying
+//! because the opposite is easy to assume from the name. No configuration read while
+//! this was written carried the parameter at all: neither the mainnet nor the testnet
+//! configuration on 2026-08-16, nor any of the key blocks captured under
+//! `tests/fixtures/`. So the rule here is conformance to the reference's selection, not
+//! the repair of anything this tree was seen refusing, and a configuration carrying the
+//! parameter is a case the tests reach only by construction.
 //!
 //! **A pruned parameter 35 is not an absent one.** The configuration arrives inside a
 //! Merkle proof, so a lookup answers found, absent, or unknown, and only the middle
