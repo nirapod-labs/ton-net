@@ -46,13 +46,13 @@ validator signatures rather than trusting the server that sent them.
 
 Working today:
 
-- The TL codec (`ton-net-tl`), ADNL over TCP (`ton-net-adnl`), and the liteserver
-  read layer (`ton-net-lite`): masterchain info, account state, and block proof.
-- The cell model and bag-of-cells codec (`ton-net-cell`): parsing, building,
+- The TL codec (`tl`), ADNL over TCP (`adnl`), and the liteserver
+  read layer (`lite`): masterchain info, account state, and block proof.
+- The cell model and bag-of-cells codec (`cell`): parsing, building,
   representation hashing, exotic cells and level masks, the dictionary, and Merkle
   proof verification.
-- The block structures and the proof engine (`ton-net-block`), and block sync in the
-  `ton-net` facade: a walk from the key block the config pins to the network's head,
+- The block structures (`tlb`), the proof engine (`proof`), and block sync in the
+  facade: a walk from the key block the config pins to the network's head,
   checking that more than two-thirds of the validator set has signed at every link
   ([NET-ADR-005], [NET-ADR-006]).
 - The verified-read facade. `Client::account` returns `Verified<Account>`, a type
