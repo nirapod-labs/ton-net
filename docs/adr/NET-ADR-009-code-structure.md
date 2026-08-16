@@ -9,6 +9,11 @@ superseded-by: none
 
 # NET-ADR-009: Flat layered crates, and how a crate grows
 
+Decisions 1 through 3 and the first rejected alternative no longer describe the tree. The
+six crates are one crate, and what replaced them is at the end, under
+[Since acceptance](#since-acceptance); the text above it is left as it was written.
+Decisions 4 through 7 stand unchanged and the module tree follows them.
+
 ## Context
 
 NET-ADR-002 fixes the architecture: the protocol and all of the verification are one audited
@@ -172,3 +177,63 @@ it. This record fixes the code shape and does not change the custody position.
 - The visibility currency is observable. A child exposes its specialization upward with
   `pub(super)`, the trunk re-exports outward with `pub use`, and the crate root declares every
   module private and names the public surface in one place.
+
+## Since acceptance
+
+The six crates are one crate. `core/Cargo.toml` declares `name = "ton-net"`, and the root
+`Cargo.toml` lists two members, `core` and `bindings/node`, with `core` the only default
+member. There is no `crates/` directory. Decisions 1, 2 and 3 fixed the multi-crate split and
+no longer describe the tree; decision 2's virtual manifest survives the collapse, since the
+root `Cargo.toml` still carries `[workspace]` with no `[package]`, one version in
+`[workspace.package]`, and one line per dependency in `[workspace.dependencies]`. Decisions 4
+through 7 are untouched, and the module tree is built to them: `pub(super)` is still the
+currency a child exposes to its parent.
+
+**What the layer names became.** Each of the five lower crates is a module of the same name
+inside `ton-net`, except that the block crate's two halves are now two modules. `core/src/lib.rs`
+declares `adnl`, `cell`, `client`, `lite`, `proof`, `tl` and `tlb` public, and `address`,
+`codec`, `config`, `error` and `verified` private and re-exported at the root. `tlb` holds
+what `ton-net-block` decoded, the account, block, coins and shard structures; `proof` holds
+what it checked, the chain walk, the validator handling and the signature rule. The facade is
+no longer a crate but the root plus `client`, whose children are `client/proof.rs` and
+`client/sync.rs`.
+
+**The first half of the rejected alternative was false about the tree it was written for.**
+The claim was that a single library has no enforced layering. The six crates enforced nothing
+either, and the reason is invisible in every manifest: `std` needs no dependency edge. A
+`std::net::TcpStream` opened inside the old `ton-net-block` compiled with no manifest change
+and nothing to notice, and a `tokio` line added to that same manifest cleared every check in
+`just gate` in silence. A dependency graph was the wrong instrument, not a weakened one.
+
+What replaces it is `scripts/check-layers.mjs`, which reads source text rather than manifests.
+It holds four deciding layers, `cell`, `tlb`, `proof` and `tl`, to naming nothing above them:
+not `crate::adnl`, `crate::lite` or `crate::client`, not `tokio` or `getrandom`, and not the
+reaches through `std` that arrive with no edge at all, the socket, the filesystem, the
+process, the environment, a thread, and both clocks. `lite` is held separately to not naming
+`cell`, because a liteserver answer leaves that layer as the bytes it arrived as. One reach is
+permitted rather than absent and is named as such: `std::thread` stays available under
+`core/src/cell/boc/`, where splitting a finalization wave across scoped threads is what the
+`parallel` feature buys.
+
+The absence is read twice. A matcher that matches nothing passes an absence check for free,
+so every refusal is first run against generated probes built to trip it, and the same reading
+then has to find three edges that are supposed to be present, `tlb` reaching `cell` and
+`proof` reaching both. A pattern that has quietly stopped matching reports itself broken
+rather than reporting the tree clean. That second reading is the part decision 3 never had.
+
+The check is narrower than decision 3's claim in one place worth naming. It does not refuse
+`crate::proof` from `tlb`, and the two do name each other: `core/src/tlb/block.rs` reaches
+`verify_merkle_proof` while `core/src/proof.rs` reaches the structures in `tlb`. Both halves
+were one crate before the collapse, so no edge existed there to point the wrong way, and
+splitting them into two modules is what made the pair visible. The property held today is
+that the deciding layers name nothing above them, which is a weaker statement than an acyclic
+graph and is stated as the weaker one.
+
+**The second half of the alternative is true of a naive merge and false of this one.** A
+consumer that wants only the cell model was said to pull the transport and the network with
+it. `core/Cargo.toml` puts the socket and the per-session randomness behind one feature,
+`net = ["dep:tokio", "dep:getrandom"]`, on by default. Under `default-features = false` the
+build carries the cell engine, the typed structures, the proof engine, the ADNL handshake and
+frame crypto, `Verified`, address parsing and the config reader, with no tokio and no socket
+in the graph. That is more than `ton-net-cell` alone gave a consumer, not less, and it is one
+dependency line rather than a choice among five.
