@@ -292,9 +292,9 @@ fn read_depth(data: &[u8], at: usize) -> Result<u16, CellError> {
 
 /// Computes every representation hash and depth a cell has.
 ///
-/// The rules follow the cell specification. The representation is
-/// `d1 || d2 || body || each reference's depth || each reference's hash`, hashed with
-/// SHA-256, where `d1` carries the level mask as it applies at the level being computed.
+/// The rules follow the cell specification. The representation is `d1 || d2 || body || each
+/// reference's depth || each reference's hash`, hashed with SHA-256, where `d1` carries the
+/// level mask as it applies at the level being computed.
 /// Three cases shape the rest:
 ///
 /// - A pruned branch below its own level answers with the hash and depth it stored for

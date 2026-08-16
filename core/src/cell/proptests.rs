@@ -345,10 +345,11 @@ proptest! {
     /// reachable. A fresh builder never runs out of reference slots, so the bare form
     /// refuses only with no bit left for the discriminator and the `Maybe` form only with
     /// fewer than two, which is two of the thousand and twenty-four widths. Those two are
-    /// enumerated rather than described by
-    /// [`the_refusing_widths_are_the_last_two`](super::builder::either::tests::the_refusing_widths_are_the_last_two).
-    /// A uniform draw finds that region so rarely that the refusal arm below was dead when
-    /// it was written uniformly.
+    /// enumerated rather than described by `the_refusing_widths_are_the_last_two` in
+    /// `builder/either.rs`, which is named rather than linked because both modules are
+    /// `#[cfg(test)]` and a link out of one would resolve for nobody. A uniform draw finds
+    /// that region so rarely that the refusal arm below was dead when it was written
+    /// uniformly.
     #[test]
     fn an_either_round_trips_or_refuses_having_written_nothing(
         payload in built_tree(),

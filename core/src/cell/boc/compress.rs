@@ -4,9 +4,8 @@
 //! LZ4 compression of a serialized bag of cells.
 //!
 //! TON compresses a bag of cells with LZ4, and this reads and writes that form. [`compress`]
-//! and [`decompress`] work on the bytes a [`serialize_boc`] gives and a
-//! [`parse_boc`] reads; [`compress_boc`] and [`decompress_boc`] do the two
-//! steps at once.
+//! and [`decompress`] work on the bytes a [`serialize_boc`] gives and a [`parse_boc`] reads;
+//! [`compress_boc`] and [`decompress_boc`] do the two steps at once.
 //!
 //! The decode side is on the untrusted boundary. A compressed bag names the length it
 //! expands to, and [`decompress`] refuses a length past a hard cap before anything is

@@ -20,7 +20,7 @@ default:
     @just --list
 
 # Everything the hermetic CI gate runs. No network.
-gate: fmt-check lint typos licenses workflows versions default-deps unsafe-posture layers census test sans-io doc
+gate: fmt-check lint typos licenses workflows versions default-deps unsafe-posture layers doc-wrap census test sans-io doc
 
 # A moved action tag is somebody else's code in this build. Also checks that a workflow
 # states what it may write and that a fork's schedule does not run it.
@@ -44,6 +44,12 @@ versions:
 # the document.
 census:
     node scripts/check-surface-census.mjs
+
+# A documentation paragraph edited without being reflowed: a short line in the middle of one,
+# or a line running past its neighbours. rustfmt would do this and cannot be asked to, since
+# `wrap_comments` is nightly-only and this repository does not carry nightly keys.
+doc-wrap:
+    node scripts/check-doc-wrap.mjs
 
 # Whether an optional dependency is still pulled by its feature and by nothing else.
 # `test` compiles and runs the default build already, so what is left unchecked is which

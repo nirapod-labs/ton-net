@@ -15,10 +15,9 @@
 //! augmented one also carries a summary of its subtree, and rebuilding it recomputes those
 //! summaries rather than copying them forward. The two differ only in what a node carries
 //! between its label and its value, so the descent, the split, the rebuild and the bulk
-//! build are written
-//! once over a private `Shape` seam and shared. The label codec that gives a dictionary
-//! its one canonical hash lives in the `label` submodule, beside the inline run a walk
-//! reads each label into.
+//! build are written once over a private `Shape` seam and shared. The label codec that
+//! gives a dictionary its one canonical hash lives in the `label` submodule, beside the
+//! inline run a walk reads each label into.
 
 use core::borrow::Borrow;
 
