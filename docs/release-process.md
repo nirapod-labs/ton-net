@@ -22,13 +22,13 @@ That one version rides every artifact the library publishes:
 
 | Registry | Artifacts | Published |
 | --- | --- | --- |
-| crates.io | `ton-net-tl`, `ton-net-cell`, `ton-net-block`, `ton-net-adnl`, `ton-net-lite`, `ton-net` | six crates |
+| crates.io | `ton-net` | one crate |
 | npm | `ton-net`, plus seven `@nirapod-labs/ton-net-<target>` packages | eight packages |
 
-Seven crate manifests carry the version: the six library crates above and the Node
-binding crate `ton-net-node`. Six of the seven publish to crates.io. The binding
-crate sets `publish = false` in `bindings/node/Cargo.toml` and reaches consumers
-through npm instead.
+Two crate manifests carry the version: the library crate `ton-net`, whose manifest
+is `core/Cargo.toml`, and the Node binding crate `ton-net-node`. One of the two
+publishes to crates.io. The binding crate sets `publish = false` in
+`bindings/node/Cargo.toml` and reaches consumers through npm instead.
 
 On npm the version sits in eight package manifests: the main `ton-net` package and
 one per-platform package for each target the binding builds. The main package lists
@@ -46,6 +46,27 @@ One changelog, `CHANGELOG.md`, covers the whole library. A release is tagged
 `v{version}`. Both are settled in
 [NET-ADR-008](adr/NET-ADR-008-versioning-and-bindings.md); the tag name is fixed in
 `release-plz.toml` as `git_tag_name = "v{{ version }}"`.
+
+## The five retired crate names
+
+crates.io carries five names this library no longer builds: `ton-net-tl`,
+`ton-net-cell`, `ton-net-adnl`, `ton-net-lite` and `ton-net-block`. They are
+published at `0.4.2`, the last version released before the six library crates
+collapsed into one, and each is now a module of the same name inside `ton-net`
+([NET-ADR-009](adr/NET-ADR-009-code-structure.md)), with `ton-net-block` split into
+the `tlb` and `proof` modules.
+
+They are frozen, not yanked. A yank breaks every build that pinned one of them, and
+a pre-1.0 library that yanks its own published names is not one anybody should take
+a dependency on. The registry's own asymmetry is the reason the choice is available
+at all: crates.io yanks but never deletes, so a name that has shipped is answered by
+publishing again rather than by withdrawal.
+
+Each of the five takes one final release whose `lib.rs` is a deprecation notice
+naming the module inside `ton-net` that replaced it, so a reader who lands on the
+old docs.rs page is told where the code went. After that release they stop moving:
+no version of any of the five ever rises again, and the library version in the table
+above names `ton-net` alone.
 
 ## A milestone tag is not a registry publish
 
@@ -117,7 +138,7 @@ Version consistency across the two registries is held by
 `scripts/check-versions.mjs`, whose source of truth is the Cargo workspace version
 read through `cargo metadata`. Its `--fix` stamps that version across the eight npm
 manifests and the lockfile; its default mode reports drift and fails. The workflow's
-last step runs it to prove one version sits in all seven crates and all eight
+last step runs it to prove one version sits in both crate manifests and all eight
 packages before anyone signs a tag over it.
 
 `release-plz.toml` also sets `git_tag_name` and `git_release_enable = true`, which
@@ -161,14 +182,11 @@ order.
   the declared version (`scripts/check-versions.mjs`). The tag is not evidence the
   tree is good: the commit it points at may never have had a full run, and
   publishing is irreversible, so the gate runs again here rather than being assumed.
-- **crates** publishes the six library crates to crates.io in dependency order:
-  `ton-net-tl`, `ton-net-cell`, `ton-net-adnl`, `ton-net-block`, `ton-net-lite`,
-  `ton-net`. crates.io resolves a dependency at publish time, so a crate goes out
-  only after the crates it needs. `cargo publish` blocks until the version it
-  uploaded is visible in the index, which is exactly the wait the next crate needs,
-  so nothing sleeps between them. `--no-verify` is deliberately absent: each package
-  is built from the tarball that will ship, which is the last chance to catch a crate
-  that compiles in the workspace but not on its own.
+- **crates** publishes `ton-net` to crates.io. There is one crate and therefore no
+  dependency order to hold to, which is what the collapse to a single library crate
+  removed from this job. `--no-verify` is deliberately absent: the package is built
+  from the tarball that will ship, which is the last chance to catch a crate that
+  compiles in the workspace but not on its own.
 - **npm** finds the `build-binding.yml` run for the same commit, downloads the
   binaries it produced, places each in its platform package, and runs
   `bindings/node/scripts/check-package.mjs`. It then publishes the seven platform
@@ -205,9 +223,9 @@ A trusted publisher can only be attached to a crate or package that already exis
 and neither registry has a pending-publisher equivalent, so the first release cannot
 use this path. The bootstrap is a one-time sequence:
 
-1. Publish the first version of the six crates and eight packages by hand, with a
+1. Publish the first version of the crate and the eight packages by hand, with a
    token.
-2. Configure the fourteen trusted publishers against `release.yml`.
+2. Configure the nine trusted publishers against `release.yml`.
 3. Revoke the tokens.
 
 Every release after that is the workflow. Until the bootstrap has happened,
