@@ -276,7 +276,10 @@ fn read_validator(s: &mut Slice<'_>) -> Result<Validator, BlockError> {
 /// A validator's short id: the SHA-256 of its key in the TL `pub.ed25519` form.
 ///
 /// This is the value a signature names its signer by, and the same computation the ADNL
-/// handshake performs on a server key.
+/// handshake performs on a server key. The two are written separately: this one runs once
+/// per validator over a set of several hundred on every link of a chain, and the codec's
+/// own serializer allocates. `the_short_id_is_the_serialized_key_hashed` holds them to the
+/// same bytes, which is a test the six-crate split could not have written.
 #[must_use]
 pub fn short_id(public_key: &[u8; 32]) -> [u8; 32] {
     let mut hasher = Sha256::new();
@@ -288,6 +291,20 @@ pub fn short_id(public_key: &[u8; 32]) -> [u8; 32] {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The hand-written TL form against the one the codec writes.
+    ///
+    /// `short_id` spells `pub.ed25519` itself rather than calling the serializer, so the
+    /// constructor id and the field order are duplicated. A change to either side of that
+    /// duplication that is not made to the other lands here.
+    #[test]
+    fn the_short_id_is_the_serialized_key_hashed() {
+        let key = [7u8; 32];
+        let mut hasher = Sha256::new();
+        hasher.update(crate::tl::serialize(crate::tl::adnl::PublicKey { key }));
+        let through_the_codec: [u8; 32] = hasher.finalize().into();
+        assert_eq!(short_id(&key), through_the_codec);
+    }
 
     /// A set with a chosen weight and nothing else, for testing the threshold alone.
     ///

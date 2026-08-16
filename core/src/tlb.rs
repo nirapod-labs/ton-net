@@ -13,15 +13,9 @@
 //! and libraries, and a block carries its whole transaction set; none of that is read
 //! here.
 //!
-//! # Trust
-//!
-//! Decoding and checking are separate, and they are separate modules: this one decodes,
-//! and [`crate::proof`] checks. An [`Account`] from [`Account::decode`] is bytes a server
-//! sent, believed because the server said so. The same type from
-//! [`crate::proof::verify_account`] was checked against a block hash the caller trusts.
-//! Nothing about the value records the difference, so the caller keeps track of which
-//! call produced it; [`Verified`](crate::Verified) is where that distinction is carried
-//! in the type.
+//! Nothing here checks anything. An [`Account`] from [`Account::decode`] is bytes a server
+//! sent, believed because the server said so; [`crate::proof`] is what turns one into an
+//! answer, and [`Verified`](crate::Verified) is what records that it did.
 //!
 //! # Examples
 //!

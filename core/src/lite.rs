@@ -4,7 +4,7 @@
 //! The liteserver read client: one query in, one decoded answer out.
 //!
 //! [`LiteClient`] speaks the liteserver query protocol over an ADNL connection and
-//! decodes the read responses into the domain types this crate defines. Nothing here
+//! decodes the read responses into the domain types this module defines. Nothing here
 //! checks anything: a read comes back as a [`ServerReported`] value, and the proof
 //! bytes travel with it for the layer above to verify.
 //!
