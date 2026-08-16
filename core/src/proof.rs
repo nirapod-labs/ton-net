@@ -281,7 +281,7 @@ pub fn verify_shard_block(
 
 /// Checks an account read against the block hash the caller trusts.
 ///
-/// This answers with [`BlockError`], the engine's own error. `ton_net::verify_account` is
+/// This answers with [`BlockError`], the engine's own error. [`crate::client::verify_account`] is
 /// the identical check at the root's [`Error`](crate::Error) type, and is the one a caller
 /// working through the root wants.
 ///

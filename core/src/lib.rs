@@ -140,7 +140,7 @@ mod verified;
 pub const VERIFY_EPOCH: u32 = 2;
 
 pub use address::Address;
-pub use client::proof::verify_account;
+pub use client::verify_account;
 #[cfg(feature = "net")]
 #[cfg_attr(docsrs, doc(cfg(feature = "net")))]
 pub use client::Client;

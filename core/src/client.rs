@@ -3,7 +3,9 @@
 
 //! The client: one ADNL channel to one liteserver, with reads over it.
 
-pub mod proof;
+mod proof;
+
+pub use proof::verify_account;
 
 // The walk exists to serve `Client::sync` and reads the local clock to judge freshness,
 // which is a thing a target with no clock cannot answer. Both reasons point the same way,
