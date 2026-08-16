@@ -130,6 +130,11 @@ pub struct GetBlockProof {
 /// same bytes offered again after it has moved on are a fresh offer. That is an external
 /// fact about the reference node's liteserver, and it is stated here because the bytes
 /// this type lays out are what that hash is taken over.
+///
+/// The request rather than the message inside it, and the distinction is not incidental:
+/// the same node deduplicates a message arriving over its broadcast path by hashing the
+/// message bytes alone. Two paths, two keys, so what is written here holds on this one and
+/// is not a property of the node.
 #[derive(TlRead, TlWrite, Debug, Clone, PartialEq, Eq)]
 #[tl(boxed, id = 0x690ad482)]
 pub struct SendMessage {
