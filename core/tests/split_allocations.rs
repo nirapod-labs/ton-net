@@ -22,9 +22,19 @@
 //! one carries a leaf wave of two full shares and the other a leaf wave one cell short, which is
 //! the width at which the dispatch stops splitting. Their cell counts differ by that one cell,
 //! and their allocation counts differ by that cell plus whatever the split cost.
+//!
+//! There are two things a run of this can establish and it says on the way which one it did.
+//! Where the wave is split, the difference is that leaf and what the split cost, and the equality
+//! at the end is a reading of the split path. Where it is not, because the `parallel` feature is
+//! off or the machine reports a single thread, the difference is the leaf alone and nothing about
+//! splitting was measured. The second passes rather than fails, a single core being a legitimate
+//! machine, and it reports itself on stderr as it goes: a gate that measured nothing otherwise
+//! reads exactly like a gate that measured and found nothing, and those have to be told apart
+//! from the log.
 
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::hint::black_box;
+use std::io::Write;
 use std::num::NonZeroUsize;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -192,6 +202,26 @@ fn a_split_wave_is_written_into_one_buffer() {
 
     let workers = workers();
     let splits = cfg!(feature = "parallel") && workers > 1;
+
+    // A run with no split in it holds the extra leaf and nothing else, which is a true statement
+    // and an empty one, so it says so where it can be read afterwards. Failing instead would be
+    // wrong: the feature is off by default and a machine with one thread is a machine this
+    // library is for. Going quiet would be worse, because a gate that measured nothing looks
+    // from the outside exactly like a gate that measured and found nothing. Written to the
+    // process's own stderr rather than through `eprintln!`, which the harness captures and then
+    // drops for a test that passed.
+    if !splits {
+        let why = if cfg!(feature = "parallel") {
+            "this machine reports one thread"
+        } else {
+            "the parallel feature is off"
+        };
+        let _ = writeln!(
+            std::io::stderr(),
+            "split_allocations: {why}, so no wave was split and what a split costs went \
+             unmeasured. What this run establishes is the one extra leaf alone."
+        );
+    }
 
     // What the split is allowed to cost: the handles and the spawns, which belong to the
     // standard library, and one buffer for the wave's outcomes, which is this crate's. Nothing
