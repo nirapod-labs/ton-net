@@ -165,11 +165,12 @@ impl<T: Transport> LiteClient<T> {
     ///
     /// **What that refusal establishes, at its exact scope.** These are external facts
     /// about liteserver behaviour rather than anything this tree checks. On this path the
-    /// server deduplicates on a hash of the whole serialized request, so it is these exact
-    /// bytes and not the message inside them that are compared, and the comparison
-    /// covers a bounded recent window rather than all of history. On this path, because
-    /// the same node keys its broadcast path on the message bytes instead. Within that window an
-    /// identical request reached this server and the server did not refuse it. That is
+    /// server deduplicates on a hash of the whole serialized request, not the message
+    /// inside it, because the same node keys its broadcast path on the message bytes
+    /// instead. So it is these exact bytes that are compared, and the comparison covers
+    /// a bounded recent
+    /// window rather than all of history. Within that window an identical request reached
+    /// this server and the server did not refuse it. That is
     /// less than saying the earlier offer succeeded: an entry is recorded before the
     /// message is run and removed again if the run fails, so a second request arriving
     /// while the first is still being run is refused as a duplicate too. Nothing about
