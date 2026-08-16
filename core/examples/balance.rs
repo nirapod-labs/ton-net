@@ -10,7 +10,7 @@
 //! The walk this does once is the expensive part, and [`resume`] shows how not to
 //! pay for it twice.
 //!
-//! [`resume`]: https://github.com/nirapod-labs/ton-net/blob/main/crates/ton-net/examples/resume.rs
+//! [`resume`]: https://github.com/nirapod-labs/ton-net/blob/main/core/examples/resume.rs
 
 use ton_net::{Address, Client, Config};
 

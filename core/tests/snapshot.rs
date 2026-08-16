@@ -108,7 +108,7 @@ async fn most_of_the_bundled_liteservers_still_answer() {
     assert!(
         reachable.len() >= MIN_REACHABLE,
         "only {} of {total} bundled liteservers answered, below the floor of {MIN_REACHABLE}. \
-         The snapshot in crates/ton-net/src/mainnet.config.json needs refreshing from the \
+         The snapshot in core/src/mainnet.config.json needs refreshing from the \
          published mainnet config before the next release.",
         reachable.len()
     );
@@ -142,6 +142,6 @@ async fn the_pinned_block_has_not_receded_out_of_reach() {
         behind <= MAX_BLOCKS_BEHIND,
         "the pinned init block is {behind} masterchain blocks behind the head, past the \
          bound of {MAX_BLOCKS_BEHIND}. Every first sync walks that gap, so the snapshot \
-         in crates/ton-net/src/mainnet.config.json needs refreshing."
+         in core/src/mainnet.config.json needs refreshing."
     );
 }

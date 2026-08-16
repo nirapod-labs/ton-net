@@ -149,25 +149,23 @@ the write path is in scope and that its key contact is the signer seam.
 
 Each invariant is checkable against named code in the current build.
 
-- Anchor from the config, never a server first: `crates/ton-net/src/config.rs` reads the anchor
+- Anchor from the config, never a server first: `core/src/config.rs` reads the anchor
   from the config's `validator.init_block` and names it the only input a verified read trusts
-  from the chain's side; `crates/ton-net/src/client.rs` starts the walk from that block or a
+  from the chain's side; `core/src/client.rs` starts the walk from that block or a
   caller-supplied anchor and uses the server's head only as a target the walk is required to
-  reach; `crates/ton-net/src/lib.rs` and `crates/ton-net/src/verified.rs` state the same in the
-  read's own documentation.
-- A private constructor and a distinct type: `crates/ton-net/src/verified.rs` gives
-  `Verified<T>` a crate-private constructor and no public one, and it is a different type from
-  `ServerReported`; `crates/ton-net/src/lib.rs` states there is no way to turn one into the
-  other.
-- A stale head refused: `crates/ton-net/src/sync.rs` returns a stale error for a proven head
+  reach; `core/src/lib.rs` and `core/src/verified.rs` state the same in the read's own
+  documentation.
+- A private constructor and a distinct type: `core/src/verified.rs` gives `Verified<T>` a
+  crate-private constructor and no public one, and it is a different type from
+  `ServerReported`; `core/src/lib.rs` states there is no way to turn one into the other.
+- A stale head refused: `core/src/client/sync.rs` returns a stale error for a proven head
   older than the bound, and returns a clock error rather than silently passing when the local
-  clock is far behind; `crates/ton-net/src/config.rs` carries the default bound and the setter.
-- The verification epoch: `crates/ton-net/src/lib.rs` defines the epoch and the rule for when it
-  moves, separate from the API version.
-- The decode lints: the identical deny block and the unsafe-code forbid sit at the top of
-  `crates/ton-net-tl/src/lib.rs`, `crates/ton-net-cell/src/lib.rs`,
-  `crates/ton-net-block/src/lib.rs`, `crates/ton-net-adnl/src/lib.rs`,
-  `crates/ton-net-lite/src/lib.rs`, and `crates/ton-net/src/lib.rs`.
+  clock is far behind; `core/src/config.rs` carries the default bound and the setter.
+- The verification epoch: `core/src/lib.rs` defines the epoch and the rule for when it moves,
+  separate from the API version.
+- The decode lints: the deny block and the unsafe-code forbid sit once at the top of
+  `core/src/lib.rs`, which is the whole library. Six crate roots carried the same block
+  before the collapse, and `scripts/check-unsafe-posture.mjs` reads the one that survives.
 
 The out-of-scope boundary is observable as an absence: no crate serves DHT values to other
 peers, exchanges full blocks as a participant, or produces blocks. The write path's floor is

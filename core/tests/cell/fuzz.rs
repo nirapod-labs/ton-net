@@ -51,7 +51,7 @@
 //!
 //! # Running it
 //!
-//! `cargo test -p ton-net-cell fuzz` runs the gate budget. `TON_NET_FUZZ_ITERATIONS` and
+//! `cargo test --all-features fuzz` runs the gate budget. `TON_NET_FUZZ_ITERATIONS` and
 //! `TON_NET_FUZZ_SEED` set how long and from where; `docs/fuzzing.md` covers both and says
 //! what to do with a failure.
 
