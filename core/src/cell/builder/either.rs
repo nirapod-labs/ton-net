@@ -359,6 +359,21 @@ mod tests {
     }
 
     #[test]
+    fn a_refused_maybe_leaves_no_presence_bit_behind() {
+        // The order the module documentation argues for, at the one width that can tell the
+        // two orders apart. One bit is free, so the presence bit would be written and the
+        // field would then fail, leaving a `just$1` with nothing behind it. Deciding first
+        // and writing after is what makes the builder equal to what it was.
+        let mut builder = filled(MAX_BITS - 1);
+        let before = builder.clone();
+        assert!(matches!(
+            builder.store_maybe_either_ref(Some(payload())),
+            Err(CellError::NoRoomForBits { .. })
+        ));
+        assert_eq!(builder, before, "a refused store left the builder alone");
+    }
+
+    #[test]
     fn a_cell_out_of_references_refuses_a_payload_that_does_not_fit_inline() {
         let mut builder = filled(EXACT_FIT_HEADER + 1);
         for _ in 0..MAX_REFS {
