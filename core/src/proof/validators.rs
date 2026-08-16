@@ -6,9 +6,25 @@
 //! This is where a light client most easily goes subtly wrong, so what the reference
 //! implementation does is written down here rather than left to the code.
 //!
-//! Configuration parameter 34 holds the current round: a count of `total` validators, a
-//! count of `main`, a declared total weight, and a dictionary of descriptors keyed by
-//! index. The masterchain set, the one that may sign a masterchain block, is **the first
+//! Two configuration parameters can hold the round in force. Parameter 34 is the
+//! standing set and parameter 35 the temporary one, and the rule is **35 when the
+//! configuration carries it, 34 otherwise**, with nothing else conditioning the choice:
+//! not the block's generation time, and not the window either set names. Reading 34
+//! unconditionally is wrong precisely where it costs most, since 35 is what a rotation
+//! installs, and it is wrong quietly: the set that comes back is a real set that simply
+//! did not sign this block, so the weight threshold is missed rather than the parameter
+//! refused, and the refusal arrives under the wrong name.
+//!
+//! **A pruned parameter 35 is not an absent one.** The configuration arrives inside a
+//! Merkle proof, so a lookup answers found, absent, or unknown, and only the middle
+//! answer licenses reading 34. Every configuration proof captured in this tree covers
+//! the walk to 35 and shows it absent, which is what a server sending the smallest proof
+//! that answers the question produces when it selects the set the same way; the pruned
+//! case is refused as uncovered rather than assumed empty.
+//!
+//! Both parameters carry the same shape: a count of `total` validators, a count of
+//! `main`, a declared total weight, and a dictionary of descriptors keyed by index. The
+//! masterchain set, the one that may sign a masterchain block, is **the first
 //! `min(main, total)` entries of that list, with their weights unchanged**. The reference
 //! implementation may then permute those entries with a seeded generator, but the
 //! permutation is over exactly those entries: it reorders them and changes neither which
@@ -43,8 +59,12 @@ use sha2::{Digest, Sha256};
 use crate::cell::{Dict, Lookup};
 use crate::tlb::BlockError;
 
-/// The configuration parameter holding the current validator set.
+/// The configuration parameter holding the standing validator set.
 const CURRENT_VALIDATORS: i32 = 34;
+
+/// The configuration parameter holding the temporary validator set, which takes
+/// precedence over [`CURRENT_VALIDATORS`] wherever the configuration carries it.
+const CURRENT_TEMP_VALIDATORS: i32 = 35;
 
 /// `validators#11` and `validators_ext#12`
 const VALIDATORS_TAG: u64 = 0x11;
@@ -91,34 +111,48 @@ pub struct ValidatorSet {
 }
 
 impl ValidatorSet {
-    /// Reads the current validator set out of a configuration dictionary.
+    /// Reads the validator set in force out of a configuration dictionary.
     ///
     /// `config` is the root of the dictionary [`crate::tlb::Block::config`] returns.
+    /// Parameter 35 answers where the configuration shows it, and parameter 34 only
+    /// where the configuration shows 35 absent. See the
+    /// [module documentation](self) for why absent and pruned are not the same answer.
     ///
     /// # Errors
     ///
-    /// Returns [`BlockError::Malformed`] if the configuration has no parameter 34 or the
-    /// parameter is inconsistent, [`BlockError::NotCovered`] if the proof prunes away
-    /// the parameter or any descriptor in the subset, and
+    /// Returns [`BlockError::Malformed`] if the configuration shows neither parameter
+    /// present or the parameter it names is inconsistent, [`BlockError::NotCovered`] if
+    /// the proof prunes the walk to parameter 35, prunes the walk to parameter 34 where
+    /// 35 is absent, or prunes any descriptor in the subset, and
     /// [`BlockError::WrongConstructor`] if a tag is not what it should be.
     pub fn from_config(config: &Cell) -> Result<Self, BlockError> {
-        let entry = match Dict::from_root(Some(config.clone()), 32)?
-            .get(&CURRENT_VALIDATORS.to_be_bytes())?
-        {
+        let params = Dict::from_root(Some(config.clone()), 32)?;
+        let entry = match params.get(&CURRENT_TEMP_VALIDATORS.to_be_bytes())? {
             Lookup::Found(entry) => entry,
-            Lookup::Absent => {
-                return Err(BlockError::Malformed(
-                    "a configuration without the validator set",
-                ))
-            }
+            // A pruned branch shows nothing, so falling back here would read 34 out of a
+            // configuration that may well carry 35, which is the wrong set derived in
+            // silence. Only a covered absence licenses the fallback below.
             Lookup::Pruned => return Err(BlockError::NotCovered),
+            Lookup::Absent => match params.get(&CURRENT_VALIDATORS.to_be_bytes())? {
+                Lookup::Found(entry) => entry,
+                Lookup::Absent => {
+                    return Err(BlockError::Malformed(
+                        "a configuration without the validator set",
+                    ))
+                }
+                Lookup::Pruned => return Err(BlockError::NotCovered),
+            },
         };
         // Every configuration parameter is stored behind a reference, so the entry's
         // own slice holds the pointer rather than the value.
         Self::from_cell(entry.slice()?.load_ref()?)
     }
 
-    /// Reads a validator set from the cell holding configuration parameter 34.
+    /// Reads a validator set from the cell one of those two parameters holds.
+    ///
+    /// The two carry the same shape, so this reads either and nothing here distinguishes
+    /// them. Which one a configuration answers with is
+    /// [`from_config`](Self::from_config)'s question.
     ///
     /// # Errors
     ///
