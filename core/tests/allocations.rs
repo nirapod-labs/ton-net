@@ -25,7 +25,9 @@
 //! The counts are taken on the thread the read runs on, which is where the whole of these
 //! reads happens. A wave of cells is split across threads once it holds twice
 //! `CELLS_PER_WORKER`, and neither fixture carries that many cells in total, so no wave of
-//! either leaves this thread and none of these counts goes anywhere it would not be seen.
+//! either leaves this thread and none of these counts goes anywhere it would not be seen. What
+//! a wave that does leave costs is counted in `tests/split_allocations.rs`, which is a target
+//! of its own because counting across threads means a counter shared between tests.
 //!
 //! A dictionary is measured the same way against a different quantity. A descent reads one edge
 //! label per level, so the question there is whether a lookup costs the allocator anything per
