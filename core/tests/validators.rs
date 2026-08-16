@@ -3,28 +3,57 @@
 
 //! The block header and the validator set, read from captured mainnet proofs.
 //!
-//! The fixtures are whole `liteServer.getBlockProof` answers, each one forward link, so
-//! a test reaches the proofs the way the library will: out of a server's reply rather
-//! than out of a hand-cut blob. Each link carries a proof of its source key block's
-//! configuration and a proof of its destination's header.
+//! The fixtures are whole `liteServer.getBlockProof` answers, so a test reaches the
+//! proofs the way the library will: out of a server's reply rather than out of a
+//! hand-cut blob. Every forward link in one carries a proof of its source key block's
+//! configuration and a proof of its destination's header. Most tests below read the
+//! first link of a fixture and nothing turns on which; the one asserting a property of
+//! every captured configuration reads every link of every fixture instead.
 //!
 //! Every expected validator set below was read from tonapi.io on 2026-07-21, at the same
 //! masterchain sequence number, and is recorded here rather than recomputed. That is
 //! what makes this a check: an implementation compared against itself proves only that
 //! it is consistent.
+//!
+//! Two tests here are **constructed rather than captured**, and each says so at its own
+//! head. They cover the preference for configuration parameter 35 over 34. Every cell
+//! they use is mainnet's; the arrangement is this file's, because no capture of the
+//! arrangement was available to take. Parameter 35 is absent from the configuration of
+//! every key block captured here, and from the mainnet and testnet configurations read
+//! on 2026-08-16. What a capture would additionally establish is that a real
+//! configuration carrying the parameter decodes and verifies end to end, and nothing
+//! offline reaches that.
 
+use ton_net::cell::Builder;
+use ton_net::cell::Cell;
 use ton_net::cell::Dict;
 use ton_net::cell::Lookup;
+use ton_net::cell::UsageTree;
 use ton_net::proof;
 use ton_net::proof::ValidatorSet;
 use ton_net::tl::{deserialize, lite};
 use ton_net::tlb::BlockError;
 
-/// One forward link from the block the mainnet config pins.
+/// The parameter holding the standing validator set.
+const CURRENT_VALIDATORS: i32 = 34;
+
+/// The parameter holding the temporary one, which answers wherever it is present.
+const CURRENT_TEMP_VALIDATORS: i32 = 35;
+
+/// Three forward links from the block the mainnet config pins, crossing one rotation.
 const ORDINARY: &str = include_str!("fixtures/chain.hex");
+
+/// The first of those three links, captured on its own.
+const ORDINARY_ONE_LINK: &str = include_str!("fixtures/one-link-ordinary.hex");
 
 /// One forward link across the block where mainnet changed its signed form.
 const SIMPLEX: &str = include_str!("fixtures/one-link-simplex.hex");
+
+/// Every capture this file reads, for the checks that hold over all of them.
+const FIXTURES: [&str; 3] = [ORDINARY, ORDINARY_ONE_LINK, SIMPLEX];
+
+/// How many forward links those captures hold between them.
+const CAPTURED_LINKS: usize = 5;
 
 /// The round key block 46894135 names, as tonapi.io reports it.
 ///
@@ -65,7 +94,8 @@ struct Link {
     config_proof: Vec<u8>,
 }
 
-fn link(text: &str) -> Link {
+/// Every forward link a fixture holds, in order.
+fn links(text: &str) -> Vec<Link> {
     let hex: String = text
         .lines()
         .filter(|line| !line.starts_with('#'))
@@ -77,23 +107,32 @@ fn link(text: &str) -> Link {
         .collect();
 
     let proof: lite::PartialBlockProof = deserialize(&bytes).expect("the fixture decodes");
-    match proof.steps.into_iter().next().expect("one step") {
-        lite::BlockLink::Forward {
-            from,
-            to,
-            to_key_block,
-            dest_proof,
-            config_proof,
-            ..
-        } => Link {
-            from,
-            to,
-            to_key_block,
-            dest_proof,
-            config_proof,
-        },
-        other => panic!("expected a forward link, got {other:?}"),
-    }
+    proof
+        .steps
+        .into_iter()
+        .map(|step| match step {
+            lite::BlockLink::Forward {
+                from,
+                to,
+                to_key_block,
+                dest_proof,
+                config_proof,
+                ..
+            } => Link {
+                from,
+                to,
+                to_key_block,
+                dest_proof,
+                config_proof,
+            },
+            other => panic!("expected a forward link, got {other:?}"),
+        })
+        .collect()
+}
+
+/// The first forward link a fixture holds.
+fn link(text: &str) -> Link {
+    links(text).into_iter().next().expect("at least one step")
 }
 
 fn unhex32(s: &str) -> [u8; 32] {
@@ -101,6 +140,49 @@ fn unhex32(s: &str) -> [u8; 32] {
         .map(|i| u8::from_str_radix(&s[i * 2..i * 2 + 2], 16).expect("hex"))
         .collect();
     bytes.try_into().expect("32 bytes")
+}
+
+/// The configuration dictionary the source key block of a link carries.
+fn config_of(link: &Link) -> Dict {
+    let block = proof::covered_block(&link.config_proof, &link.from.root_hash)
+        .expect("the config proof roots at the key block");
+    let config = block.config().expect("a key block carries a configuration");
+    Dict::from_root(Some(config), 32).expect("a 32-bit dictionary")
+}
+
+/// The cell a configuration parameter sits behind, where the proof covers it.
+fn param_cell(config: &Dict, index: i32) -> Cell {
+    config
+        .get(&index.to_be_bytes())
+        .expect("the lookup runs")
+        .found()
+        .expect("the proof covers the parameter")
+        .slice()
+        .expect("the entry is a slice")
+        .load_ref()
+        .expect("a parameter sits behind a reference")
+        .clone()
+}
+
+/// A configuration dictionary value: one reference to the parameter's own cell.
+fn param_value(cell: Cell) -> Builder {
+    let mut value = Builder::new();
+    value.store_ref(cell).expect("one reference fits");
+    value
+}
+
+/// Marks `cell` and everything below it, so a prune keeps the whole subtree.
+///
+/// [`UsageTree::mark_path`] keeps a cell reachable and stops at it, which is enough to
+/// walk a dictionary to a parameter and not enough to read what the parameter holds: a
+/// validator set's descriptor dictionary hangs below the parameter cell and prunes away
+/// with everything else unmarked. A narrowing meant to leave one parameter readable has
+/// to mark both, the path down and the subtree under.
+fn mark_subtree(usage: &mut UsageTree, cell: &Cell) {
+    usage.mark(cell);
+    for child in cell.refs() {
+        mark_subtree(usage, child);
+    }
 }
 
 /// Reads the validator set the source key block of a link names.
@@ -315,6 +397,143 @@ fn a_config_proof_covers_only_the_parameter_it_answers_for() {
     assert_eq!(
         ValidatorSet::from_cell(&param).expect("it is a validator set"),
         set_of(&link)
+    );
+}
+
+#[test]
+fn every_captured_configuration_shows_parameter_35_absent_rather_than_pruned() {
+    // The set in force is parameter 35 where the configuration carries it and 34
+    // otherwise, so reading 34 is licensed by a covered absence of 35 and by nothing
+    // else. A server sending the smallest proof that answers the question covers the
+    // walk to 35 exactly because it selected the set the same way, and every
+    // configuration captured here shows that: 35 absent, not pruned.
+    //
+    // What this settles is a property of the captured bytes, not of the code. Deleting
+    // the preference leaves this test green, and `chain.rs` with it: where 35 is absent
+    // the two readings agree. The two constructed tests below are what hold the
+    // preference. What `chain.rs` holds is the derivation, verifying every link of the
+    // same captures against the set each configuration names. The count is asserted so a
+    // capture added and not read here is caught rather than quietly left outside the
+    // word every.
+    let mut checked = 0;
+    for text in FIXTURES {
+        for link in links(text) {
+            let config = config_of(&link);
+            assert!(matches!(
+                config
+                    .get(&CURRENT_TEMP_VALIDATORS.to_be_bytes())
+                    .expect("the lookup runs"),
+                Lookup::Absent
+            ));
+            assert!(matches!(
+                config
+                    .get(&CURRENT_VALIDATORS.to_be_bytes())
+                    .expect("the lookup runs"),
+                Lookup::Found(_)
+            ));
+            checked += 1;
+        }
+    }
+    assert_eq!(checked, CAPTURED_LINKS, "not every capture was read");
+}
+
+#[test]
+fn parameter_35_answers_where_the_configuration_carries_it() {
+    // **A constructed fixture.** Both parameter cells below are mainnet bytes, taken
+    // from the two captured rounds, and so is the configuration dictionary they sit in.
+    // What is constructed is the placement: no captured key block here carries 35, and
+    // none was found to capture, so this arrangement of real cells is as close as an
+    // offline test reaches. What it does not establish is that a mainnet configuration
+    // carrying 35 decodes and verifies end to end, which only a capture would.
+    let a = link(ORDINARY);
+    let b = link(SIMPLEX);
+    let round_b = config_of(&b);
+
+    let mut edited = config_of(&a);
+    edited
+        .set(
+            &CURRENT_TEMP_VALIDATORS.to_be_bytes(),
+            &param_value(param_cell(&round_b, CURRENT_VALIDATORS)),
+        )
+        .expect("the parameter fits");
+
+    // The two rounds are twelve million blocks apart and share no set, so answering
+    // with round B's out of round A's own configuration can only be the preference
+    // firing. Reading 34 would answer with round A's, which is the defect this pins.
+    let read = ValidatorSet::from_config(edited.root().expect("an edited root"))
+        .expect("the configuration holds a validator set");
+    assert_eq!(read, set_of(&b));
+    assert_ne!(read, set_of(&a));
+
+    // And with 35 taken out again the same dictionary answers with 34, so the fallback
+    // is a fallback rather than a second reading of the same parameter.
+    assert!(edited
+        .remove(&CURRENT_TEMP_VALIDATORS.to_be_bytes())
+        .expect("the removal runs"));
+    assert_eq!(
+        ValidatorSet::from_config(edited.root().expect("a root")).expect("it reads"),
+        set_of(&a)
+    );
+}
+
+#[test]
+fn a_pruned_parameter_35_is_refused_rather_than_read_as_an_absent_one() {
+    // **A constructed fixture**, on the arrangement of real cells the test above
+    // builds: a configuration carrying both parameters, proved down to the walk to 34
+    // alone. That is what a server selecting the set by reading 34 and nothing else
+    // would send, and against it the walk to 35 answers neither found nor absent.
+    //
+    // Nothing in such a proof rules out the 35 standing behind the pruned branch, so
+    // reading 34 would be deriving a set the block never signed under, in silence. The
+    // refusal names the proof rather than the configuration, which is the difference
+    // between a server that answered a narrower question and a configuration that has
+    // nothing in it.
+    //
+    // The narrowing has to be built rather than captured for a second reason on top of
+    // the one above: in a captured configuration 34 and 35 are adjacent keys reached
+    // through one edge, so covering 34 covers the absence of 35 as a side effect and no
+    // real proof this tree holds can put a pruned branch on that walk.
+    let a = link(ORDINARY);
+    let b = link(SIMPLEX);
+    let mut config = config_of(&a);
+    config
+        .set(
+            &CURRENT_TEMP_VALIDATORS.to_be_bytes(),
+            &param_value(param_cell(&config_of(&b), CURRENT_VALIDATORS)),
+        )
+        .expect("the parameter fits");
+    let root = config.root().expect("an edited configuration has a root");
+
+    // The whole of 34 is kept, not merely the walk to it. Marking the path alone leaves
+    // the descriptor dictionary hanging under the parameter cell pruned, so 34 reads as
+    // uncovered too and the refusal below arrives whichever branch produced it. The test
+    // then passes with the preference deleted, which is the shape this narrowing avoids.
+    let param_34 = param_cell(&config, CURRENT_VALIDATORS);
+    let mut usage = UsageTree::new(root.clone());
+    assert!(usage.mark_path(&param_34), "the walk to 34 is in the tree");
+    mark_subtree(&mut usage, &param_34);
+    let narrowed = Dict::from_root(Some(usage.prune().expect("the tree prunes")), 32)
+        .expect("a 32-bit dictionary");
+
+    assert!(matches!(
+        narrowed
+            .get(&CURRENT_TEMP_VALIDATORS.to_be_bytes())
+            .expect("the lookup runs"),
+        Lookup::Pruned
+    ));
+    assert!(matches!(
+        ValidatorSet::from_config(narrowed.root().expect("a root")),
+        Err(BlockError::NotCovered)
+    ));
+
+    // Parameter 34 survives the narrowing all the way down to its last descriptor, so it
+    // reads: it answers with round A's set. That is what makes the refusal above the
+    // preference declining an uncovered 35 rather than the pruning having taken 34 away
+    // with it, and it is what a fall-through to 34 would have returned here instead.
+    assert_eq!(
+        ValidatorSet::from_cell(&param_cell(&narrowed, CURRENT_VALIDATORS))
+            .expect("the narrowing kept the whole of 34"),
+        set_of(&a)
     );
 }
 
