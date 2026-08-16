@@ -8,7 +8,7 @@ the data flow of a proven account read from a pinned anchor to a verified result
 state the library keeps and the state it refuses to keep, and the failure and security
 posture at each boundary the library crosses.
 
-The code under `crates/` is authoritative for behaviour. This document explains the
+The code under `core/src` is authoritative for behaviour. This document explains the
 shape the code takes and why, and marks what is designed but not yet built.
 
 ## What ton-net is
@@ -29,31 +29,49 @@ core rather than one implementation per language is fixed in NET-ADR-002.
 
 ## Layering and dependency direction
 
-The workspace is six library crates and one binding, layered so that each depends only
-on those beneath it.
+The workspace is one library crate and one binding. The library's layers are modules of
+that crate, declared in `core/src/lib.rs`, layered so that each names only those beneath
+it.
 
 ```
                          bindings/node   (napi-rs, JS shapes)
                                 |
-                            ton-net       (facade: Client, Config, Address,
+                          ton-net crate
+                       root + client      (facade: Client, Config, Address,
                                 |          Verified, Error, sync, VERIFY_EPOCH)
               +-----------------+--------------------+
               |                 |                    |
-        ton-net-lite      ton-net-block        ton-net-cell
+            lite           tlb + proof             cell
         (read client)     (decode + verify)    (cells, BoC, proofs)
               |                 |    \               |
-        ton-net-adnl            |     \--------------+
+            adnl                |     \--------------+
         (transport)             |                    |
               |                 |                    |
               +--------+--------+--------------------+
                        |
-                   ton-net-tl   (TL wire codec)
+                      tl       (TL wire codec)
 ```
 
-ton-net-tl and ton-net-cell are the two roots. ton-net-cell is independent of the wire
-codec: the cell model belongs to TON's data layer, not to any one protocol. ton-net-block
-sits on both roots, ton-net-adnl on the codec, ton-net-lite on the transport and the
-codec, and the facade on all of them.
+`tl` and `cell` are the two roots and name no other module. `cell` is independent of the
+wire codec: the cell model belongs to TON's data layer, not to any one protocol. The old
+block layer is two modules now, `tlb` for decoding and `proof` for checking. `tlb` sits on
+`cell` alone; `proof` sits on `cell`, on `tl` and on `tlb`, because a check reads what a
+decode produced. `adnl` sits on the codec, `lite` on the transport and the codec,
+and the facade on all of them.
+
+The direction is checked rather than assumed. `scripts/check-layers.mjs` reads the source
+text of `cell`, `tlb`, `proof` and `tl` and refuses any of them writing `crate::adnl`,
+`crate::lite` or `crate::client`, naming tokio or getrandom, or reaching the socket, the filesystem, the process,
+the environment, a thread or a clock. A manifest could never have shown the last of those,
+because `std` needs no dependency edge. `lite` is held separately to not naming `cell`.
+Every refusal is proved against probes built to trip it, and the same reading asserts the
+three edges that are supposed to be present, so a matcher that finds nothing fails instead
+of passing.
+
+The socket sits behind the `net` feature, on by default. With `default-features = false`
+the crate carries the cell engine, the typed structures, the proof engine, the ADNL
+handshake and frame crypto, `Verified`, address parsing and the config reader, and pulls
+neither tokio nor getrandom.
 
 The transport is a seam, not a fixed choice. The ADNL protocol logic is sans-I/O: it
 produces bytes to send and consumes bytes received, over a `Transport` trait that moves
@@ -63,7 +81,7 @@ NET-ADR-002.
 
 ## Components
 
-### ton-net-tl: the TL codec
+### `tl`: the TL codec
 
 Defines the TON Type Language types the client reads and writes, derived over the
 `tl-proto` crate, and re-exports the serialize and deserialize entry points. It covers
@@ -71,14 +89,14 @@ the ADNL message envelope, the liteserver query and response types, and the mess
 validator signature covers. A boxed type carries a four-byte constructor id, the CRC32
 of its scheme line; a bare type, used only as a field, carries none.
 
-This crate performs no I/O and checks nothing. A decoded response is the server's word
-until a higher crate verifies it. The block-proof types it defines carry the raw proof
+This module performs no I/O and checks nothing. A decoded response is the server's word
+until a higher module verifies it. The block-proof types it defines carry the raw proof
 and signature bytes as `Vec<u8>`, because their reader is a verifier rather than a person.
 
-### ton-net-cell: the cell model, the bag-of-cells codec, and the proof primitives
+### `cell`: the cell model, the bag-of-cells codec, and the proof primitives
 
 A cell is TON's universal container: up to 1023 bits of data and up to four references,
-forming a directed acyclic graph. Every structure on TON is a tree of cells. This crate
+forming a directed acyclic graph. Every structure on TON is a tree of cells. This module
 holds the cell type and its four exotic kinds, the bag-of-cells parser and serializer,
 the dictionary types a block is built from, cell builders, usage trees, and the Merkle
 primitives.
@@ -89,7 +107,7 @@ it replaced, so a pruned copy of a tree hashes to the same value as the full tre
 substitution is what makes a Merkle proof checkable. `virtualize` reads the tree a proof
 stands for, and `create_proof` builds one.
 
-This is the crate that reads bytes off the untrusted boundary, so it is the adversarial
+This is the module that reads bytes off the untrusted boundary, so it is the adversarial
 parsing surface. Parsing never panics and never allocates on a declared size it has not
 checked. It refuses a bag past `MAX_CELLS` (2^17) or `MAX_DEPTH` (1024), a reference that
 does not point strictly forward, and a cell whose descriptors and data disagree. It
@@ -98,7 +116,7 @@ need, JSON rendering and LZ4 compression of a serialized bag, are behind the `js
 `compress` feature gates so the default build carries neither. The compression admission
 is NET-ADR-010.
 
-### ton-net-block: block and account decoding, the proof engine, and validator handling
+### `tlb` and `proof`: block and account decoding, the proof engine, and validator handling
 
 Turns the cells a liteserver returns into values a reader can use, and holds the
 verification logic. It decodes only what a read or a proof needs: the account structure,
@@ -106,7 +124,8 @@ a block header, the configuration a key block carries, the state update a block 
 and the shard records a masterchain state holds. It does not read a block's transaction
 set or a shard state's message queues.
 
-Decoding and verifying are separate here, and the separation is the crate's spine. An
+Decoding and verifying are separate here, and the separation is what put them in two
+modules. An
 `Account` from `Account::decode` is bytes a server sent. The same type from
 `proof::verify_account` was checked against a block hash the caller trusts. The proof
 engine is a set of pure functions:
@@ -128,7 +147,7 @@ module built on the curve crate already in the dependency tree rather than on a 
 ed25519 crate (NET-ADR-006). Both are described in the data-flow section below, because
 they are the heart of a proven read.
 
-### ton-net-adnl: the ADNL transport
+### `adnl`: the ADNL transport
 
 Opens and runs a liteserver session over ADNL, split along the sans-I/O seam. Three
 pieces:
@@ -151,7 +170,7 @@ evidence the configured key is the key that answered. A server key that is not a
 point, or one of small order that would collapse the secret to zero, is refused before any
 session opens.
 
-### ton-net-lite: the liteserver read client
+### `lite`: the liteserver read client
 
 Speaks the liteserver query protocol over an ADNL connection and decodes the read
 responses into cleaner domain types. It exposes three reads: `masterchain_info` for the
@@ -160,12 +179,12 @@ current head, `account_state` for an account's raw state and proofs at a block, 
 unsigned height and sets the raw proof bytes aside in a `ServerReported<T>` wrapper rather
 than mixing them into the value.
 
-This crate checks nothing. Every value it returns wears the `ServerReported` wrapper to
+This module checks nothing. Every value it returns wears the `ServerReported` wrapper to
 say so, and the proof bytes travel on that wrapper so the layer above can verify them
 without another round trip. The block-proof response is returned as the wire type, because
 its every field is evidence for a verifier to weigh.
 
-### ton-net: the facade
+### The facade: the crate root and `client`
 
 Composes the stack into the surface a program uses. It owns:
 
@@ -185,7 +204,7 @@ Composes the stack into the surface a program uses. It owns:
   changes, so a caller who cached a result can decide whether to check it again.
 
 The facade is where the read-versus-proved distinction is carried in the type. The lower
-crates leave it to the caller to track; here `account` returns `Verified<Account>` and
+modules leave it to the caller to track; here `account` returns `Verified<Account>` and
 `account_reported` returns `ServerReported<Account>`, and nothing converts one into the
 other.
 
@@ -212,12 +231,12 @@ then a raw read at that head, then the proof engine binding the account to it.
 ### The transport underneath every query
 
 Each of the three liteserver reads used below travels the same path. The facade calls
-into ton-net-lite, which wraps the request in a `liteServer.query` envelope and hands the
+into `lite`, which wraps the request in a `liteServer.query` envelope and hands the
 bytes to `AdnlConnection::query`. The connection wraps them in an `adnl.message.query`
 with a fresh random id, seals them into a frame under the send keystream with a fresh
 nonce, and writes it. It then reads frames under the receive keystream, skipping an empty
 confirmation frame, until an `adnl.message.answer` echoes the query id, and returns the
-answer bytes. ton-net-lite decodes those bytes as the expected response, or surfaces a
+answer bytes. `lite` decodes those bytes as the expected response, or surfaces a
 `liteServer.error` if that is what the server returned. Every call runs under a deadline:
 an ordinary read at 15 seconds, a block-proof reply at 60 because it is a larger thing.
 
@@ -352,7 +371,7 @@ Never stored, at any point:
 
 ## Failure and security posture
 
-Every boundary the library crosses is treated as adversarial. The library crates deny
+Every boundary the library crosses is treated as adversarial. The library crate denies
 panic, unwrap, and unchecked indexing, so a decoder fails by returning rather than by
 unwinding, because a panic in a decoder reading a peer's bytes is a denial of service in
 the process that embedded it.

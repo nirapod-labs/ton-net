@@ -1,6 +1,6 @@
 TON network configuration
 
-crates/ton-net/src/mainnet.config.json is the TON mainnet network configuration
+core/src/mainnet.config.json is the TON mainnet network configuration
 published by the TON Foundation at https://ton.org/global.config.json. It is
 carried here unchanged so a client has a default network to start from.
 

@@ -74,13 +74,13 @@ The read path:
 - key-block sync and the proven-read facade,
 - a Node binding over the facade.
 
-The cell engine, in `ton-net-cell`:
+The cell engine, in the `cell` module:
 
 - cells and their identity, with `Builder` and `Slice` as a pair, so what one writes the other
   reads back in the form it went in,
 - three dictionary shapes: `Dict`, `AugDict` for `HashmapAug`, where each node carries a
   summary of the subtree under it, and `PfxDict` for prefix maps,
-- Merkle proofs and updates, built here and anchored in `ton-net-block`: `create_proof`,
+- Merkle proofs and updates, built here and anchored in `proof`: `create_proof`,
   `create_update`, `apply_update`, `combine_updates`, `validate_update`, and `virtualize` with
   the pruned-branch rules around it,
 - `UsageTree`, which records the cells a read touched, so a proof can be cut to them,
@@ -89,12 +89,14 @@ The cell engine, in `ton-net-cell`:
 - `base64_encode`, `base64_decode`, `hex_encode` and `hex_decode`, the spellings a serialized
   bag and a cell hash travel in.
 
-The `ton-net` facade re-exports the cell types its own methods answer with, so a caller can
-name what `Cell::parse` or `Client::account_state` hands back without depending on a crate the
-facade presents as internal. It stops there on purpose: the augmented and prefix dictionaries,
-the proof builders and the streaming readers are reachable from no method the facade returns,
-so a consumer whose need is the cell engine itself depends on `ton-net-cell` rather than
-finding half of it through the facade.
+The crate root re-exports the cell types its own methods answer with, so a caller can name
+what `Cell::parse` or `Client::account_state` hands back without reaching for a module. It
+stops there on purpose: the augmented and prefix dictionaries, the proof builders and the
+streaming readers are reachable from no method the root returns, so a consumer whose need is
+the cell engine itself names `ton_net::cell` and has all of it rather than finding half of it
+at the root. Taking the crate with `default-features = false` drops tokio and the socket and
+keeps the cell engine, the typed structures, the proof engine, the ADNL handshake and frame
+crypto, `Verified`, address parsing and the config reader.
 
 A first sync covers every key block published since the pinned one, over a thousand links
 against mainnet and a couple of minutes. Saving the block it ended on turns the next run into
@@ -119,25 +121,33 @@ and the API freezes only when the client is complete
 follow once the core reaches parity
 ([NET-ADR-008](docs/adr/NET-ADR-008-versioning-and-bindings.md)).
 
-## Crate layout
+## Module layout
 
-The core is a flat set of workspace crates under `crates/`, each named for its directory. The
-internal dependencies point one way, from the facade down to the foundations and never back,
-so a consumer takes only the layer it needs
+The core is one crate, `ton-net`, whose source is `core/src`. Its layers are flat modules
+declared in `core/src/lib.rs`. The edges between them point one way, from the facade down to
+the foundations and never back, so a build stops where the consumer does
 ([NET-ADR-009](docs/adr/NET-ADR-009-code-structure.md)).
 
-| Crate | Layer | Role |
+| Module | Layer | Role |
 |---|---|---|
-| `ton-net-tl` | base | The TL codec: constructor tags, boxed and bare types. |
-| `ton-net-cell` | base | The TON cell model and the bag-of-cells codec. |
-| `ton-net-block` | on cell, tl | TON block and account structures decoded from cells, and proof verification. |
-| `ton-net-adnl` | on tl | The ADNL transport, sans-I/O over a transport seam. |
-| `ton-net-lite` | on adnl, tl | The liteserver read client. |
-| `ton-net` | facade | The entry point that composes the layers below and returns a proven read. |
+| `tl` | base | The TL codec: constructor tags, boxed and bare types. |
+| `cell` | base | The TON cell model and the bag-of-cells codec. |
+| `tlb` | on cell | TON block and account structures decoded from cells. |
+| `proof` | on cell, tl, tlb | Merkle-proof, chain and validator-signature verification. |
+| `adnl` | on tl | The ADNL transport, sans-I/O over a transport seam. |
+| `lite` | on adnl, tl | The liteserver read client. |
+| root, `client` | facade | The entry point that composes the layers below and returns a proven read. |
+
+The direction is not left to a manifest to imply. `scripts/check-layers.mjs` reads the source
+text of `cell`, `tlb`, `proof` and `tl` and refuses any of them naming a layer above, naming
+tokio or getrandom, or reaching the socket, the filesystem, the process, the environment, a
+thread or a clock, which are the reaches no dependency graph can see because `std` needs no
+edge. It asserts the edges below them in the same reading, so a check that has stopped
+matching fails rather than passing quietly.
 
 `ton-net` is the only crate a consumer or a binding depends on. The Node binding lives in
-`bindings/node` and wraps that facade; it is excluded from a default build, so a bare build
-compiles the six core crates alone.
+`bindings/node` and wraps it; the binding is excluded from a default build, so a bare build
+compiles the library crate alone.
 
 ## Architecture decisions
 

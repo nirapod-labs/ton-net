@@ -9,6 +9,11 @@ superseded-by: none
 
 # NET-ADR-008: Versioning, the verification epoch, and the binding sequence
 
+The artifact counts in decisions 1 and 2 describe the tree as it stood when the decision was
+taken. Six library crates are now one, and the current counts are at the end, under
+[Since acceptance](#since-acceptance). Everything the decisions fix about lockstep, the
+epoch, and the binding sequence stands unchanged.
+
 ## Context
 
 ton-net is one audited Rust core distributed across language bindings (NET-ADR-002). It
@@ -161,3 +166,30 @@ claim a boundary the core does not stand behind.
   cannot report a boundary different from the core's.
 - Each epoch rise is recorded in the changelog as the accept and refuse delta, so an upgrade
   that moved the boundary says so in the one place a consumer reads before upgrading.
+
+## Since acceptance
+
+**The six library crates are one.** `core/Cargo.toml` declares `name = "ton-net"`, and
+`ton-net-tl`, `ton-net-cell`, `ton-net-block`, `ton-net-adnl` and `ton-net-lite` are modules
+inside it rather than crates beside it (NET-ADR-009). Two crate manifests now carry the
+version by inheritance, `core/Cargo.toml` and `bindings/node/Cargo.toml`, and one of the two
+publishes to crates.io: the binding still sets `publish = false` and reaches consumers through
+npm. Where decision 1 says six library crates and the Node binding crate, read one library
+crate and the Node binding crate; where decision 2 says crates.io carries the six library
+crates, read one. The npm side is unchanged at eight packages, the `ton-net` package and seven
+per-platform packages.
+
+The five retired names are published on crates.io at 0.4.2 and stay published. Yanking them
+would break every consumer that pinned one, and a pre-1.0 library that yanks is not one worth
+depending on. Each takes one final release whose `lib.rs` is a deprecation notice naming what
+inside `ton-net` replaced it, and after that they stop moving. Four map to one module of the
+same name; `ton-net-block` maps to two, `tlb` for what it decoded and `proof` for what it
+checked. The rule this
+record already fixes covers them: a published version is immutable in both registries, so a
+name that has shipped is dealt with by publishing again rather than by withdrawal.
+
+Nothing else in the record moves. Lockstep is still one version by workspace inheritance, the
+epoch is still separate from the version and still pinned by a transcript, and the binding
+sequence is still Node first. Two point-in-time numbers have advanced since acceptance and are
+tracked in the changelog rather than here: the version is 0.4.2 rather than 0.3.0, and
+`VERIFY_EPOCH` is 2 rather than 1.

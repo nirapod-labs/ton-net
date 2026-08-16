@@ -1,0 +1,42 @@
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-FileCopyrightText: 2026 Nirapod Labs
+
+//! The liteserver read client: one query in, one decoded answer out.
+//!
+//! [`LiteClient`] speaks the liteserver query protocol over an ADNL connection and
+//! decodes the read responses into the domain types this module defines. Nothing here
+//! checks anything: a read comes back as a [`ServerReported`] value, and the proof
+//! bytes travel with it for the layer above to verify.
+//!
+//! [`LiteClient::masterchain_info`] reads the current masterchain head,
+//! [`LiteClient::account_state`] reads an account's raw state at a given block, and
+//! [`LiteClient::block_proof`] asks for the links between two blocks. The facade above
+//! [`Client`](crate::Client) wraps a `LiteClient` over a TCP transport and adds address
+//! parsing and a bundled config.
+//!
+//! This module maps the wire types from [`crate::tl`] into cleaner domain types: block
+//! sequence numbers become unsigned, and a response keeps only what a reader needs. The
+//! block-proof types are the exception and are re-exported as they come off the wire,
+//! because their reader is a verifier rather than a person.
+
+// The query driver holds an ADNL connection, so it needs the socket. The response types
+// are decoding and nothing else, and stay reachable without one.
+#[cfg(feature = "net")]
+#[cfg_attr(docsrs, doc(cfg(feature = "net")))]
+mod client;
+mod types;
+
+#[cfg(feature = "net")]
+#[cfg_attr(docsrs, doc(cfg(feature = "net")))]
+pub use client::{LiteClient, LiteError};
+pub use types::{AccountState, BlockIdExt, MasterchainInfo, ServerReported};
+
+/// An account identifier: a workchain and a 256-bit account id.
+///
+/// This is the account [`LiteClient::account_state`] reads, re-exported from [`crate::tl`].
+/// The facade builds one from a parsed address.
+pub use crate::tl::lite::AccountId;
+
+/// The block-proof types [`LiteClient::block_proof`] answers with, re-exported from
+/// [`crate::tl`] so a caller need not name the codec to read a chain.
+pub use crate::tl::lite::{BlockLink, PartialBlockProof, Signature, SignatureSet};

@@ -25,7 +25,7 @@
 import { readFileSync } from "node:fs";
 
 const PUBLISHED = "https://ton.org/global.config.json";
-const BUNDLED = "crates/ton-net/src/mainnet.config.json";
+const BUNDLED = "core/src/mainnet.config.json";
 
 // `shard` is -2^63, which no JSON parser in JavaScript keeps exactly. Both sides
 // are read the same way and lose the same digits, so comparing them still answers

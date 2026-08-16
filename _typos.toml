@@ -17,7 +17,7 @@
 # The notices are generated, and they are eighty-odd other projects' license texts.
 # A typo in one is theirs, and this file is not the place to fix it.
 extend-exclude = [
-  "crates/*/tests/fixtures/**",
+  "core/tests/fixtures/**",
   "*.hex",
   "THIRD-PARTY-LICENSES.md",
   "spikes/**",

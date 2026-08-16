@@ -9,6 +9,12 @@ superseded-by: none
 
 # NET-ADR-011: What a cell's identity is, and the barrier a trusted hash may not cross
 
+The paths and the crate names in this record describe the tree as it stood when the decision was
+taken. Six library crates are now one, and where each anchor points, along with the one
+enforcement mechanism that did not survive the merge intact, is at the end, under
+[Since acceptance](#since-acceptance). What a cell's identity is, and the rule that a trusted
+hash may not cross into a checked result, are unchanged.
+
 ## Context
 
 ton-net exists to verify answers against validator signatures rather than trust a server
@@ -519,3 +525,60 @@ Gates on the work this record decides, none of which runs today:
   and an exact `CellError` value on the refusing side.
 - The construction check: an external struct literal for an `Identity`, and an external
   assignment to one of its fields, are both compile-fail cases.
+
+## Since acceptance
+
+The six library crates are one crate, `ton-net`, whose source is `core/src` (NET-ADR-009). Where
+a record of this vintage carries a `crates/ton-net-x/src/y.rs` anchor it reads `core/src/x/y.rs`,
+with `ton-net-block` the one exception: its decoding half is `tlb` and its checking half is
+`proof`. This record names neither half. Its anchors land in `core/src/cell/`, in
+`core/src/lite/`, and in the crate root beside `core/src/client.rs`, so a reader following one
+never has to choose between `tlb` and `proof`.
+
+Four of them, resolved rather than left to the rule:
+
+- `crates/ton-net-cell/src/cell.rs`, the construction site the Context turns on, is
+  `core/src/cell/cell.rs`. `Cell::from_parts` is still `pub(crate)` there and still the one
+  place `Arc::new` is written under `core/src/cell`.
+- `crates/ton-net-cell/src/lib.rs` is `core/src/cell.rs`, not `core/src/lib.rs`. The cell
+  crate's root became the cell module's root, so the re-export list the Verification section
+  reads for the absence of `summarize` is one directory level up from the module it describes,
+  under the module's own name.
+- `crates/ton-net-lite/src/types.rs`, where `ServerReported<T>` is defined, is
+  `core/src/lite/types.rs`, and its `new` is still `pub(crate)`.
+- `crates/ton-net-cell/tests/fixtures/block-basechain.hex` is
+  `core/tests/fixtures/block-basechain.hex`. The tests moved to `core/tests` whole, keeping
+  every path below `tests/`.
+
+**One anchor is stale twice over, and the second staleness predates the merge.**
+`crates/ton-net/src/client.rs:384` appears in the Context and again in decision 2, both times as
+the single call site of `Verified::new`. The file is `core/src/client.rs`. The line number is
+from a tree that had already moved before the crates were collapsed: at the last commit where
+`crates/` existed, line 384 was `Ok(Verified::new(account, trusted.clone()))`, and that
+expression is now further down the same file, after a masterchain-anchor refusal that was added
+above it. Line 384 of `core/src/client.rs` today is inside that refusal, a `return Err` on a
+trusted block that is not in the masterchain, which is a different subject entirely. The
+property the anchor was carrying survives and is the thing to follow: a grep for `Verified::new`
+across the library still returns one line, and it is that call in `core/src/client.rs`. The
+number is dropped here rather than replaced, because the number is the half that moved twice.
+
+**The enforcement in decision 2 that rested on an absent dependency edge no longer rests on
+one.** The record's second enforcement reads "the enforcement is the absent dependency edge
+rather than anyone's diligence": `ton-net-cell` named no workspace crate, so a parse mode written
+there could not reach `Verified`, and the same absence put `ServerReported` out of reach. There is
+one manifest now, so there is no edge to be absent. What holds the direction is
+`scripts/check-layers.mjs`, which reads the source text of `core/src/{cell,tlb,proof,tl}` and
+refuses each of them naming `crate::adnl`, `crate::lite` or `crate::client`, naming tokio or
+getrandom, or reaching the socket, the filesystem, the process, the environment, a thread or
+either clock, and which asserts three edges below those layers in the same reading so a matcher
+that has stopped matching fails rather than passing quietly.
+
+That check does not name `crate::verified`, and it is stated here rather than smoothed. The
+refusal list is the one above; `Verified` is not on it, and `Verified::new` is `pub(crate)` in
+`core/src/verified.rs`, which is a boundary drawn at the library rather than between two layers
+inside it. So the mechanism this record cited for that enforcement is gone and the mechanism that
+replaced it covers less at this exact point. The rejected alternative that turns on the same
+absence, returning a trusting parse's roots in `ServerReported` because the cell crate cannot
+reach it, is refused on the same weakened ground. The rule decision 2 states is unchanged and
+this note settles nothing about how to hold it; it records where the mechanical half now stops,
+which the gates listed above are what would close.

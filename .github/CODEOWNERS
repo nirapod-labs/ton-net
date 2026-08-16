@@ -7,9 +7,15 @@
 * @athexweb3
 
 # The proof and signature paths are the library's whole reason to exist. A change
-# here that looks harmless can make the client believe something unproven.
-/crates/ton-net-block/ @athexweb3
-/crates/ton-net-cell/ @athexweb3
+# here that looks harmless can make the client believe something unproven. They are
+# modules of the one library crate rather than crates of their own, so each is named
+# twice: the directory, and the module body beside it that carries its surface.
+/core/src/proof/ @athexweb3
+/core/src/proof.rs @athexweb3
+/core/src/tlb/ @athexweb3
+/core/src/tlb.rs @athexweb3
+/core/src/cell/ @athexweb3
+/core/src/cell.rs @athexweb3
 
 # Decisions of record. Changing one is superseding it, not editing it.
 /docs/adr/ @athexweb3

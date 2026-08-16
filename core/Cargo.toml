@@ -1,0 +1,136 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: 2026 Nirapod Labs
+
+[package]
+name = "ton-net"
+description = "A direct client for the TON network: TL, ADNL, and liteserver over one Rust core."
+readme = "README.md"
+documentation = "https://docs.rs/ton-net"
+homepage = "https://github.com/nirapod-labs/ton-net"
+keywords = ["ton", "blockchain", "adnl", "liteserver", "client"]
+categories = ["network-programming", "cryptography::cryptocurrencies"]
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+# A feature that gates a public item is a fact a reader needs before they compile, so
+# docs.rs is asked for every feature and for the cfg that renders the pill beside each one.
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+[lib]
+# `cargo bench` would otherwise run the unit tests with criterion's flags.
+bench = false
+
+[features]
+default = ["net"]
+# The socket and the per-session randomness it needs. Everything the library decides
+# rather than fetches builds without this: the cell engine, the typed structures, the
+# proof engine, the ADNL handshake and frame crypto, `Verified`, address parsing and the
+# config reader. That is what a browser target gets from `--no-default-features`.
+net = ["dep:tokio", "dep:getrandom"]
+# LZ4 compression of a serialized bag of cells, opt-in so the default build stays free
+# of lz4_flex (admitted by NET-ADR-010).
+compress = ["dep:lz4_flex"]
+# JSON rendering of an ordinary cell tree. It admits no dependency, because the config
+# reader already carries serde_json unconditionally; what it gates is the module, which
+# is off by default because a rendering is not what this library is for.
+json = []
+# Splitting a wide finalization wave across the standard library's scoped threads. It
+# admits no dependency, and it is off by default for two reasons rather than for weight:
+# the spawn is compiled only when it is on, so a build for a target whose threads do not
+# run carries none, and a caller running several parses beside each other should not find
+# this one starting threads underneath it. The waves themselves are on either way; this
+# chooses what runs them.
+parallel = []
+
+[dependencies]
+tl-proto.workspace = true
+# Signature verification is built on the curve crate rather than on an ed25519 crate,
+# which would duplicate it (NET-ADR-006).
+curve25519-dalek.workspace = true
+# The representation hash is SHA-256, on the single copy NET-ADR-004 fixes. A validator's
+# short id is the same hash over its key in TL form.
+sha2.workspace = true
+aes.workspace = true
+ctr.workspace = true
+thiserror.workspace = true
+serde = { workspace = true }
+serde_json.workspace = true
+lz4_flex = { workspace = true, optional = true }
+# The per-session ADNL randomness, drawn at the I/O edge and nowhere else.
+getrandom = { workspace = true, optional = true }
+# The native transport and the timer that bounds every call. The socket is behind the
+# `net` feature; the runtime comes from the caller.
+tokio = { workspace = true, optional = true, features = [
+  "net",
+  "io-util",
+  "time",
+] }
+
+[dev-dependencies]
+criterion.workspace = true
+proptest.workspace = true
+# The differential test compares this library's acceptance rule against an audited
+# implementation. It does not ship, so the curve copy it pulls reaches no consumer.
+ed25519-dalek = "3"
+tokio = { workspace = true, features = [
+  "rt",
+  "rt-multi-thread",
+  "macros",
+  "time",
+  "test-util",
+] }
+
+# Four targets open a socket, and the examples all connect. Without this a
+# `--no-default-features --all-targets` build fails on them rather than on the library,
+# which is the configuration `just sans-io` exists to read.
+[[test]]
+name = "mainnet_adnl"
+required-features = ["net"]
+
+[[test]]
+name = "mainnet_client"
+required-features = ["net"]
+
+[[test]]
+name = "mainnet_lite"
+required-features = ["net"]
+
+[[test]]
+name = "snapshot"
+required-features = ["net"]
+
+[[example]]
+name = "balance"
+required-features = ["net"]
+
+[[example]]
+name = "freshness"
+required-features = ["net"]
+
+[[example]]
+name = "own_anchor"
+required-features = ["net"]
+
+[[example]]
+name = "resume"
+required-features = ["net"]
+
+[[bench]]
+name = "cells"
+harness = false
+
+[[bench]]
+name = "dict"
+harness = false
+
+[[bench]]
+name = "verify"
+harness = false
+
+[lints]
+workspace = true

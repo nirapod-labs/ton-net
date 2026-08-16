@@ -7,10 +7,14 @@
 # bag-of-cells checksum was written and verified through the same function, so a
 # round trip agreed with itself no matter what that function computed.
 #
-# Mutate one crate, but run every crate's tests. The layers here are thin on their
-# own and checked from above: making `skip_bits` a no-op passes the cell crate's own
-# suite untouched and fails four chain tests one crate up. Scoping the test run to
-# the mutated package reports that as a gap in coverage that is not missing.
+# Mutate the library and run every test in the workspace. This was an argument about a
+# crate boundary: making `skip_bits` a no-op passed the cell crate's own suite untouched
+# and failed four chain tests one crate up, which a run scoped to the mutated package
+# never reached. The layers are modules of one crate now and those chain tests are that
+# crate's own, in core/tests/chain.rs, so a scoped run would reach them. What the setting
+# is still for is the binding: it links the library and no run scoped to the library
+# builds it. The reason is a smaller one than it was, and it is written here rather than
+# left as a setting nobody can date.
 test_workspace = true
 
 # Everything excluded below was read and judged unkillable rather than untested.

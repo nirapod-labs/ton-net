@@ -8,9 +8,9 @@
 # A trusted publisher is configured on a crate or a package that already exists.
 # crates.io has no equivalent of PyPI's pending publisher, and npm has none either, so
 # there is nothing to attach a publisher to until a name is taken. The first version of
-# the six crates and the eight packages goes out by hand with a token, the fourteen
-# publishers are configured against this file, and the tokens are then revoked. Every
-# release after that is this workflow. docs/release-process.md carries the sequence.
+# the crate and the eight packages goes out by hand with a token, the nine publishers are
+# configured against this file, and the tokens are then revoked. Every release after that
+# is this workflow. docs/release-process.md carries the sequence.
 #
 # Until that has happened this workflow runs and stops at the first publish, which is
 # the honest failure: it says the trusted publisher is not configured, rather than
@@ -26,11 +26,13 @@
 #
 # # Order
 #
-# Crates go bottom up, because crates.io resolves a dependency at publish time and a
-# crate whose dependency is not yet on the index does not build. tl and cell depend on
-# nothing here, adnl needs tl, block needs cell and tl, lite needs adnl and tl, and the
-# facade needs all of them. npm is the same shape: the platform packages are optional
-# dependencies of the main one, so they exist before it names them.
+# There is one crate, so crates.io has no order left to get wrong: the dependency graph
+# that used to decide it is inside the library now. The five names that carried the layers
+# before it, `ton-net-tl`, `ton-net-cell`, `ton-net-adnl`, `ton-net-block` and
+# `ton-net-lite`, are still published at 0.4.2 and are not yanked, so anything already
+# resolving them keeps resolving them; this workflow no longer publishes any of them.
+# npm still has an order: the platform packages are optional dependencies of the main one,
+# so they exist before it names them.
 name: release
 
 on:
@@ -132,23 +134,14 @@ jobs:
       - uses: rust-lang/crates-io-auth-action@c6f97d42243bad5fab37ca0427f495c86d5b1a18 # v1.0.5
         id: auth
 
-      # Bottom up. `--no-verify` is deliberately absent: the package is built from the
-      # tarball that will be published, which is the last chance to catch a crate that
-      # compiles in the workspace and not on its own.
-      #
-      # Nothing here sleeps between crates: since 1.66 `cargo publish` blocks until the
-      # version it just uploaded is visible in the index, which is exactly the wait the
-      # next crate in the list needs.
-      - name: publish the crates in dependency order
+      # `--no-verify` is deliberately absent: the package is built from the tarball that
+      # will be published, which is the last chance to catch a crate that compiles in the
+      # workspace and not on its own. The binding is a workspace member and sets
+      # `publish = false`, so naming the library is what keeps it out.
+      - name: publish the crate
         env:
           CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
-        run: |
-          set -euo pipefail
-          for crate in ton-net-tl ton-net-cell ton-net-adnl ton-net-block ton-net-lite ton-net; do
-            echo "::group::publish $crate"
-            cargo publish -p "$crate"
-            echo "::endgroup::"
-          done
+        run: cargo publish -p ton-net
 
   npm:
     needs: gate

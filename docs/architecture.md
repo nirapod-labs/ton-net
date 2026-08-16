@@ -23,35 +23,36 @@ repository.
 
 ## The layer stack
 
-The library is a set of small crates under `crates/`, each with one job, plus the
-bindings under `bindings/`. From the wire up:
+The library is one crate, `ton-net`, whose source is `core/src`, plus the bindings
+under `bindings/`. Each layer is a module of that crate with one job, declared in
+`core/src/lib.rs`. From the wire up:
 
-- **`ton-net-tl`, the TL codec.** TON's Type Language is the wire format for ADNL
-  envelopes and liteserver queries. This crate defines the typed messages the
+- **`tl`, the TL codec.** TON's Type Language is the wire format for ADNL
+  envelopes and liteserver queries. This module defines the typed messages the
   client reads and writes and derives their encode and decode over `tl-proto`. It
   performs no I/O and checks nothing: a decoded response is the server's word until
   a higher layer verifies it. It covers the ADNL message envelope, the liteserver
   query and response set, and the two messages a validator signature covers.
 
-- **`ton-net-cell`, the cell model and bag-of-cells codec.** A cell is TON's
+- **`cell`, the cell model and bag-of-cells codec.** A cell is TON's
   universal container, up to 1023 bits of data and up to four references, forming a
-  directed acyclic graph that every TON structure is built from. This crate parses
+  directed acyclic graph that every TON structure is built from. This module parses
   the serialized bag-of-cells form, builds cells, reads typed values out of them,
   computes the SHA-256 representation hash, and implements the exotic-cell and
   level-mask rules that make Merkle proofs checkable. It also carries the TON
-  dictionary, because the cell model owns it. The crate sits at the foundation
+  dictionary, because the cell model owns it. It sits at the foundation
   because that model belongs to no single higher layer: a proof, a block, and a
   wallet all need it. Parsing treats its input as hostile and returns an error
   rather than panicking or allocating on a declared size it has not checked.
 
-- **`ton-net-adnl`, the ADNL channel.** ADNL is the encrypted transport TON nodes
-  speak. This crate opens a liteserver session over it and runs a query to its
+- **`adnl`, the ADNL channel.** ADNL is the encrypted transport TON nodes
+  speak. This module opens a liteserver session over it and runs a query to its
   answer. Its protocol core is pure: building the handshake packet, deriving the
   session ciphers, and sealing and opening the stream frames are synchronous
   functions over bytes, tested against fixed vectors, with no socket and no clock.
   The I/O sits behind a seam described below.
 
-- **`ton-net-lite`, the liteserver client.** This crate speaks the liteserver query
+- **`lite`, the liteserver client.** This module speaks the liteserver query
   protocol over an ADNL connection and decodes the read responses into cleaner
   domain types. It checks nothing. A read comes back as a `ServerReported` value,
   and the proof bytes travel with it for the layer above to verify. It reads the
@@ -65,15 +66,16 @@ bindings under `bindings/`. From the wire up:
   from a fixed server list, and it stands beside the liteserver client as the other
   way to reach the network.
 
-- **`ton-net-block`, the block structures and the proof engine.** This crate turns
-  the cells a liteserver returns into account and block values, and it is where
+- **`tlb`, the block structures, and `proof`, the proof engine.** `tlb` turns
+  the cells a liteserver returns into account and block values, and `proof` is where
   responses are checked. `verify_chain` checks a block-proof chain link by link,
   and `verify_account` checks an account read against a trusted block hash by
   recomputing every Merkle hash from the bytes the server sent. Decoding and
-  checking are separate operations here, and the crate decodes only what a read or
-  a proof needs, not a block's whole transaction set or a shard state's queues.
+  checking are separate operations, which is why they are separate modules, and
+  `tlb` decodes only what a read or a proof needs, not a block's whole transaction
+  set or a shard state's queues.
 
-- **Block-sync, in the `ton-net` facade.** Block-sync is what turns a pinned
+- **Block-sync, in the facade.** Block-sync is what turns a pinned
   starting block into a current one the client proved for itself. It walks from the
   key block the config names to the network's head, checking a validator signature
   set at every step, and bounds the walk so a server cannot decide how much work
@@ -84,10 +86,11 @@ bindings under `bindings/`. From the wire up:
   computed contract result would be server-reported rather than proven, which is the
   gap it closes.
 
-- **`ton-net`, the facade.** This crate is the API most consumers use. It owns the
-  connection lifecycle, address parsing, the bundled network config, block-sync, and
-  the type distinction between a proven read and a reported one. The lower crates are
-  internal; the facade re-exports the handful of their types a caller needs.
+- **The facade, at the crate root and in `client`.** This is the API most consumers
+  use. It owns the connection lifecycle, address parsing, the bundled network config,
+  block-sync, and the type distinction between a proven read and a reported one. The
+  lower modules are reachable but not the surface the API is designed around; the
+  root re-exports the handful of their types a caller needs.
 
 - **`bindings/node`, the bindings.** The Node.js binding wraps the facade with
   napi-rs and presents it in JavaScript-native shapes. It is the first binding, and
@@ -98,7 +101,7 @@ bindings under `bindings/`. From the wire up:
 The ADNL protocol logic is sans-I/O. It produces bytes to send and consumes bytes
 received, and it touches no socket and no clock. The one thing that moves those
 bytes over a real link is a `Transport`, a two-method trait (`write_all`,
-`read_exact`) in `ton-net-adnl`. `TcpTransport` implements it over TCP and is the
+`read_exact`) in `adnl`. `TcpTransport` implements it over TCP and is the
 native default. Nagle's algorithm is disabled on it, because ADNL is a
 request-and-response protocol where a small frame should go out at once rather than
 be held for coalescing.
@@ -113,9 +116,10 @@ and verification stack unchanged. The trait's methods return `impl Future + Send
 rather than using `async fn` so the `Send` bound is explicit, which the generic
 driver needs to run on a multi-threaded runtime.
 
-The seam is why the transport crate pulls only the narrow tokio features it needs
-and the facade pulls only the timer, to bound every call. The socket and the async
-runtime belong to the caller, not to the library.
+The seam is why the crate pulls only the narrow tokio features the transport and the
+call timer need, and why both sit behind the `net` feature: a build with
+`default-features = false` carries the handshake and the frame crypto and no socket
+at all. The socket and the async runtime belong to the caller, not to the library.
 
 ## One core, every language
 
@@ -194,9 +198,9 @@ against the current one and decide whether to check again.
 ## Correctness first, performance within it
 
 Correctness and safety are the floor and win any real conflict, and the code holds
-that floor structurally. All six library crates forbid unsafe code, and the compiler
-holds them there, since an inner allowance of a forbidden lint is an error rather than
-an override. Unsafe code exists in exactly two places outside those roots. The node
+that floor structurally. The library crate forbids unsafe code, and the compiler
+holds it there, since an inner allowance of a forbidden lint is an error rather than
+an override. Unsafe code exists in exactly two places outside that root. The node
 binding cannot forbid: the macro that generates its bridge expands to unsafe code
 carrying its own allowance, so a binding root that forbids does not compile. It denies
 instead, and because a deny is what an allowance silently defeats, a check reads the
@@ -221,33 +225,51 @@ it can be shared without copying.
 
 ## Repository shape and the one-way layering
 
-The crates are flat under `crates/`, not nested, and the dependency edges run one way.
-Two crates depend on nothing internal and sit at the foundation. Each higher crate
-depends only on crates below it, and `ton-net` at the top pulls the four it needs. The
-binding depends only on `ton-net`.
+The layers are flat modules under `core/src`, not nested crates, and the edges between
+them run one way. Two modules name no other and sit at the foundation. Each higher
+module names only modules below it, and the facade at the top reaches the five it
+needs. The binding depends only on `ton-net`.
 
 ```
 bindings   ton-net-node    Node.js binding      -> ton-net
 
-facade     ton-net         API and block-sync   -> lite, adnl, block, cell
+facade     root + client   API and block-sync   -> lite, adnl, proof, tlb, cell
 
-client     ton-net-lite    liteserver reads     -> adnl, tl
+client     lite            liteserver reads     -> adnl, tl
 
-protocol   ton-net-adnl    ADNL channel         -> tl
-           ton-net-block   blocks and proofs    -> cell, tl
+protocol   adnl            ADNL channel         -> tl
+           tlb, proof      blocks and proofs    -> cell, tl
 
-foundation ton-net-tl      TL codec             (no internal dependencies)
-           ton-net-cell    cell model and BoC   (no internal dependencies)
+foundation tl              TL codec             (names no other module)
+           cell            cell model and BoC   (names no other module)
 ```
 
-Every arrow points down this ladder; a lower group never depends on a higher one, and
-there are no cycles. That keeps each crate publishable and auditable on its own and
-lets a consumer that needs only the cell model or only the codec depend on that one
-crate. The external tree is held to a single copy of each crypto primitive on purpose:
-the signature curve, the digest, and the ciphers are shared rather than duplicated.
-Optional paths that a lighter consumer does not want, JSON rendering of a cell tree and
-bag-of-cells compression, are feature-gated off the default build so they cost nothing
-at runtime until asked for. The crate versions move in lockstep on one library version.
+Every arrow points down this ladder, and no module below the facade names anything
+above it. The two on the same rung run one way as well: `proof` reads the structures
+`tlb` decodes, and nothing in `tlb` names `proof`. Nothing mechanical holds that one,
+because the check refuses only the layers above, so the ladder is stated as one
+direction rather than as an acyclic graph, and it is that direction the build checks.
+
+`scripts/check-layers.mjs` is what holds it. Reading a dependency graph was the wrong
+instrument, because `std` needs no dependency edge and a socket opened inside a
+foundation layer would have compiled with nothing to notice. The check reads the source
+text of the four deciding layers instead and refuses any of them writing `crate::adnl`,
+`crate::lite` or `crate::client`, naming tokio or getrandom, or reaching the socket, the filesystem, the
+process, the environment, a thread or a clock. `lite` is held separately to not naming
+`cell`, because a liteserver answer leaves that layer as the bytes it arrived as. Every
+refusal is run first against probes built to trip it, and the same reading has to find
+the three edges that are supposed to be present, so a pattern that has stopped matching
+reports itself broken rather than reporting the tree clean.
+
+What the one-way direction buys a consumer is a build that stops where the consumer
+does. `default-features = false` drops tokio and the socket and keeps the cell engine,
+the typed structures, the proof engine, the ADNL handshake and frame crypto,
+`Verified`, address parsing and the config reader, on one dependency line. The external
+tree is held to a single copy of each crypto primitive on purpose: the signature curve,
+the digest, and the ciphers are shared rather than duplicated. Optional paths that a
+lighter consumer does not want, JSON rendering of a cell tree and bag-of-cells
+compression, are feature-gated off the default build so they cost nothing at runtime
+until asked for. The library and the binding move in lockstep on one library version.
 
 ## What is still to come
 

@@ -9,12 +9,12 @@ This is the reference for the bytes ton-net puts on the wire and reads back from
 liteserver. Three protocols stack to make one query travel:
 
 - **The TL codec**, TON's Type Language: a constructor-tagged binary encoding. Every
-  message below is a TL type. Defined in `ton-net-tl`.
+  message below is a TL type. Defined in the `tl` module.
 - **ADNL**, the encrypted transport TON nodes speak: a fixed handshake packet, then a
-  stream of framed messages under two AES-256-CTR keystreams. Defined in `ton-net-adnl`.
+  stream of framed messages under two AES-256-CTR keystreams. Defined in the `adnl` module.
 - **The liteserver query layer**, the `liteServer.*` request and response set a read
-  client speaks over ADNL. Query construction and answer decoding are in `ton-net-lite`;
-  the message types are in `ton-net-tl`.
+  client speaks over ADNL. Query construction and answer decoding are in `lite`;
+  the message types are in `tl`.
 
 The split between the pure protocol core and the I/O that carries it follows NET-ADR-002:
 the handshake and the framing are synchronous functions over bytes, tested against fixed
@@ -34,10 +34,10 @@ wire order, low byte first.
 
 ## 1. The TL codec
 
-TON's Type Language describes each message as a typed record. `ton-net-tl` defines the
+TON's Type Language describes each message as a typed record. The `tl` module defines the
 records the client needs as Rust types and derives their encoders and decoders over the
 `tl-proto` crate, so a caller serializes and deserializes typed values and never handles
-the tags by hand (`crates/ton-net-tl/src/lib.rs`).
+the tags by hand (`core/src/tl.rs`).
 
 ### 1.1 Boxed and bare types
 
@@ -55,7 +55,7 @@ The constructor id is computed by the standard CRC-32 with the reflected polynom
 is the full TL definition: the constructor name, each field as `name:type`, and the
 `= ResultType` tail. The wire-format test reproduces that CRC and checks every boxed
 type's declared id against the CRC of its scheme line
-(`crates/ton-net-tl/tests/wire.rs`, `constructor_ids_match_scheme`).
+(`core/tests/wire.rs`, `constructor_ids_match_scheme`).
 
 Worked example. The scheme line
 
@@ -65,10 +65,10 @@ liteServer.getMasterchainInfo = liteServer.MasterchainInfo
 
 hashes to `0x89b5e62e`, which written little-endian is `2e e6 b5 89`. A nullary boxed
 request serializes to exactly its constructor id, so this request is those four bytes and
-nothing more. The crate's own doctest asserts it (`crates/ton-net-tl/src/lib.rs`):
+nothing more. The module's own doctest asserts it (`core/src/tl.rs`):
 
 ```rust
-assert_eq!(ton_net_tl::serialize(GetMasterchainInfo), [0x2e, 0xe6, 0xb5, 0x89]);
+assert_eq!(ton_net::tl::serialize(GetMasterchainInfo), [0x2e, 0xe6, 0xb5, 0x89]);
 ```
 
 ### 1.2 Primitive field encodings
@@ -93,15 +93,15 @@ value is written as the marker byte `0xfe`, then a three-byte little-endian leng
 the data, then padding. The single-byte case is visible in the query wrapping of section
 6.1 (the `0x04` and `0x0c` prefixes); the `0xfe` marker is exercised by a hostile-length
 test that rejects a prefix claiming roughly 16 MB with no data behind it
-(`crates/ton-net-tl/tests/wire.rs`, `hostile_length_prefix_is_rejected`).
+(`core/tests/wire.rs`, `hostile_length_prefix_is_rejected`).
 
 The `int256`, `int`, and `long` widths together fix the size of a `tonNode.blockIdExt` at
 80 bytes (a 4-byte workchain, an 8-byte shard, a 4-byte seqno, and two 32-byte hashes),
 which the block-proof request layout depends on (section 6.2) and a test asserts
-(`crates/ton-net-tl/tests/wire.rs`, `the_mode_word_follows_the_target_block`). The `#`
+(`core/tests/wire.rs`, `the_mode_word_follows_the_target_block`). The `#`
 width is fixed at 4 bytes by that same test's mode word. The `boolTrue` id and the
 4-byte vector count are both fixed by a test that builds a `liteServer.partialBlockProof`
-header by hand (`crates/ton-net-tl/tests/wire.rs`, `a_hostile_vector_length_does_not_allocate`).
+header by hand (`core/tests/wire.rs`, `a_hostile_vector_length_does_not_allocate`).
 
 A boxed field that is optional, written `mode.0?type` in a scheme, is present in the bytes
 only when the flag bit it names is set in the preceding `#` word. Section 6.2 covers the
@@ -110,11 +110,12 @@ one request that uses this.
 ### 1.3 The decoder's posture
 
 The codec reads bytes from a server the client does not trust, so its failure mode is
-fixed by lints: `ton-net-tl` denies panicking, indexing, and unwrapping in library code,
-so a decoder returns an error rather than unwinding (`crates/ton-net-tl/src/lib.rs`). A
+fixed by lints: the crate root denies panicking, indexing, and unwrapping in library
+code, and every module sits beneath it, so a decoder returns an error rather than
+unwinding (`core/src/lib.rs`). A
 panic in a decoder would be a denial of service in whatever process embedded the client.
 
-Three behaviors follow, each pinned by a test in `crates/ton-net-tl/tests/wire.rs`:
+Three behaviors follow, each pinned by a test in `core/tests/wire.rs`:
 
 - **No input panics.** A fixed-seed generator feeds 50,000 pseudo-random byte strings to
   every deserializer; each must resolve to `Ok` or `Err`, never a panic
@@ -135,7 +136,7 @@ A session with a liteserver opens with one packet from the client. From the mome
 sent, both sides share the two stream ciphers that frame everything after. The handshake
 is a pure function of a server key and fresh randomness; the code that builds it touches
 no socket, no clock, and no randomness source of its own
-(`crates/ton-net-adnl/src/handshake.rs`, and NET-ADR-002 for the sans-I/O seam).
+(`core/src/adnl/handshake.rs`, and NET-ADR-002 for the sans-I/O seam).
 
 ### 2.1 The packet
 
@@ -164,7 +165,7 @@ is `scalar` times the Edwards base point, compressed to 32 bytes. The shared sec
 X25519 Diffie-Hellman of `scalar` with the server key converted to its Montgomery form.
 Both the base-point multiply and the shared-secret multiply apply the RFC 7748 clamp, so
 the key sent and the secret derived rest on one scalar
-(`crates/ton-net-adnl/src/handshake.rs`).
+(`core/src/adnl/handshake.rs`).
 
 Two server keys are refused:
 
@@ -175,7 +176,7 @@ Two server keys are refused:
   `HandshakeError::DegenerateSharedSecret`, per RFC 7748 section 6.1. A zero secret would
   leave the handshake key as sixteen zero bytes followed by half of a checksum the packet
   carries in the clear, handing the session to anyone watching the packet
-  (`crates/ton-net-adnl/src/handshake.rs`, tests `a_non_point_server_key_is_rejected` and
+  (`core/src/adnl/handshake.rs`, tests `a_non_point_server_key_is_rejected` and
   `a_small_order_server_key_is_rejected`).
 
 ### 2.3 The handshake cipher over the parameters
@@ -187,10 +188,10 @@ secret and the checksum:
 - iv = `checksum[..4] ++ shared[20..]`
 
 The stream cipher is `Ctr128BE<Aes256>`, AES-256 in counter mode with a 128-bit
-big-endian counter (`crates/ton-net-adnl/src/lib.rs`). A party holding the shared secret,
+big-endian counter (`core/src/adnl.rs`). A party holding the shared secret,
 and only such a party, can recover the parameters and so the session ciphers. A unit test
 reconstructs the key and iv from the shared secret and decrypts the packet tail back to
-the original parameters (`crates/ton-net-adnl/src/handshake.rs`,
+the original parameters (`core/src/adnl/handshake.rs`,
 `encrypted_params_decrypt_back_to_params`).
 
 ### 2.4 The randomness a handshake consumes
@@ -199,13 +200,13 @@ One handshake needs 192 bytes of fresh randomness: a 32-byte seed for the epheme
 and the 160 session parameters. The building function takes this as an input value
 (`HandshakeSecrets`) so it stays pure. The one draw from the operating system happens in
 the async connection driver at the I/O edge, through `getrandom`
-(`crates/ton-net-adnl/src/handshake.rs`, `crates/ton-net-adnl/src/connection.rs`). The
+(`core/src/adnl/handshake.rs`, `core/src/adnl/connection.rs`). The
 same 192 bytes must never be reused across two handshakes.
 
 ## 3. Session framing
 
 Once the handshake is sent, each direction of the session is an AES-256-CTR stream whose
-keystream runs continuously across every frame (`crates/ton-net-adnl/src/frame.rs`).
+keystream runs continuously across every frame (`core/src/adnl/frame.rs`).
 
 ### 3.1 The frame
 
@@ -224,8 +225,8 @@ length (u32 LE) ++ nonce (32) ++ payload ++ checksum (32)
 The whole frame, length prefix included, is encrypted under the sending direction's
 keystream. A sealed frame with an empty payload is therefore `4 + 64` bytes; a sealed
 frame with an 18-byte payload is `4 + 32 + 18 + 32 = 86` bytes
-(`crates/ton-net-adnl/src/frame.rs`, tests `seals_and_opens_an_empty_payload` and the
-pinned vector in `crates/ton-net-adnl/tests/vectors.rs`).
+(`core/src/adnl/frame.rs`, tests `seals_and_opens_an_empty_payload` and the
+pinned vector in `core/tests/vectors.rs`).
 
 ### 3.2 The two session ciphers
 
@@ -236,7 +237,7 @@ it. The client seeds them from the 160 session parameters:
 - `tx` key = `params[32..64]`, `tx` iv = `params[80..96]`
 
 The server derives the mirror image from the same parameters, so a frame the client seals
-with `tx` opens on the server with its `rx` (`crates/ton-net-adnl/src/frame.rs`,
+with `tx` opens on the server with its `rx` (`core/src/adnl/frame.rs`,
 `from_params`; the test `peer` helper builds the mirror). Parameter bytes `96..160` are
 carried in the handshake but are not consumed by this seeding.
 
@@ -262,7 +263,7 @@ measured mainnet block-proof reply is already 713 kB, so a tighter bound would r
 honest traffic the day a server sends a few more links. The bounds that limit real work,
 the link count, the proof sizes, and the signature counts a client will check, live in the
 `ton-net` facade, all well under this ceiling
-(`crates/ton-net-adnl/src/frame.rs`).
+(`core/src/adnl/frame.rs`).
 
 Sealing a payload that would exceed the ceiling returns `FrameError::PayloadTooLarge`
 before anything is sealed, so the send keystream does not move. Refusing after sealing
@@ -276,19 +277,19 @@ four-byte length prefix, advancing the `rx` keystream by four bytes, and returns
 length to read. `open_body` then decrypts exactly that many bytes, splits off the nonce
 and checksum, and rejects the frame with `FrameError::Checksum` if
 `SHA-256(nonce ++ payload)` does not match the stored checksum
-(`crates/ton-net-adnl/src/frame.rs`). A single flipped byte inside the body fails this
+(`core/src/adnl/frame.rs`). A single flipped byte inside the body fails this
 check (`a_tampered_payload_is_rejected`).
 
 Because both steps move the keystream, they must run in order and to completion. The
 connection driver guards this with an `intact` flag, lowered before a frame starts moving
 and raised only once it has finished; an interruption in between leaves it lowered, and
 the session is reported as `Desynchronized` on the next use rather than silently reading
-from the wrong keystream position (`crates/ton-net-adnl/src/connection.rs`).
+from the wrong keystream position (`core/src/adnl/connection.rs`).
 
 ## 4. The ADNL message envelope
 
 Inside a frame's payload rides an `adnl.Message`. The client sends a query and the server
-replies with an answer echoing the same id (`crates/ton-net-tl/src/adnl.rs`).
+replies with an answer echoing the same id (`core/src/tl/adnl.rs`).
 
 | Scheme line | Constructor id | Role |
 |---|---|---|
@@ -303,7 +304,7 @@ to its request. For the liteserver path the query payload is a serialized
 
 The connection driver wraps each outgoing request in an `adnl.message.query` with a fresh
 random `query_id`, seals it into a frame, and reads frames until an `adnl.message.answer`
-echoes that id (`crates/ton-net-adnl/src/connection.rs`, `query`). Two rules shape the read
+echoes that id (`core/src/adnl/connection.rs`, `query`). Two rules shape the read
 loop:
 
 - A frame whose decrypted payload is empty is an ADNL confirmation frame and carries no
@@ -316,13 +317,13 @@ loop:
 ADNL defines more message kinds than the two modeled here. A frame that decrypts and
 checks out but names an unmodeled message is treated as a gap in what is decoded, not a
 broken stream: it is skipped like any other non-answer, and the stream position stays
-known because the frame was read whole (`crates/ton-net-adnl/src/connection.rs`).
+known because the frame was read whole (`core/src/adnl/connection.rs`).
 
 ## 5. The liteserver query layer
 
 The liteserver read protocol is a set of `liteServer.*` request and response types
-(`crates/ton-net-tl/src/lite.rs`), driven by `ton-net-lite`
-(`crates/ton-net-lite/src/client.rs`). Every response is the server's word; this layer
+(`core/src/tl/lite.rs`), driven by `lite`
+(`core/src/lite/client.rs`). Every response is the server's word; this layer
 decodes it and checks neither the Merkle proofs nor the validator signatures a liteserver
 returns.
 
@@ -338,8 +339,8 @@ A liteserver method travels inside two envelopes:
 
 The wrapping is worked out byte for byte in a test that reproduces the exact query a
 mainnet liteserver accepted in the feasibility spike
-(`crates/ton-net-tl/tests/wire.rs`, `query_wire_layout_matches_mainnet_spike`;
-`crates/ton-net-lite/src/client.rs`, `build_query_wraps_the_request_as_a_liteserver_query`).
+(`core/tests/wire.rs`, `query_wire_layout_matches_mainnet_spike`;
+`core/src/lite/client.rs`, `build_query_wraps_the_request_as_a_liteserver_query`).
 For `getMasterchainInfo`:
 
 ```text
@@ -378,10 +379,10 @@ target block follows. In this client the field is derived from the target rather
 carried, so the flag word and the field cannot disagree. With the target present, the
 request is `4 + 4 + 80 + 80 = 168` bytes and the mode word is `01 00 00 00`; with the
 target absent, the request is `4 + 4 + 80 = 88` bytes and the mode word is `00 00 00 00`
-(`crates/ton-net-tl/tests/wire.rs`, `the_mode_word_follows_the_target_block`). The read
+(`core/tests/wire.rs`, `the_mode_word_follows_the_target_block`). The read
 client always supplies a target: a client walking toward a head it has already chosen
 gains nothing from letting the server pick the destination
-(`crates/ton-net-lite/src/client.rs`, `block_proof`).
+(`core/src/lite/client.rs`, `block_proof`).
 
 ### 5.3 Responses
 
@@ -403,12 +404,12 @@ layer parses none of those cell trees.
 
 A real `liteServer.masterchainInfo` captured from a mainnet liteserver decodes and
 re-encodes to the exact captured bytes, which anchors the response layout to TON rather
-than to this crate's encoder (`crates/ton-net-tl/tests/wire.rs`,
+than to this crate's encoder (`core/tests/wire.rs`,
 `decodes_a_real_mainnet_masterchain_info`; the capture is at masterchain seqno 80945431).
 
 ### 5.4 Shared identifiers
 
-Three bare types recur as fields (`crates/ton-net-tl/src/lite.rs`):
+Three bare types recur as fields (`core/src/tl/lite.rs`):
 
 - `tonNode.blockIdExt` is a full block identifier: workchain (`int`), shard (`long`),
   seqno (`int`), root hash (`int256`), and file hash (`int256`), 80 bytes in all. The
@@ -426,7 +427,7 @@ A liteserver answers a query with either the expected response or a `liteServer.
 The two carry distinct constructor ids, so the read client first tries to decode the
 answer as `liteServer.error`; a success there surfaces as a `LiteError::LiteServer` with
 the server's code and message, and anything else is decoded as the expected response type
-(`crates/ton-net-lite/src/client.rs`, `decode_answer`). Bytes that are neither the error
+(`core/src/lite/client.rs`, `decode_answer`). Bytes that are neither the error
 nor the expected response are a decode failure.
 
 ## 6. Block proofs and the signed forms
@@ -434,7 +435,7 @@ nor the expected response are a decode failure.
 A block proof is what turns a block the client already trusts into a later one it can also
 trust. The server picks the route and the client validates every step, believing nothing
 about the route itself, including whether it runs forward
-(`crates/ton-net-tl/src/lite.rs`).
+(`core/src/tl/lite.rs`).
 
 ### 6.1 The proof chain
 
@@ -463,14 +464,14 @@ A step is a `liteServer.BlockLink` in one of two directions:
 
 Two whole answers captured from a mainnet liteserver, one per signed form, decode and
 re-encode byte for byte, which pins the layout to TON
-(`crates/ton-net-tl/tests/wire.rs`, `a_captured_block_proof_round_trips_byte_for_byte`).
+(`core/tests/wire.rs`, `a_captured_block_proof_round_trips_byte_for_byte`).
 The captures are one forward link each: masterchain 46894135 to 46897112 in the ordinary
 form, and 59238081 to 59379986 in the simplex form
-(`crates/ton-net-tl/tests/fixtures/`).
+(`core/tests/fixtures/`).
 
 The block-proof types cross the read client as their wire form rather than a cleaned-up
 twin, because their reader is a verifier and every field is evidence
-(`crates/ton-net-lite/src/lib.rs`, `crates/ton-net-lite/src/client.rs`).
+(`core/src/lite.rs`, `core/src/lite/client.rs`).
 
 ### 6.2 The signature set and its two forms
 
@@ -488,7 +489,7 @@ The **ordinary** form signs a block identity directly. The **simplex** form come
 TON's Simplex consensus and signs a vote naming a candidate, so the block is reached
 through the candidate rather than signed outright. Mainnet changed form at masterchain
 block 59379986, and a chain spanning that point carries both
-(`crates/ton-net-tl/src/lite.rs`).
+(`core/src/tl/lite.rs`).
 
 The two forms are a genuine hazard, which is why the constructor id is load-bearing here.
 Their first two integer fields are in opposite order: the ordinary form is
@@ -497,7 +498,7 @@ Their first two integer fields are in opposite order: the ordinary form is
 silently swapped, and nothing later in the bytes catches it. The constructor id is the
 only thing keeping the two apart, so a third form no version of the client knows is refused
 by name rather than read as a best guess
-(`crates/ton-net-tl/tests/wire.rs`,
+(`core/tests/wire.rs`,
 `the_set_id_is_the_only_thing_keeping_the_two_forms_apart`,
 `an_unknown_signature_set_is_refused_rather_than_read`).
 
@@ -505,7 +506,7 @@ by name rather than read as a best guess
 
 A signature in a set is 64 bytes and a signer id, and says nothing about what was signed.
 A client that checks one rebuilds the exact bytes the validator's key went over. These are
-the signed forms (`crates/ton-net-tl/src/signed.rs`). They are written and never read in
+the signed forms (`core/src/tl/signed.rs`). They are written and never read in
 normal use: a client builds one to check a signature against it.
 
 | Scheme line | Constructor id |
@@ -529,8 +530,8 @@ destination is believed only after its signatures check, not after its header pr
 only in its constructor id. It is not what a block proof's signatures cover; it is the
 negative control that keeps that from being an assumption. A client checking a real set
 against the wrong constructor finds every signature invalid, which looks exactly like a
-forged set (`crates/ton-net-tl/src/signed.rs`, and
-`crates/ton-net-tl/tests/wire.rs` for the id checks).
+forged set (`core/src/tl/signed.rs`, and
+`core/tests/wire.rs` for the id checks).
 
 **The simplex form.** A Simplex signature covers a `consensus.dataToSign`, assembled as:
 
@@ -546,7 +547,7 @@ the `notarizeVote` arm is its near neighbour and serves as the negative control 
 `blockIdApprove` does for the ordinary form. Both vote unions have a third member this
 client never builds. `CandidateId.hash` is the SHA-256 of the candidate bytes the signature
 set carries; nothing in the signed module hashes, so that digest is computed by the caller
-and the digest crates stay out of the codec (`crates/ton-net-tl/src/signed.rs`).
+and the digest crates stay out of the codec (`core/src/tl/signed.rs`).
 
 **Which block a candidate names.** A simplex signature covers a vote naming a candidate by
 hash, which on its own says nothing about which block that candidate was. A set of real
@@ -555,7 +556,7 @@ candidate bytes travel with the set precisely so a client can read the block out
 `consensus.candidateHashData` has two constructors, ordinary and empty, and both open with
 a `tonNode.blockIdExt`. The reader for this type implements no writer and reads only that
 opening block identity, tolerating trailing bytes; the bytes after the identity are covered
-by the hash the vote already signs (`crates/ton-net-tl/src/signed.rs`, `CandidateBlock`,
+by the hash the vote already signs (`core/src/tl/signed.rs`, `CandidateBlock`,
 `read_prefix`). The empty form names the block an empty slot extends rather than a
 proposal, and because Simplex finalization is transitive, finalizing an empty slot
 finalizes its nearest ordinary ancestor. The two constructors therefore say the same thing
@@ -565,10 +566,10 @@ about the block they name, so the reader unions them.
 
 Every boxed type the client encodes or decodes, with the constructor id declared in source
 and checked against the CRC-32 of its scheme line
-(`crates/ton-net-tl/tests/wire.rs`, `constructor_ids_match_scheme`). The id is the 32-bit
+(`core/tests/wire.rs`, `constructor_ids_match_scheme`). The id is the 32-bit
 value; on the wire it is written little-endian. Bare types carry no id and are listed after.
 
-### ADNL envelope (`crates/ton-net-tl/src/adnl.rs`)
+### ADNL envelope (`core/src/tl/adnl.rs`)
 
 | TL name | Constructor id | Rust type |
 |---|---|---|
@@ -576,7 +577,7 @@ value; on the wire it is written little-endian. Bare types carry no id and are l
 | `adnl.message.query` | `0xb48bf97a` | `adnl::Message::Query` |
 | `adnl.message.answer` | `0x0fac8416` | `adnl::Message::Answer` |
 
-### Liteserver requests and responses (`crates/ton-net-tl/src/lite.rs`)
+### Liteserver requests and responses (`core/src/tl/lite.rs`)
 
 | TL name | Constructor id | Rust type |
 |---|---|---|
@@ -597,7 +598,7 @@ value; on the wire it is written little-endian. Bare types carry no id and are l
 | `liteServer.signatureSet` | `0xf644a6e6` | `lite::SignatureSet::Ordinary` |
 | `liteServer.signatureSet.simplex` | `0xac249800` | `lite::SignatureSet::Simplex` |
 
-### Signed forms (`crates/ton-net-tl/src/signed.rs`)
+### Signed forms (`core/src/tl/signed.rs`)
 
 | TL name | Constructor id | Rust type |
 |---|---|---|
@@ -614,10 +615,10 @@ value; on the wire it is written little-endian. Bare types carry no id and are l
 
 | TL name | Rust type | Source |
 |---|---|---|
-| `tonNode.blockIdExt` | `lite::BlockIdExt` | `crates/ton-net-tl/src/lite.rs` |
-| `tonNode.zeroStateIdExt` | `lite::ZeroStateIdExt` | `crates/ton-net-tl/src/lite.rs` |
-| `liteServer.accountId` | `lite::AccountId` | `crates/ton-net-tl/src/lite.rs` |
-| `liteServer.signature` | `lite::Signature` | `crates/ton-net-tl/src/lite.rs` |
+| `tonNode.blockIdExt` | `lite::BlockIdExt` | `core/src/tl/lite.rs` |
+| `tonNode.zeroStateIdExt` | `lite::ZeroStateIdExt` | `core/src/tl/lite.rs` |
+| `liteServer.accountId` | `lite::AccountId` | `core/src/tl/lite.rs` |
+| `liteServer.signature` | `lite::Signature` | `core/src/tl/lite.rs` |
 
 ### TL primitive observed here
 
@@ -629,28 +630,28 @@ value; on the wire it is written little-endian. Bare types carry no id and are l
 
 | Constant | Value | Meaning | Source |
 |---|---|---|---|
-| handshake packet size | 256 bytes | `server_key_id ++ client_pub ++ checksum ++ encrypted_params` | `crates/ton-net-adnl/src/handshake.rs` |
-| handshake field sizes | 32 / 32 / 32 / 160 | the four packet fields | `crates/ton-net-adnl/src/handshake.rs` |
-| handshake randomness | 192 bytes | 32-byte key seed plus 160 session parameters | `crates/ton-net-adnl/src/handshake.rs` |
-| session cipher | `Ctr128BE<Aes256>` | AES-256-CTR, 128-bit big-endian counter | `crates/ton-net-adnl/src/lib.rs` |
-| `rx` seed | key `params[0..32]`, iv `params[64..80]` | server-to-client cipher | `crates/ton-net-adnl/src/frame.rs` |
-| `tx` seed | key `params[32..64]`, iv `params[80..96]` | client-to-server cipher | `crates/ton-net-adnl/src/frame.rs` |
-| `MIN_FRAME` | 64 | smallest frame body: nonce plus checksum | `crates/ton-net-adnl/src/frame.rs` |
-| `MAX_FRAME` | 16777216 (`1 << 24`) | protocol frame-body ceiling | `crates/ton-net-adnl/src/frame.rs` |
-| frame checksum | `SHA-256(nonce ++ payload)` | integrity over a frame body | `crates/ton-net-adnl/src/frame.rs` |
-| `CONNECT_TIMEOUT` | 10 seconds | TCP connect deadline | `crates/ton-net-adnl/src/transport.rs` |
-| `MAX_FRAMES_PER_QUERY` | 8 | frames read per query before giving up | `crates/ton-net-adnl/src/connection.rs` |
-| `tonNode.blockIdExt` size | 80 bytes | `4 + 8 + 4 + 32 + 32` | `crates/ton-net-tl/tests/wire.rs` |
-| `getBlockProof` size | 168 with target, 88 without | `4 + 4 + 80 + 80` or `4 + 4 + 80` | `crates/ton-net-tl/tests/wire.rs` |
-| `ton.blockId` size | 68 bytes | id plus two 32-byte hashes | `crates/ton-net-tl/src/signed.rs` |
-| ordinary form change | masterchain block 59379986 | where mainnet moved to the simplex form | `crates/ton-net-tl/src/signed.rs`, `crates/ton-net-tl/src/lite.rs` |
+| handshake packet size | 256 bytes | `server_key_id ++ client_pub ++ checksum ++ encrypted_params` | `core/src/adnl/handshake.rs` |
+| handshake field sizes | 32 / 32 / 32 / 160 | the four packet fields | `core/src/adnl/handshake.rs` |
+| handshake randomness | 192 bytes | 32-byte key seed plus 160 session parameters | `core/src/adnl/handshake.rs` |
+| session cipher | `Ctr128BE<Aes256>` | AES-256-CTR, 128-bit big-endian counter | `core/src/adnl.rs` |
+| `rx` seed | key `params[0..32]`, iv `params[64..80]` | server-to-client cipher | `core/src/adnl/frame.rs` |
+| `tx` seed | key `params[32..64]`, iv `params[80..96]` | client-to-server cipher | `core/src/adnl/frame.rs` |
+| `MIN_FRAME` | 64 | smallest frame body: nonce plus checksum | `core/src/adnl/frame.rs` |
+| `MAX_FRAME` | 16777216 (`1 << 24`) | protocol frame-body ceiling | `core/src/adnl/frame.rs` |
+| frame checksum | `SHA-256(nonce ++ payload)` | integrity over a frame body | `core/src/adnl/frame.rs` |
+| `CONNECT_TIMEOUT` | 10 seconds | TCP connect deadline | `core/src/adnl/transport/tcp.rs` |
+| `MAX_FRAMES_PER_QUERY` | 8 | frames read per query before giving up | `core/src/adnl/connection.rs` |
+| `tonNode.blockIdExt` size | 80 bytes | `4 + 8 + 4 + 32 + 32` | `core/tests/wire.rs` |
+| `getBlockProof` size | 168 with target, 88 without | `4 + 4 + 80 + 80` or `4 + 4 + 80` | `core/tests/wire.rs` |
+| `ton.blockId` size | 68 bytes | id plus two 32-byte hashes | `core/src/tl/signed.rs` |
+| ordinary form change | masterchain block 59379986 | where mainnet moved to the simplex form | `core/src/tl/signed.rs`, `core/src/tl/lite.rs` |
 
 ## 9. Conformance vectors
 
 The transport ships fixed public-API vectors that pin the exact bytes the handshake and
 framing produce for fixed inputs, so any change to the construction is caught. They are
 the construction the feasibility spike completed against a mainnet liteserver
-(`crates/ton-net-adnl/tests/vectors.rs`). The fixed inputs are a real mainnet server key
+(`core/tests/vectors.rs`). The fixed inputs are a real mainnet server key
 `9f85439d2094b92a639c2c9493d7b740e39dea8d08b525986d39d6dd69e7f309`, a key seed of 32
 `0x11` bytes, and 160 parameters where byte `i` is `(i * 3 + 5) mod 256`.
 
@@ -678,5 +679,5 @@ de5eb5b85168861aeda9114ae1fc6aa4984e556c3e6c
 
 The read path is exercised against a live mainnet liteserver by ignored network tests that
 complete a real handshake and read the masterchain head and the Elector account
-(`crates/ton-net-adnl/tests/mainnet.rs`, `crates/ton-net-lite/tests/mainnet.rs`). They run
+(`core/tests/mainnet_adnl.rs`, `core/tests/mainnet_lite.rs`). They run
 in a dedicated network CI job, not in the hermetic suite.

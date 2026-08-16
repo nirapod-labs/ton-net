@@ -26,34 +26,55 @@ crosses into the Node binding.
 ## The closed facade
 
 A consumer depends on one crate, `ton-net`, and imports from one place. The
-library is built as a stack of small crates, but the lower crates are internal.
-The facade re-exports the handful of their types a caller needs and hides the
-rest, so the import surface is closed and small rather than the whole workspace.
-This is the one-core, thin-surface arrangement of NET-ADR-002: the protocol and
-the verification live in the Rust core, and what a consumer sees is a narrow
-window onto it.
+library's layers are modules of that crate, `cell`, `tl`, `tlb`, `proof`, `adnl`,
+`lite` and `client`, and the crate root re-exports the handful of their types a
+caller needs. That list is the facade: closed and small rather than the whole of
+what the modules hold. The modules themselves stay public, so a consumer whose
+need is a layer reaches it one level down by naming the module, and the facade
+never becomes a wall between a caller and code it has already compiled. This is
+the one-core, thin-surface arrangement of NET-ADR-002: the protocol and the
+verification live in the Rust core, and what a consumer imports by default is a
+narrow window onto it.
 
-The re-exported surface, grouped by where each type is defined:
+Two things are public, and they are not the same thing. The modules are public
+because a layer has to stay reachable; the names below them are re-exported to the
+crate root because a caller should not have to name a layer to do the ordinary
+work. What follows lists both, the modules first and then, module by module, what
+the root lifts out of each.
 
-- From the facade itself: `Client`, `Config`, `Address`, `Error`, `ErrorCode`,
+The re-exported surface, and the modules it is drawn from:
+
+- The modules, seven of them, each reached by naming it: `adnl`, `cell`, `client`,
+  `lite`, `proof`, `tl` and `tlb`. A module is public, not re-exported.
+- From the root and `client`: `Client`, `Config`, `Address`, `Error`, `ErrorCode`,
   `Verified`, `SyncReport`, the free function `verify_account`, and the constant
   `VERIFY_EPOCH`.
-- From the liteserver layer: `ServerReported`, `BlockIdExt`, `MasterchainInfo`,
+- From `lite`: `ServerReported`, `BlockIdExt`, `MasterchainInfo`,
   `AccountState`.
-- From the block layer: `Account`, `AccountStatus`, `AccountRead`, `Coins`.
-- From the cell layer: the model, `Cell`, `CellType`, `Identity`, `Slice`,
+- From `tlb` and `proof`: `Account`, `AccountStatus`, `AccountRead`, `Coins`.
+- From `cell`: the model, `Cell`, `CellType`, `Identity`, `Slice`,
   `Builder`, `CellError`, `Dict`, `DictEntry`, `DictIter`, `Lookup` and
   `MsgAddress`; and the bag codec, `parse_boc`, `serialize_boc`, `MAX_CELLS`,
   `MAX_DEPTH`, `MAX_BITS` and `MAX_REFS`.
+- Nothing from `adnl` or `tl`. The wire codec and the transport are what the layers
+  above them are for, and a consumer who needs one names the module.
+
+The `net` feature gates every name that reaches a socket or the randomness drawn for
+one: `Client` and `SyncReport` at the root, `LiteClient` and `LiteError` in `lite`,
+and `AdnlConnection`, `AdnlError` and `TcpTransport` in `adnl`. That is wider than the
+socket itself, because the ADNL message layer and the liteserver query client are
+generic over the transport seam and are gated with their one consumer rather than
+apart from it. A feature is not an export, which is why this is written here and not
+in the list.
 
 Which types the cell layer contributes is decided by a rule rather than by
 taste, because a closed facade is a promise that fails quietly otherwise. A
-method answering with a type the facade does not re-export is a method a
-consumer cannot use: the call compiles inside the workspace, where every crate
-is a path away, and outside it the result has nowhere to go. The cell model is
-re-exported to that closure: every type a method on a re-exported cell type
-answers with is nameable here. The block layer is not: `Account::decode` answers
-with a `BlockError` the facade does not re-export, so that failure is read
+method answering with a type the root does not re-export is a method a consumer
+cannot use without naming the module it came from, and the point of the root list
+is to be usable without that. The cell model is re-exported to that closure:
+every type a method on a re-exported cell type answers with is nameable at the
+root. The block layer is not: `Account::decode` answers
+with a `BlockError` the root does not re-export, so that failure is read
 through the conversion into `Error` rather than by naming it, and closing that is
 a separate decision about which layer's error a consumer sees. An `Account`
 carries its code and data as `Cell`s, and from a `Cell` that rule reaches
@@ -61,7 +82,7 @@ carries its code and data as `Cell`s, and from a `Cell` that rule reaches
 `Dict` it loads, the `Lookup`, `DictEntry` and `DictIter` a dictionary is read
 through, and the `MsgAddress` a message carries. `MsgAddress` is the wire form
 of an address and is not `Address`, which is the form a person writes.
-`crates/ton-net/tests/surface.rs` holds the rule for the methods it enumerates,
+`core/tests/surface.rs` holds the rule for the methods it enumerates,
 by binding each result to a name written as `ton_net::`.
 
 The bag codec is here for a different reason. `account_state` hands a proof and
@@ -70,30 +91,37 @@ no `parse_boc` could write a bag and not read one, and that escape hatch would
 dead-end. The four constants are the bounds a parse refuses past and the bounds
 one cell holds within.
 
-What the rule does not reach stays out: the augmented and prefix dictionaries,
-the proof builders and usage tracking, and the streaming and chunked readers are
-reachable from no method on a type the facade returns. No feature of the cell engine
-is forwarded, and each is out for its own reason. `parallel` pulls no dependency
-and splits a wide finalization wave across threads, so forwarding it would start
-threads under a caller running several parses beside each other, which is the
-caller's choice to make and not this crate's. `json` renders a cell as a
-`serde_json::Value`, so forwarding it would put a type the facade does not
-re-export back into a facade signature, and would pin the facade's public API to
-serde_json's major version. `compress` is clean on types, dealing only in
-`Vec<u8>`, `Cell` and `CellError`, and waits on the build rather than on the
-surface: no read here returns a compressed bag and no method takes one, and the
-gate compiles, lints and documents the facade in one configuration, so a feature
-the gate does not build is code rotting behind a flag. It is forwarded when a
-read or a write here handles a compressed bag, together with the lane that keeps
-it compiled.
+What the rule does not reach stays out of the root list: the augmented and prefix
+dictionaries, the proof builders and usage tracking, and the streaming and chunked
+readers are reachable from no method on a type the root returns. Out of the root
+list is not out of the crate. Each is reached by naming `ton_net::cell`, which is
+the module that holds the whole cell engine and is public for exactly this case.
+
+The optional capabilities are the crate's own features rather than something
+forwarded from a layer below, and all three are off by default. `compress` is LZ4
+over a serialized bag and admits `lz4_flex`; `json` renders an ordinary cell tree
+and admits no dependency, because the config reader already carries `serde_json`;
+`parallel` splits a wide finalization wave across scoped threads and admits no
+dependency either. What each adds is reached through `ton_net::cell`, and the root
+re-export list does not move when one is turned on, so the facade this document
+describes is the same list in every feature configuration. Turning `parallel` on is
+a decision about whether threads start underneath a caller already running several
+parses, and putting it on the one crate a consumer names is what puts that decision
+where it belongs.
+
+`net` is the fourth feature and the only one on by default. It admits `tokio` and
+`getrandom`, and it is what `Client` and `SyncReport` need. Under
+`default-features = false` the crate carries the cell engine, the typed structures,
+the proof engine, the ADNL handshake and frame crypto, `Verified`, address parsing
+and the config reader, with no socket in the graph, and `verify_account` still
+checks a read from bytes and an anchor a caller supplies.
 
 The facade owns the connection lifecycle, address parsing, the bundled network
 config, block-sync, and the type distinction between a proven read and a
 reported one. A caller who needs only the cell model or only a decoded account
-can depend on the lower crate directly, because each crate is publishable on its
-own, and that is also how the cell engine's features are reached today, but
-the facade is the surface the API is designed around and the one this document
-describes.
+names `ton_net::cell` or `ton_net::tlb` and takes the crate with its default
+features off, but the root list is the surface the API is designed around and the
+one this document describes.
 
 ## Two kinds of read
 
@@ -252,7 +280,7 @@ second string for the same account. Across the two alphabets it does not: `-` an
 parses, and the two parse equal. Which alphabets a user-friendly address may be
 written in is an open question this repository does not settle, and the decoder is
 left taking both rather than narrowed on a preference; the reasoning and the test
-that pins the count sit on `base64_decode` in `crates/ton-net/src/codec.rs`. A
+that pins the count sit on `base64_decode` in `core/src/codec.rs`. A
 caller that needs one identity per account compares parsed `Address` values, which
 is what equality here is for, rather than the strings they came from.
 It exposes `workchain` and `account_id`, and the two sending hints the

@@ -10,9 +10,9 @@ superseded-by: none
 # NET-ADR-012: What the cell engine promises at scale
 
 Parts of this record describe the tree as it stood when the decision was taken, and some of
-that has since been built. What moved is at the end, under [Since acceptance](#since-acceptance);
-the text above it is left as it was written, except where a claim about the tree was found
-false and corrected, which is marked in place.
+that has since been built. The crates it names have also become one crate. Both are at the end,
+under [Since acceptance](#since-acceptance); the text above it is left as it was written, except
+where a claim about the tree was found false and corrected, which is marked in place.
 
 ## Context
 
@@ -529,6 +529,39 @@ Gates on the work this record decides, none of which runs today:
   the control moved with the load.
 
 ## Since acceptance
+
+**The six library crates are one crate.** `ton-net`'s source is `core/src` (NET-ADR-009). Where
+a record of this vintage carries a `crates/ton-net-x/src/y.rs` anchor it reads `core/src/x/y.rs`,
+with `ton-net-block` the one exception: its decoding half is `tlb` and its checking half is
+`proof`. This record reaches that crate once and it lands in the second half. Four anchors,
+resolved rather than left to the rule:
+
+- `crates/ton-net-cell/tests/allocations.rs`, which the Context reads its fixture sizes off and
+  which decision 4's gate is written against, is `core/tests/allocations.rs`. The crate's tests
+  moved to `core/tests` whole, keeping every path below `tests/`, so
+  `crates/ton-net-cell/tests/cell/hostile.rs` is `core/tests/cell/hostile.rs` by the same step.
+- `crates/ton-net-cell/src/boc/parse.rs`, which carries the passes decision 3 is about, is
+  `core/src/cell/boc/parse.rs`.
+- `crates/ton-net-block/src/chain.rs`, where the per-link work budget is spent, is
+  `core/src/proof/chain.rs`. It went to the checking half, because bounding curve operations
+  against a padded validator set is a decision about a signature rather than a decode.
+- `crates/ton-net-adnl/src/connection.rs`, which carries the frame budget on an answer, is
+  `core/src/adnl/connection.rs`.
+
+**The Context's layering paragraph describes a graph that no longer exists, and one of its two
+conclusions is weaker than it was.** There are no longer two crates above the cell engine naming
+it in their manifests, nor a base crate that names none. What holds the direction is
+`scripts/check-layers.mjs`, which reads the source text of `core/src/{cell,tlb,proof,tl}` and
+refuses each of them naming `crate::adnl`, `crate::lite` or `crate::client`, naming tokio or
+getrandom, or reaching the socket, the filesystem, the process, the environment, a thread or
+either clock. Reading the text rather than the graph is stronger for the runtime claim: the
+sentence that the cell engine names no runtime is now checked on every source file under
+`core/src/cell/` rather than inferred from an absent manifest line, and the `std` reaches a
+manifest could never see are refused with it. It is weaker for the other conclusion. The
+Context says a parse mode added in the cell engine can reach neither `Verified` nor
+`ServerReported` because the crate names no workspace crate; `crate::lite` is on the refusal
+list and `crate::verified` is not, and NET-ADR-011's own note records where that leaves the
+barrier it rests on.
 
 Decisions 3 and 4 have since been built, and what was built differs from what this record
 anticipated in three places worth naming. Decision 2 is untouched: no storage seam exists.

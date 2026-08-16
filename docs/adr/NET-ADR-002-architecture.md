@@ -9,6 +9,12 @@ superseded-by: none
 
 # NET-ADR-002: One audited core, a sans-I/O seam, thin bindings
 
+Where this record names six crates it describes the tree as it stood when the decision was
+taken. They are one crate now, and what the layer names became is at the end, under
+[Since acceptance](#since-acceptance). The one-core shape this record fixes is unaffected:
+the collapse took the core from six crates to one, which is the direction the decision
+already pointed.
+
 ## Context
 
 ton-net speaks the TON client protocol and verifies every answer against validator
@@ -157,3 +163,26 @@ fixes the code shape and does not change the custody position.
 - The same core over a second transport is demonstrable. The generic driver runs over any
   `Transport`; TcpTransport shows it today, and a WebSocket transport reuses the driver
   unchanged.
+
+## Since acceptance
+
+The six core crates are one crate, `ton-net`, whose source is `core/src` (NET-ADR-009). Each
+name decision 1 assigns is now a module of `ton-net` rather than a crate beside it, and the
+block crate is two of them. `core/src/lib.rs` declares the public set: the TL codec is `tl`,
+the ADNL handshake and stream framing are `adnl`, the cell model and the representation hash
+and Merkle-proof checking are `cell`, block and account decode is `tlb`, the proof engine and
+the validator-signature-checked chain walk are `proof`, the liteserver query layer is `lite`,
+and the facade is the crate root together with `client`. Read decision 1 and the sentence
+closing the decision list with those names substituted; every seam they describe is where it
+was.
+
+Decision 4 needs one restatement rather than a substitution. The facade is still the single
+public surface, but "the only crate a consumer or a binding depends on" is now the only crate
+there is, so what carries the layer boundary is the module tree and the check over it rather
+than a manifest. A consumer that wants the deciding layers without the network takes
+`ton-net` with `default-features = false`, which drops tokio and the socket and keeps the cell
+engine, the typed structures, the proof engine, the ADNL handshake and frame crypto,
+`Verified`, address parsing and the config reader.
+
+The verification bullet reading "the six workspace crates hold the protocol and the
+verification" reads one crate, and the Node binding still depends on `ton-net` alone.

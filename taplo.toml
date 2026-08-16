@@ -1,10 +1,11 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: 2026 Nirapod Labs
 
-# TOML formatting, so the manifests stop being hand-maintained. Nineteen TOML files
+# TOML formatting, so the manifests stop being hand-maintained. Sixteen TOML files
 # carry the workspace, the lint policy, the license policy and the release
 # configuration, and until this file existed each one was formatted by whoever
-# touched it last.
+# touched it last. Three of the sixteen are the standalone spikes, which the exclude
+# below keeps out.
 #
 # The settings below are not preferences. `.editorconfig` already declared two-space
 # indentation for TOML and every file was using four, so the convention the repository

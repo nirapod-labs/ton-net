@@ -2,14 +2,14 @@
 
 ## What is fuzzed
 
-The decode boundary of `ton-net-cell`: the point where bytes a peer chose become values
+The decode boundary of the `cell` module: the point where bytes a peer chose become values
 this client trusts. A bag of cells arrives from a liteserver nobody vouches for, every
 length, count and index in it was written by whoever sent it, and a Merkle proof is
 attacker-shaped by design. That is why the crate root forbids unsafe code and denies
 `unwrap`, `expect`, `panic`, `unreachable`, `todo` and slice indexing (NET-ADR-003).
 
 A lint rules out one way of failing. The fuzzer looks for the rest, over inputs nobody sat
-down and wrote. The targets live in `crates/ton-net-cell/tests/cell/fuzz.rs` and its
+down and wrote. The targets live in `core/tests/cell/fuzz.rs` and its
 `fuzz/targets.rs` child.
 
 ## The mechanism, and why not cargo-fuzz
@@ -29,7 +29,7 @@ AFL job added later reuses them rather than rewriting them.
 It adds no dependency. `deny.toml` refuses a second copy of a crate already in the tree and
 vets every license and advisory, so a crate is a decision here rather than a line in a
 manifest (NET-ADR-004). `proptest`, already in the tree for the properties in
-`crates/ton-net-cell/src/proptests.rs`, generates values rather than mutating captured
+`core/src/cell/proptests.rs`, generates values rather than mutating captured
 bytes, so it answers a different question and is left where it is.
 
 ## Running it
@@ -37,7 +37,7 @@ bytes, so it answers a different question and is left where it is.
 The whole battery, at the budget the gate runs:
 
 ```
-cargo test -p ton-net-cell --all-features fuzz
+cargo test -p ton-net --all-features fuzz
 ```
 
 That is five targets at fifteen hundred cases each, about a second and a half on the machine
@@ -47,7 +47,7 @@ is part of `cargo test`.
 A longer run sets the budget:
 
 ```
-TON_NET_FUZZ_ITERATIONS=250000 cargo test -p ton-net-cell --all-features fuzz -- --nocapture
+TON_NET_FUZZ_ITERATIONS=250000 cargo test -p ton-net --all-features fuzz -- --nocapture
 ```
 
 Two hundred and fifty thousand cases per target ran in about seven minutes on the machine
@@ -77,14 +77,14 @@ A failing case prints the target, the seed, the case index and the input as hex 
 assertion message. The whole run is a function of the seed, so:
 
 ```
-TON_NET_FUZZ_SEED=0x53465546465a5a55 cargo test -p ton-net-cell --all-features fuzz
+TON_NET_FUZZ_SEED=0x53465546465a5a55 cargo test -p ton-net --all-features fuzz
 ```
 
 reproduces it exactly. The seed accepts decimal or a `0x` prefix and defaults to a fixed
 value, so a failure in the gate reproduces from what the run printed rather than from
 whatever the clock said.
 
-For a case worth keeping, the printed hex goes into `crates/ton-net-cell/tests/cell/`
+For a case worth keeping, the printed hex goes into `core/tests/cell/`
 as its own named test asserting the property that broke. A fuzz corpus is not a regression
 suite: the corpus moves, and a case that only reproduces under one seed and one budget is
 not a check anybody can read.
@@ -100,9 +100,9 @@ having survived, which the test runner reports anyway.
   reads the count a bag states rather than one that counts what a bag already parsed to.
   `MAX_BITS` and `MAX_REFS` are not checked at all, because neither is a bound the reader
   gets the chance to miss. `bit_len` in
-  `crates/ton-net-cell/src/boc.rs` halves a descriptor byte, multiplies by eight and adds
+  `core/src/cell/boc.rs` halves a descriptor byte, multiplies by eight and adds
   seven at its widest, which is `MAX_BITS` at a descriptor of 255, and `Refs` in
-  `crates/ton-net-cell/src/cell/refs.rs` is an enum whose widest variant holds `MAX_REFS`
+  `core/src/cell/cell/refs.rs` is an enum whose widest variant holds `MAX_REFS`
   cells. What parses then round trips, to the same root representation hashes and to the
   same bytes twice running, for every bag it parses.
 
@@ -143,7 +143,7 @@ having survived, which the test runner reports anyway.
 
 ## The corpus
 
-Three captured mainnet bags, in `crates/ton-net-cell/tests/fixtures/`: an account proof,
+Three captured mainnet bags, in `core/tests/fixtures/`: an account proof,
 which carries exotic cells, and two whole blocks, which carry stored hashes and complete
 dictionaries. Random bytes stop at the magic number and bytes that get past it stop at the
 first count, so a corpus of real bags is what reaches the reference decoding, the exotic

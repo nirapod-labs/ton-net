@@ -485,65 +485,18 @@ dependencies = [
 
 [[package]]
 name = "ton-net"
-version = "0.3.0"
-dependencies = [
- "serde",
- "serde_json",
- "thiserror",
- "tokio",
- "ton-net-adnl",
- "ton-net-block",
- "ton-net-cell",
- "ton-net-lite",
-]
-
-[[package]]
-name = "ton-net-adnl"
-version = "0.3.0"
+version = "0.4.2"
 dependencies = [
  "aes",
  "ctr",
  "curve25519-dalek",
  "getrandom",
+ "serde",
+ "serde_json",
  "sha2",
  "thiserror",
- "tokio",
- "ton-net-tl",
-]
-
-[[package]]
-name = "ton-net-block"
-version = "0.3.0"
-dependencies = [
- "curve25519-dalek",
- "sha2",
- "thiserror",
- "ton-net-cell",
- "ton-net-tl",
-]
-
-[[package]]
-name = "ton-net-cell"
-version = "0.3.0"
-dependencies = [
- "sha2",
- "thiserror",
-]
-
-[[package]]
-name = "ton-net-lite"
-version = "0.3.0"
-dependencies = [
- "thiserror",
- "ton-net-adnl",
- "ton-net-tl",
-]
-
-[[package]]
-name = "ton-net-tl"
-version = "0.3.0"
-dependencies = [
  "tl-proto",
+ "tokio",
 ]
 
 [[package]]

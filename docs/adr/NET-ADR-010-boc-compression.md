@@ -7,6 +7,11 @@ supersedes: none
 superseded-by: none
 ---
 
+The paths in this record describe the tree as it stood when the decision was taken. Six library
+crates are now one, and where each anchor points today is at the end, under
+[Since acceptance](#since-acceptance). The feature gate, the cap before allocation, and the
+bounds-checked expansion are unaffected.
+
 ## Context
 
 TON compresses a serialized bag of cells with LZ4, and a full client reads and writes that
@@ -165,3 +170,34 @@ and under a cap. Whether those bytes are what a TON node emits is undetermined h
 things would settle it, and neither is a change to this decision: a captured bag from a
 node, read back to the identities it should give, and a citation for the framing in
 `docs/protocol/wire-format.md`.
+
+## Since acceptance
+
+The six library crates are one crate, `ton-net`, whose source is `core/src` (NET-ADR-009). Where
+a record of this vintage carries a `crates/ton-net-x/src/y.rs` anchor it reads `core/src/x/y.rs`,
+with `ton-net-block` the one exception: its decoding half is `tlb` and its checking half is
+`proof`. This record names neither half, so every anchor in it lands in `cell` or in `tl` and the
+split does not arise.
+
+Three of them, resolved rather than left to the rule:
+
+- `crates/ton-net-cell/src/boc/compress.rs`, which the Decision and the Verification both name,
+  is `core/src/cell/boc/compress.rs`. `MAX_DECOMPRESSED` and the four functions are there, and
+  the tests the Verification lists sit in the same file as before.
+- `crates/ton-net-cell/src/boc.rs`, which declares the module, is `core/src/cell/boc.rs`.
+- `crates/ton-net-cell/tests/cell/fuzz/targets.rs`, which asserts the bound the corrected clause
+  narrowed to, is `core/tests/cell/fuzz/targets.rs`. The crate's tests moved to `core/tests`
+  whole, keeping the path below `tests/`.
+
+**The crate-level re-export is now a module-level one, and the file it sits in changed name.**
+The Decision says `mod compress` and "the crate-level re-export in `lib.rs`" are both behind
+`#[cfg(feature = "compress")]`. The cell crate's root became the cell module's root, so that
+`lib.rs` is `core/src/cell.rs`, and the re-export there is still gated. A caller reaches the
+module the same way, through the `cell` module rather than through a crate of its own.
+
+The dependency claims are unaffected, because they were never about the workspace. `lz4_flex`
+is an external optional dependency and `compress = ["dep:lz4_flex"]` is declared in
+`core/Cargo.toml`, so the feature is the only path that pulls it and the default build carries
+neither the crate nor the code. The one workspace-shaped claim is in the closing section, that
+`crates/ton-net-tl` declares no constructor for a compressed bag; read `core/src/tl`, and the
+absence is what it was.

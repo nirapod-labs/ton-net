@@ -13,8 +13,8 @@
 
 use std::time::Duration;
 
-use ton_net_adnl::{AdnlConnection, TcpTransport};
-use ton_net_tl::{lite as wire, serialize};
+use ton_net::adnl::{AdnlConnection, TcpTransport};
+use ton_net::tl::{lite as wire, serialize};
 
 use sync_spike::block;
 use sync_spike::tl::{self, BlockIdExt, Link, Reader};

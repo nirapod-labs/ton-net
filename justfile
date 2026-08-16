@@ -20,7 +20,7 @@ default:
     @just --list
 
 # Everything the hermetic CI gate runs. No network.
-gate: fmt-check lint typos licenses workflows versions default-deps unsafe-posture census test doc
+gate: fmt-check lint typos licenses workflows versions default-deps unsafe-posture layers census test sans-io doc
 
 # A moved action tag is somebody else's code in this build. Also checks that a workflow
 # states what it may write and that a fork's schedule does not run it.
@@ -45,21 +45,36 @@ versions:
 census:
     node scripts/check-surface-census.mjs
 
-# Whether the cell engine's optional dependencies are still optional. `test` already
-# compiles and runs the default build, so the narrow thing left unchecked is that lz4_flex
-# and serde_json stay out of it. Naming either feature in a `default` list puts its crate in
-# every build with nothing failing, which is the silent mutation this catches; dropping the
-# `optional` line alone is caught by cargo, which refuses the manifest.
+# Whether an optional dependency is still pulled by its feature and by nothing else.
+# `test` compiles and runs the default build already, so what is left unchecked is which
+# crates that build carries. lz4_flex is out of it, because `compress` is not a default
+# feature. getrandom and tokio are out only with `--no-default-features`, because `net`
+# is one, and saying they were out of the default build would be false. serde_json is
+# read the other way, as a presence with the features off: the config reader parses JSON
+# on the ungated path, so putting that reader behind a feature is what this refuses.
+# Naming a feature in a `default` list puts its crate in every build with nothing
+# failing, which is the silent mutation here; dropping the `optional` line alone is
+# caught by cargo, which refuses the manifest.
 default-deps:
     node scripts/check-default-deps.mjs
 
-# Whether each crate root still carries the strongest unsafe-code lint it can. The six
-# library crates forbid, and the compiler needs no help holding them there. The binding
+# Whether each crate root still carries the strongest unsafe-code lint it can. The
+# library crate forbids, and the compiler needs no help holding it there. The binding
 # cannot: `napi_derive` expands an inner allowance, so a binding root that forbids fails
 # to build. It denies instead, and an allowance defeats a deny silently, so what is left
 # for a reading of the source text to close is that.
 unsafe-posture:
     node scripts/check-unsafe-posture.mjs
+
+# Which way the layers run, read out of the source text under core/src rather than out of
+# the crate graph. The graph was the old answer and it never held: `std` needs no
+# dependency edge, so a socket opened in a layer that only decides changed no manifest and
+# failed nothing here. This reads for a lower layer naming the transport above it, naming
+# tokio or getrandom, or reaching a thread, a socket, a file, the process, the environment
+# or the clock. It reads the edges that are supposed to be present in the same pass,
+# because a pattern that has stopped matching passes every absence for free.
+layers:
+    node scripts/check-layers.mjs
 
 # Regenerates the notices the npm tarballs carry. The `.node` links its whole
 # dependency tree in, so publishing it redistributes eighty-odd other projects and
@@ -76,26 +91,32 @@ notices:
 notices-check: notices
     git diff --stat --exit-code THIRD-PARTY-LICENSES.md
 
-# The sans-I/O core, on a target with no threads, no sockets and no clock. The
-# transport crates are expected to fail this until the browser transport lands.
+# The sans-I/O core, on a target with no threads, no sockets and no clock. What that
+# covers is wider than the three crates this used to name: the core is now everything the
+# `net` feature does not gate, which is the cells, the typed structures, the TL codec, the
+# proof engine, the ADNL handshake and frame ciphers, `Verified`, address parsing, the
+# config reader and the offline account check. What `net` holds back is the socket and the
+# randomness it draws, and with them the three consumers of the transport seam: the ADNL
+# message layer, the liteserver query client and `Client` with its walk. That is wider than
+# the socket alone, and `just sans-io` is what says which side each capability is on.
 wasm:
-    cargo build --target wasm32-unknown-unknown -p ton-net-tl -p ton-net-cell -p ton-net-block
+    cargo build --target wasm32-unknown-unknown --no-default-features
 
 # What the hot paths cost, over committed fixtures, so it runs offline.
 bench:
-    cargo bench -p ton-net-cell --bench cells
-    cargo bench -p ton-net-block --bench verify
+    cargo bench --bench cells
+    cargo bench --bench verify
 
 # Removes one check at a time and reruns the suite, which answers the question a
 # passing suite cannot: would a test notice. Slow, so it is a scheduled job in CI.
 mutants:
-    cargo mutants -p ton-net-cell -p ton-net-block --timeout 120
+    cargo mutants -p ton-net --timeout 120
 
 # The decode boundary under more cases than `test` runs on every push. Slow, so it is a
 # scheduled job in CI as well. docs/fuzzing.md covers the seed, how a failing case
 # reproduces, and why this is not a release profile.
 fuzz iterations="250000":
-    TON_NET_FUZZ_ITERATIONS={{ iterations }} cargo test -p ton-net-cell --all-features fuzz -- --nocapture
+    TON_NET_FUZZ_ITERATIONS={{ iterations }} cargo test -p ton-net --all-features fuzz -- --nocapture
 
 versions-fix:
     node scripts/check-versions.mjs --fix
@@ -129,9 +150,9 @@ hooks:
 lint:
     cargo clippy --all-targets -- -D warnings
     cargo clippy -p ton-net-node --all-targets -- -D warnings
-    # The cell crate's optional features are off by the line above, so they are linted
+    # The library's optional features are off by the line above, so they are linted
     # here too, or their code rots unseen behind a feature flag.
-    cargo clippy -p ton-net-cell --all-features --all-targets -- -D warnings
+    cargo clippy --all-features --all-targets -- -D warnings
 
 # Every file carries a copyright holder and a license identifier.
 licenses:
@@ -139,12 +160,22 @@ licenses:
 
 test:
     cargo test
-    cargo test -p ton-net-cell --all-features
+    cargo test --all-features
+
+# What a build with no socket still carries, compiled in that configuration. The manifest
+# names the capabilities `--no-default-features` keeps, and `test` above runs the default
+# build and the all-features build, both of which have `net` on, so nothing else in the gate
+# ever reads this resolution. Gating one of the named items stops the file compiling here.
+sans-io:
+    cargo test --no-default-features --test sans_io
+    cargo check --no-default-features --all-targets
 
 doc:
     RUSTDOCFLAGS="-D warnings" cargo doc --no-deps
     RUSTDOCFLAGS="-D warnings" cargo doc --no-deps -p ton-net-node
-    RUSTDOCFLAGS="-D warnings" cargo doc --no-deps -p ton-net-cell --all-features
+    # Same gap as `lint`: documentation on a feature-gated item is written once and then
+    # read by nothing until the feature is on.
+    RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --all-features
 
 # Reaches a live mainnet liteserver. Each test skips if its server is unreachable.
 test-live:

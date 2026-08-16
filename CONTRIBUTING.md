@@ -95,12 +95,12 @@ A test for a guard should be checked against the guard's absence. Remove the che
 confirm the test fails, put the check back. A regression test that passes either
 way is not testing anything.
 
-The cell crate's decode boundary carries fuzz targets, which `cargo test` runs at a
+The cell engine's decode boundary carries fuzz targets, which `cargo test` runs at a
 small budget along with everything else. A change to the parser, the slice readers or
 the dictionary readers is worth a longer run past that budget:
 
 ```
-TON_NET_FUZZ_ITERATIONS=250000 cargo test -p ton-net-cell --all-features fuzz -- --nocapture
+TON_NET_FUZZ_ITERATIONS=250000 cargo test --all-features fuzz -- --nocapture
 ```
 
 A failing case prints the seed and the input that produced it, and setting

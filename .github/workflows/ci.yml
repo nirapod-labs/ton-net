@@ -36,7 +36,7 @@ concurrency:
 # a push or a pull request from a fork still runs everything.
 #
 # The Node binding gets its own job as that layer lands in the v0.1.0 plan. The
-# hermetic gate covers the core crates; the network job runs the ignored tests that
+# hermetic gate covers the library; the network job runs the ignored tests that
 # reach a live liteserver; the spike job covers the standalone projects the gate
 # cannot see.
 jobs:
@@ -93,25 +93,35 @@ jobs:
       - uses: Swatinem/rust-cache@a45951ff880207c249adf57334cf2e9bd81d6e1e # v2
       - name: format
         run: cargo fmt --all -- --check
+      # The second line of each pair is what reaches the feature-gated code. The default
+      # build leaves `compress`, `json` and `parallel` off, so without it their code and
+      # their documentation are written once and then read by nothing.
       - name: clippy
         run: |
           cargo clippy --all-targets -- -D warnings
-          cargo clippy -p ton-net-cell --all-features --all-targets -- -D warnings
+          cargo clippy --all-features --all-targets -- -D warnings
       - name: docs
         env:
           RUSTDOCFLAGS: -D warnings
         run: |
           cargo doc --no-deps
-          cargo doc --no-deps -p ton-net-cell --all-features
+          cargo doc --no-deps --all-features
       - name: tests
         run: |
           cargo test
-          cargo test -p ton-net-cell --all-features
+          cargo test --all-features
       # The bare `cargo test` two lines up compiles and runs the default build, so this is
-      # not asking whether that build works. It asks whether the two optional dependencies
-      # are still absent from it. `scripts/check-default-deps.mjs` carries the reasoning.
+      # not asking whether that build works. It asks which dependencies that build carries
+      # and which one only a feature pulls. `scripts/check-default-deps.mjs` carries the
+      # reasoning, including why the answer for `net` is read with the features off rather
+      # than in the default build.
       - name: optional dependencies stayed optional
         run: node scripts/check-default-deps.mjs
+      # Which way the layers run, read out of the source text rather than out of a crate
+      # graph. The graph was the old answer and it never held: `std` needs no dependency
+      # edge, so a socket opened in a layer that only decides changed no manifest.
+      - name: the layers run one way
+        run: node scripts/check-layers.mjs
 
   mutants:
     name: would a test notice a missing check
@@ -133,8 +143,13 @@ jobs:
       # That is the question worth asking about a library whose job is refusing things.
       # Mutants judged unkillable rather than untested are excluded in
       # .cargo/mutants.toml, each with the reason.
-      - name: cell and proof crates
-        run: cargo mutants -p ton-net-cell -p ton-net-block --timeout 120
+      #
+      # The package is the whole library now, where it used to be the two crates that
+      # decode and verify. Nothing narrower is available without naming source paths here,
+      # and a path list in a workflow is a second copy of the layout that goes stale the
+      # first time a module moves.
+      - name: the library
+        run: cargo mutants -p ton-net --timeout 120
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:
@@ -163,7 +178,7 @@ jobs:
       - name: cell decode boundary
         env:
           TON_NET_FUZZ_ITERATIONS: 1000000
-        run: cargo test -p ton-net-cell --all-features fuzz -- --nocapture
+        run: cargo test -p ton-net --all-features fuzz -- --nocapture
 
   deny:
     name: advisories, licenses, duplicates, sources, notices
@@ -213,13 +228,25 @@ jobs:
           toolchain: stable
           targets: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@a45951ff880207c249adf57334cf2e9bd81d6e1e # v2
-      # The browser binding is a later milestone, and by then the decision that
-      # matters is already made: whether the protocol logic stayed free of the
-      # runtime. These three crates are the sans-I/O core and must build with no
-      # threads, no sockets and no clock. The transport layers above them pull in
-      # tokio and are expected to fail here until the browser transport lands.
-      - name: core crates on wasm32
-        run: cargo build --target wasm32-unknown-unknown -p ton-net-tl -p ton-net-cell -p ton-net-block
+      # A browser binding is not here yet, and by the time it is the decision that matters
+      # is already made: whether the protocol logic stayed free of the runtime. The line
+      # that decides it is the `net` feature rather than a set of package names, so this
+      # turns the feature off and builds what is left. That reaches wider than the three
+      # crates it used to name: everything the library decides rather than fetches has to
+      # compile with no threads, no sockets and no clock, which is the cell engine, the
+      # typed structures, the TL codec, the proof engine, the ADNL handshake and frame
+      # ciphers, `Verified`, address parsing and the config reader. What `net` holds back is
+      # the socket and the randomness it draws, and with them the three consumers of the
+      # transport seam: the ADNL message layer, the liteserver query client, and `Client`.
+      - name: the library without the socket, on wasm32
+        run: cargo build --target wasm32-unknown-unknown --no-default-features
+      # A build says the code compiles; it does not say the capabilities the manifest
+      # names are still reachable. This runs on the host, because the question is which
+      # items survive the feature and not which target they run on.
+      - name: what the build without the socket still carries
+        run: |
+          cargo test --no-default-features --test sans_io
+          cargo check --no-default-features --all-targets
 
   release-ready:
     name: versions and packaging
