@@ -12,7 +12,13 @@ use super::Slice;
 use crate::error::CellError;
 
 /// An account address, as a message carries it.
+///
+/// Two of the four wire forms are read here, and the account reader already parses a third
+/// (`crates/ton-net-block/src/account.rs`), so this enum is expected to grow arms. It is
+/// sealed against exhaustive matching from outside the crate for that reason: adding the
+/// remaining forms must not break a caller's `match`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum MsgAddress {
     /// No account, the form an empty source or an uninitialised destination takes.
     None,
