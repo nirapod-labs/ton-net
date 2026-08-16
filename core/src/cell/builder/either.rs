@@ -10,10 +10,11 @@
 //!
 //! At `Y = ^X` the two constructors are the same payload in two places: a clear bit and the
 //! payload written where the bit ended, or a set bit and the payload in the next reference.
-//! `Maybe (Either X ^X)` puts a `nothing$0` or `just$1` bit in front of that choice. Where the
-//! payload fits either way, both encodings are well formed for the same value, so the choice is the writer's, and a writer
-//! that chooses differently produces a different cell with a different hash. That is the
-//! whole reason the decision is made in one function here rather than at each field.
+//! `Maybe (Either X ^X)` puts a `nothing$0` or `just$1` bit in front of that choice. Where
+//! the payload fits either way, both encodings are well formed for the same value, so the
+//! choice is the writer's, and a writer that chooses differently produces a different cell
+//! with a different hash. That is the whole reason the decision is made in one function
+//! here rather than at each field.
 //!
 //! # Where the boundary sits
 //!
