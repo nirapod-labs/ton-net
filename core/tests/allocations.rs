@@ -55,6 +55,15 @@
 //! runs on, which is the same scope the counts above are stated at and for the same reason: no
 //! bag here is wide enough for a wave to leave this thread.
 //!
+//! **And it is exact only where a realloc extended a block where it lay.** The live figure moves
+//! after that call returns, debiting the old size before crediting the new, so a block that
+//! moved, which genuinely holds its old address and its new one together while the bytes are
+//! copied, is recorded at the new size alone. Where the request grew, the larger of the two
+//! stands in for both, and the figure is low by the old block for the length of the copy and by
+//! nothing after it. The peaks pinned to an exact figure below are taken over blocks reserved at
+//! their size and released whole, which is a shape no realloc arises in; the reads measured
+//! beside them are held to a bound and to agreeing with themselves.
+//!
 //! Counting them at all means installing a global allocator, and a global allocator means
 //! `unsafe`. That is why this is a test binary and not the library: the library forbids
 //! unsafe code and goes on forbidding it, and a test binary is a crate of its own.
