@@ -60,6 +60,9 @@ impl Builder {
     /// module documentation states which side of the discriminator that test sits on and
     /// what it deliberately does not reserve.
     ///
+    /// [`load_either_ref`](crate::cell::Slice::load_either_ref) reads it back and says which
+    /// arm was taken, since the encoding gives a reader no other way to tell.
+    ///
     /// # Errors
     ///
     /// Returns [`CellError::NoRoomForRefs`] if the payload does not fit inline and the cell
@@ -101,6 +104,8 @@ impl Builder {
     /// [`CellError::NoRoomForBits`] when not even the presence bit fits. The whole field is
     /// tested before any of it is written, so a failure never leaves a presence bit with
     /// nothing behind it.
+    ///
+    /// [`load_maybe_either_ref`](crate::cell::Slice::load_maybe_either_ref) reads it back.
     pub fn store_maybe_either_ref(
         &mut self,
         payload: Option<Cell>,
