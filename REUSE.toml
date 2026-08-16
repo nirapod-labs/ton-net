@@ -21,7 +21,7 @@ path = [
   ".github/PULL_REQUEST_TEMPLATE.md",
   "bindings/node/README.md",
   "bindings/node/package.json",
-  "crates/*/README.md",
+  "core/README.md",
   "spikes/*/README.md",
   "spikes/sync-feasibility/.gitignore",
 ]
@@ -65,7 +65,7 @@ SPDX-License-Identifier = "Apache-2.0"
 # the corpus as assembled, which block to keep and how it is laid out, and not the
 # network data inside it. Facts carry no copyright and none is claimed over them.
 [[annotations]]
-path = ["crates/*/tests/fixtures/**"]
+path = ["core/tests/fixtures/**"]
 precedence = "aggregate"
 SPDX-FileCopyrightText = "2026 Nirapod Labs"
 SPDX-License-Identifier = "Apache-2.0"
@@ -85,7 +85,7 @@ SPDX-License-Identifier = "Apache-2.0"
 # is the one file here that is somebody else's. It is held under its own identifier
 # rather than swept into the project license.
 [[annotations]]
-path = ["crates/ton-net/src/mainnet.config.json"]
+path = ["core/src/mainnet.config.json"]
 precedence = "aggregate"
 SPDX-FileCopyrightText = "NONE"
 SPDX-License-Identifier = "LicenseRef-TON-network-config"
