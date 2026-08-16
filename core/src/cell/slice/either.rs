@@ -8,10 +8,16 @@
 //! right$1 {X:Type} {Y:Type} value:Y = Either X Y;
 //! ```
 //!
-//! At `Y = ^X` that pair is the choice a message makes for each field whose width is not
-//! fixed: a clear bit puts the payload inline, starting at the bit after the discriminator,
-//! and a set bit puts it in the next reference. `Maybe (Either X ^X)` puts a `nothing$0` or
-//! `just$1` bit in front of the same choice.
+//! At `Y = ^X` that pair is what `Message X` and `MessageRelaxed X` use for two fields each,
+//! `init:(Maybe (Either StateInit ^StateInit))` and `body:(Either X ^X)`; `EitherStateInit`
+//! is that same `init` under a name of its own, and the block schema puts the combinator
+//! nowhere else. Being variable in width is not what places a field behind one, which the
+//! same schema shows at `CommonMsgInfo`: a `CurrencyCollection`, a `VarUInteger 16` and a
+//! `Grams`, three variable-width fields carrying no discriminator between them.
+//!
+//! What the pair chooses is where the payload sits. A clear bit puts it inline, starting at
+//! the bit after the discriminator, and a set bit puts it in the next reference.
+//! `Maybe (Either X ^X)` puts a `nothing$0` or `just$1` bit in front of the same choice.
 //!
 //! The encoding carries the discriminator and nothing else. It does not carry how wide an
 //! inline payload is, so only `X`'s own parse can end one, and a reader at this level can
