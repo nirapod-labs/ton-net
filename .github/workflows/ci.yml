@@ -122,6 +122,11 @@ jobs:
       # edge, so a socket opened in a layer that only decides changed no manifest.
       - name: the layers run one way
         run: node scripts/check-layers.mjs
+      # A documentation paragraph edited without being reflowed. rustfmt would do this and
+      # cannot be asked to, since `wrap_comments` is nightly-only and `rustfmt.toml` carries
+      # no nightly key, on the ground that one warns on every run for every contributor.
+      - name: documentation is wrapped the way it was filled
+        run: node scripts/check-doc-wrap.mjs
 
   mutants:
     name: would a test notice a missing check
