@@ -3,7 +3,7 @@
 
 //! The ADNL transport: the encrypted link to a liteserver.
 //!
-//! ADNL is the transport TON nodes speak. This crate opens and runs a liteserver
+//! ADNL is the transport TON nodes speak. This module opens and runs a liteserver
 //! session over it, split along the sans-I/O seam of NET-ADR-002:
 //!
 //! - The protocol core is pure. [`client_handshake`] builds the 256-byte handshake

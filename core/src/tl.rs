@@ -3,7 +3,7 @@
 
 //! The TL codec: TON's Type Language wire format.
 //!
-//! This crate defines the TON TL types the client reads and writes, derived over
+//! This module defines the TON TL types the client reads and writes, derived over
 //! [`tl_proto`], and re-exports the serialize and deserialize entry points. It
 //! covers the ADNL message envelope ([`adnl`]), the liteserver query and response
 //! types ([`lite`]), and the messages a validator signature covers ([`signed`]).

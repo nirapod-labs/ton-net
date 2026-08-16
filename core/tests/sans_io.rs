@@ -25,6 +25,7 @@
 //! threads or a clock: it establishes that the code compiles and its pure paths answer,
 //! not that a browser would be happy.
 
+use ton_net::adnl::{client_handshake, FrameError, HandshakeSecrets, SessionCiphers};
 use ton_net::cell::{parse_boc, serialize_boc, Builder, Cell, CellError, Slice, UsageTree};
 use ton_net::proof::{signature, verify_account, verify_chain, AccountRead, ValidatorSet};
 use ton_net::tlb::{Account, AccountStatus, Block, BlockError, Coins, ShardState};
@@ -98,6 +99,17 @@ fn the_reader_and_the_parser_are_here() {
 
     let refused: Result<Address, Error> = Address::parse("not an address");
     assert_eq!(refused.unwrap_err().code(), ErrorCode::Address);
+}
+
+/// The ADNL handshake and the frame cipher, which are arithmetic over bytes.
+#[test]
+fn the_link_crypto_is_here() {
+    // Named rather than driven: a handshake needs a server key and a drawn secret, and
+    // this file draws nothing. Naming them is what proves the socket did not take them.
+    let _ = client_handshake;
+    let _ = SessionCiphers::open_len;
+    let _: fn(&FrameError) -> String = |e| e.to_string();
+    let _: fn(HandshakeSecrets) -> [u8; 32] = |s| s.key_seed;
 }
 
 /// The trust wrapper and the epoch, which a caller records alongside a stored result.

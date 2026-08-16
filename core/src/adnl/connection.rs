@@ -3,7 +3,7 @@
 
 //! The async connection driver: a liteserver session over a transport.
 //!
-//! [`AdnlConnection`] is the one async object in this crate. It draws the per-session
+//! [`AdnlConnection`] is the one async object in [`crate::adnl`]. It draws the per-session
 //! randomness from the operating system, drives the sans-I/O handshake and framing over
 //! a [`Transport`], and runs the ADNL message layer: it wraps a query with a fresh id,
 //! sends it, and reads frames until the answer to that id comes back. The liteserver
