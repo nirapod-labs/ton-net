@@ -3,12 +3,12 @@
 
 //! Writing a message address.
 //!
-//! The write side of [`load_address`](crate::Slice::load_address): the none and standard
+//! The write side of [`load_address`](crate::cell::Slice::load_address): the none and standard
 //! forms, in the layout a message reads them from.
 
 use super::Builder;
-use crate::error::CellError;
-use crate::slice::MsgAddress;
+use crate::cell::error::CellError;
+use crate::cell::slice::MsgAddress;
 
 impl Builder {
     /// Writes a [`MsgAddress`] in the standard or none form.
@@ -34,8 +34,8 @@ impl Builder {
 
 #[cfg(test)]
 mod tests {
-    use crate::slice::MsgAddress;
-    use crate::Builder;
+    use crate::cell::slice::MsgAddress;
+    use crate::cell::Builder;
 
     #[test]
     fn the_none_form_is_two_bits() {

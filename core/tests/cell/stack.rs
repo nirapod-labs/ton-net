@@ -52,7 +52,7 @@
 
 use std::process::Command;
 
-use ton_net_cell::{
+use ton_net::cell::{
     AugDict, Augmentation, Builder, CellError, Dict, Slice, Traverse, UsageTree, MAX_BITS,
     MAX_DEPTH,
 };
@@ -157,7 +157,7 @@ fn deep_aug() -> AugDict<Sum> {
 /// A chain at the limit, asserted to be that deep.
 fn deep_bag() -> Vec<u8> {
     let bag = deep_chain(LINKS);
-    let roots = ton_net_cell::parse_boc(&bag).expect("a bag at the limit parses");
+    let roots = ton_net::cell::parse_boc(&bag).expect("a bag at the limit parses");
     let root = roots.first().expect("the one root");
     #[allow(clippy::cast_possible_truncation)]
     let want = LINKS as u16;
@@ -206,21 +206,21 @@ fn spawn(scenario: &str, stack: usize) {
 fn run_over_a_bag(scenario: &str, bag: &[u8]) {
     match scenario {
         "parse" => {
-            let roots = ton_net_cell::parse_boc(bag).expect("parses");
+            let roots = ton_net::cell::parse_boc(bag).expect("parses");
             std::mem::forget(roots);
         }
         "release" => {
-            let roots = ton_net_cell::parse_boc(bag).expect("parses");
+            let roots = ton_net::cell::parse_boc(bag).expect("parses");
             drop(roots);
         }
         "dump" => {
-            let roots = ton_net_cell::parse_boc(bag).expect("parses");
+            let roots = ton_net::cell::parse_boc(bag).expect("parses");
             let rendered = roots.first().expect("the one root").dump();
             assert!(!rendered.is_empty(), "the render produced something");
             std::mem::forget(roots);
         }
         "prove" => {
-            let roots = ton_net_cell::parse_boc(bag).expect("parses");
+            let roots = ton_net::cell::parse_boc(bag).expect("parses");
             let root = roots.first().expect("the one root").clone();
             let mut usage = UsageTree::new(root.clone());
             let mut at = root.clone();
@@ -322,7 +322,7 @@ fn parsing_a_bag_costs_the_same_stack_at_any_depth() {
     for links in [4usize, LINKS] {
         let bag = deep_chain(links);
         on_a_stack_of("parse", 32 << 10, move || {
-            let roots = ton_net_cell::parse_boc(&bag).expect("the bag parses");
+            let roots = ton_net::cell::parse_boc(&bag).expect("the bag parses");
             #[allow(clippy::cast_possible_truncation)]
             let want = links as u16;
             let root = roots.first().expect("the one root");

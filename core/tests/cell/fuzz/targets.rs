@@ -16,7 +16,7 @@
 
 use std::collections::HashMap;
 
-use ton_net_cell::{
+use ton_net::cell::{
     parse_boc, serialize_boc, AugDict, Augmentation, BocView, Builder, Cell, CellError, Dict,
     LazyBoc, PfxDict, Slice, MAX_CELLS, MAX_DEPTH,
 };
@@ -607,7 +607,7 @@ impl Augmentation for Sum {
 /// reach the same bag.
 #[cfg(feature = "compress")]
 pub(super) fn compressed(bytes: &[u8]) -> bool {
-    use ton_net_cell::compress::{compress, decompress, decompress_boc};
+    use ton_net::cell::compress::{compress, decompress, decompress_boc};
 
     let mut expanded_any = false;
     if let Ok(expanded) = decompress(bytes) {

@@ -5,9 +5,9 @@
 
 use std::fmt;
 
-use ton_net_cell::Slice;
+use crate::cell::Slice;
 
-use crate::error::BlockError;
+use crate::tlb::error::BlockError;
 
 /// The nanotons in one TON.
 const NANOTONS_PER_TON: u128 = 1_000_000_000;
@@ -21,7 +21,7 @@ const NANOTONS_PER_TON: u128 = 1_000_000_000;
 /// # Examples
 ///
 /// ```
-/// use ton_net_block::Coins;
+/// use ton_net::tlb::Coins;
 ///
 /// let amount = Coins::from_nanotons(6_910_657_721_334);
 /// assert_eq!(amount.to_string(), "6910657721334");

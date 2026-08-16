@@ -18,8 +18,8 @@
 use lz4_flex::{compress_prepend_size, decompress_size_prepended};
 
 use super::{parse_boc, serialize_boc};
-use crate::cell::Cell;
-use crate::error::CellError;
+use crate::cell::cell::Cell;
+use crate::cell::error::CellError;
 
 /// The most bytes a compressed bag is allowed to expand to.
 ///
@@ -93,7 +93,7 @@ pub fn decompress_boc(bytes: &[u8]) -> Result<Vec<Cell>, CellError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::Builder;
+    use crate::cell::Builder;
 
     /// A two-cell bag: a root byte over one child byte.
     fn roots() -> Vec<Cell> {

@@ -13,7 +13,7 @@
 //! liteserver gave, one per signed form, are decoded and re-encoded and must come back
 //! byte for byte, which pins the layout to TON rather than to this crate's encoder.
 
-use ton_net_tl::{adnl, deserialize, lite, serialize, signed, TlError};
+use ton_net::tl::{adnl, deserialize, lite, serialize, signed, TlError};
 
 // IEEE CRC32, the TL constructor-id function. A boxed type's id is the CRC32 of its
 // scheme line, written little-endian on the wire.

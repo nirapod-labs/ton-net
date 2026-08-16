@@ -15,36 +15,58 @@ license.workspace = true
 repository.workspace = true
 rust-version.workspace = true
 
+[lib]
+# `cargo bench` would otherwise run the unit tests with criterion's flags.
+bench = false
+
+[features]
+default = ["net"]
+# The socket and the per-session randomness it needs. Everything the library decides
+# rather than fetches builds without this: the cell engine, the typed structures, the
+# proof engine, the ADNL handshake and frame crypto, `Verified`, address parsing and the
+# config reader. That is what a browser target gets from `--no-default-features`.
+net = ["dep:tokio", "dep:getrandom"]
+# LZ4 compression of a serialized bag of cells, opt-in so the default build stays free
+# of lz4_flex (admitted by NET-ADR-010).
+compress = ["dep:lz4_flex"]
+# JSON rendering of an ordinary cell tree. It admits no dependency, because the config
+# reader already carries serde_json unconditionally; what it gates is the module, which
+# is off by default because a rendering is not what this library is for.
+json = []
+# Splitting a wide finalization wave across the standard library's scoped threads. It
+# admits no dependency, and it is off by default for two reasons rather than for weight:
+# the spawn is compiled only when it is on, so a build for a target whose threads do not
+# run carries none, and a caller running several parses beside each other should not find
+# this one starting threads underneath it. The waves themselves are on either way; this
+# chooses what runs them.
+parallel = []
+
 [dependencies]
-ton-net-lite.workspace = true
-ton-net-adnl.workspace = true
-ton-net-block.workspace = true
-# No feature of ton-net-cell is forwarded, so `json` and `compress` are unreachable
-# through this crate whatever the re-export list above them says.
-#
-# `json` renders a cell tree as a `serde_json::Value`. Forwarding it would put a type
-# from a crate this one does not re-export into a facade signature, which is the same
-# hole the cell re-exports close, one crate further out, and it would pin this crate's
-# public API to serde_json's major version.
-#
-# `compress` is clean on types, dealing only in `Vec<u8>`, `Cell` and `CellError`, and
-# the reason it waits is the build rather than the surface: no read here returns a
-# compressed bag and no method takes one, and the gate compiles, lints and documents this
-# crate in one configuration, so a feature the gate does not build is code rotting behind
-# a flag. That is the same argument the justfile writes beside its `--all-features` lint
-# of ton-net-cell. Forward it with the lane that keeps it compiled, when a read or a
-# write here handles a compressed bag.
-#
-# Until then either feature is reached by depending on ton-net-cell, which docs/api-design.md
-# already provides for where the need is the cell engine rather than the client.
-ton-net-cell.workspace = true
+tl-proto.workspace = true
+# Signature verification is built on the curve crate rather than on an ed25519 crate,
+# which would duplicate it (NET-ADR-006).
+curve25519-dalek.workspace = true
+# The representation hash is SHA-256, on the single copy NET-ADR-004 fixes. A validator's
+# short id is the same hash over its key in TL form.
+sha2.workspace = true
+aes.workspace = true
+ctr.workspace = true
+thiserror.workspace = true
 serde = { workspace = true }
 serde_json.workspace = true
-thiserror.workspace = true
-# Only the timer, to bound every call. The socket and runtime come from the caller.
-tokio = { workspace = true, features = ["time"] }
+lz4_flex = { workspace = true, optional = true }
+# The per-session ADNL randomness, drawn at the I/O edge and nowhere else.
+getrandom = { workspace = true, optional = true }
+# The native transport and the timer that bounds every call. The socket is behind the
+# `net` feature; the runtime comes from the caller.
+tokio = { workspace = true, optional = true, features = ["net", "io-util", "time"] }
 
 [dev-dependencies]
+criterion.workspace = true
+proptest.workspace = true
+# The differential test compares this library's acceptance rule against an audited
+# implementation. It does not ship, so the curve copy it pulls reaches no consumer.
+ed25519-dalek = "3"
 tokio = { workspace = true, features = [
   "rt",
   "rt-multi-thread",
@@ -52,6 +74,18 @@ tokio = { workspace = true, features = [
   "time",
   "test-util",
 ] }
+
+[[bench]]
+name = "cells"
+harness = false
+
+[[bench]]
+name = "dict"
+harness = false
+
+[[bench]]
+name = "verify"
+harness = false
 
 [lints]
 workspace = true

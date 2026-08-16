@@ -12,10 +12,10 @@
 //! computed once, at the end, from what was stored. There is no way to set a hash, and
 //! no way to reach the constructor that would let one disagree with its contents.
 
-use crate::cell::{Cell, CellType, Payload, Refs, MAX_BITS, MAX_REFS};
-use crate::dict::Dict;
-use crate::error::CellError;
-use crate::slice::Slice;
+use crate::cell::cell::{Cell, CellType, Payload, Refs, MAX_BITS, MAX_REFS};
+use crate::cell::dict::Dict;
+use crate::cell::error::CellError;
+use crate::cell::slice::Slice;
 
 mod address;
 mod snake;
@@ -30,14 +30,14 @@ mod snake;
 /// # Examples
 ///
 /// ```
-/// use ton_net_cell::Builder;
+/// use ton_net::cell::Builder;
 ///
 /// let mut b = Builder::new();
 /// b.store_uint(0xab, 8)?;
 /// let cell = b.build()?;
 /// assert_eq!(cell.bit_len(), 8);
 /// assert_eq!(cell.data(), [0xab]);
-/// # Ok::<(), ton_net_cell::CellError>(())
+/// # Ok::<(), ton_net::cell::CellError>(())
 /// ```
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Builder {
@@ -153,7 +153,7 @@ impl Builder {
     ///
     /// A zero-width field holds only zero and writes nothing, which is what
     /// [`store_uint`](Builder::store_uint) does with the same argument and what
-    /// [`load_int`](crate::Slice::load_int) reads back from no bits at all. The three used
+    /// [`load_int`](crate::cell::Slice::load_int) reads back from no bits at all. The three used
     /// to disagree: a zero width was a `TooWide` here and a written nothing there, so the
     /// one length a variable-width encoding reaches for its zero was a failure on the
     /// signed side alone.
@@ -317,13 +317,13 @@ impl Builder {
     /// # Examples
     ///
     /// ```
-    /// use ton_net_cell::Builder;
+    /// use ton_net::cell::Builder;
     ///
     /// let mut b = Builder::new();
     /// b.store_var_uint(42, 16)?;
     /// // A four-bit length of one, then the byte itself.
     /// assert_eq!(b.bits_used(), 12);
-    /// # Ok::<(), ton_net_cell::CellError>(())
+    /// # Ok::<(), ton_net::cell::CellError>(())
     /// ```
     pub fn store_var_uint(&mut self, value: u128, max: u32) -> Result<&mut Self, CellError> {
         if max < 2 {

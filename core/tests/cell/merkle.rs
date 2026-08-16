@@ -16,7 +16,7 @@
 //! Building runs alongside it: a proof built here over the tree a server's proof stands for
 //! reproduces that server's proof cell byte for byte, which pins the layout to real bytes.
 
-use ton_net_cell::{
+use ton_net::cell::{
     apply_update, create_proof, create_update, parse_boc, validate_update, virtualize, Cell,
     CellType, UsageTree,
 };

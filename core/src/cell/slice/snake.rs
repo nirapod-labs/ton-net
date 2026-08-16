@@ -3,12 +3,12 @@
 
 //! Reading a snake string.
 //!
-//! The inverse of [`store_snake`](crate::Builder::store_snake): the whole bytes of this
+//! The inverse of [`store_snake`](crate::cell::Builder::store_snake): the whole bytes of this
 //! cell, then those of the cell chained through its first reference, and so on to the end.
 
 use super::Slice;
-use crate::cell::Cell;
-use crate::error::CellError;
+use crate::cell::cell::Cell;
+use crate::cell::error::CellError;
 
 impl Slice<'_> {
     /// Reads a snake string: the whole bytes of this slice, then those of each cell chained
@@ -60,7 +60,7 @@ impl Slice<'_> {
 
 #[cfg(test)]
 mod tests {
-    use crate::Builder;
+    use crate::cell::Builder;
 
     /// Writes a snake, then reads it back whole.
     fn round_trip(bytes: &[u8]) -> Vec<u8> {

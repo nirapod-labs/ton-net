@@ -3,11 +3,11 @@
 
 //! The liteserver read client and its query and decode helpers.
 
-use ton_net_adnl::{AdnlConnection, Transport};
-use ton_net_tl::lite as wire;
-use ton_net_tl::{deserialize, serialize, TlRead, TlWrite};
+use crate::adnl::{AdnlConnection, Transport};
+use crate::tl::lite as wire;
+use crate::tl::{deserialize, serialize, TlRead, TlWrite};
 
-use crate::types::{AccountState, BlockIdExt, MasterchainInfo, ServerReported};
+use crate::lite::types::{AccountState, BlockIdExt, MasterchainInfo, ServerReported};
 
 /// A read client for one liteserver.
 ///
@@ -25,7 +25,7 @@ pub struct LiteClient<T> {
 pub enum LiteError {
     /// The ADNL layer failed: a transport, framing, or handshake error.
     #[error(transparent)]
-    Adnl(#[from] ton_net_adnl::AdnlError),
+    Adnl(#[from] crate::adnl::AdnlError),
 
     /// The liteserver returned an error in place of a result.
     #[error("liteserver error {code}: {message}")]
@@ -38,7 +38,7 @@ pub enum LiteError {
 
     /// The answer bytes did not decode as the expected response.
     #[error("could not decode the liteserver answer")]
-    Decode(#[from] ton_net_tl::TlError),
+    Decode(#[from] crate::tl::TlError),
 }
 
 impl<T: Transport> LiteClient<T> {

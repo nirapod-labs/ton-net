@@ -14,9 +14,9 @@
 use serde_json::{json, Value};
 
 use super::{Cell, MAX_BITS};
-use crate::builder::Builder;
-use crate::codec::{hex_decode, hex_encode};
-use crate::error::CellError;
+use crate::cell::builder::Builder;
+use crate::cell::codec::{hex_decode, hex_encode};
+use crate::cell::error::CellError;
 
 /// Renders an ordinary cell tree as JSON.
 ///
@@ -109,7 +109,7 @@ fn bit_at(data: &[u8], index: u16) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::create_proof;
+    use crate::cell::create_proof;
 
     /// A leaf cell holding one byte.
     fn leaf(byte: u64) -> Cell {

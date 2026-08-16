@@ -3,7 +3,7 @@
 
 //! The wrapper that marks a value as proven against a block.
 
-use ton_net_lite::BlockIdExt;
+use crate::lite::BlockIdExt;
 
 /// A value proven to sit in the state of a block the caller trusts.
 ///

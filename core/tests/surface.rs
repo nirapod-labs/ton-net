@@ -15,9 +15,9 @@
 //! compiling, which `cargo test` reports as a failure.
 //!
 //! Every cell type here arrives through the one `use ton_net::{..}` below, and nothing
-//! under it reaches for `ton_net_cell` by path. That is a discipline this file keeps
+//! under it reaches for `ton_net::cell` by path. That is a discipline this file keeps
 //! rather than something cargo enforces: a test target inherits its crate's own
-//! dependencies, so `ton_net_cell::Cell` would resolve here as readily as it does inside
+//! dependencies, so `ton_net::cell::Cell` would resolve here as readily as it does inside
 //! the library, and writing it would quietly reopen the hole the file exists to close.
 //!
 //! # The scope, exactly

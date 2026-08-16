@@ -25,7 +25,7 @@
 //! ends the sync with a named error, and none of them relaxes a check to let a sync
 //! succeed.
 
-use ton_net_lite::{BlockIdExt, PartialBlockProof};
+use crate::lite::{BlockIdExt, PartialBlockProof};
 
 use crate::Error;
 
@@ -71,7 +71,7 @@ const MAX_CLOCK_SKEW: u64 = 300;
 /// so it costs nothing, and it runs before the cell engine parses a proof or the curve
 /// arithmetic touches a signature.
 pub fn within_bounds(reply: &PartialBlockProof) -> Result<(), Error> {
-    use ton_net_lite::BlockLink;
+    use crate::lite::BlockLink;
 
     if reply.steps.len() > MAX_LINKS_PER_REPLY {
         return Err(Error::Sync(format!(

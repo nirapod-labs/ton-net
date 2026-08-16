@@ -3,9 +3,9 @@
 
 //! A block, read for its header, its configuration, and the state it leaves behind.
 
-use ton_net_cell::{Cell, CellType, Slice};
+use crate::cell::{Cell, CellType, Slice};
 
-use crate::error::BlockError;
+use crate::tlb::error::BlockError;
 use crate::proof::verify_merkle_proof;
 
 /// The constructor tag a block begins with.
@@ -98,7 +98,7 @@ impl Block {
     /// proof does not check out against `root_hash`, and
     /// [`BlockError::WrongConstructor`] if what it covers is not a block.
     pub fn from_proof(proof: &[u8], root_hash: &[u8; 32]) -> Result<Self, BlockError> {
-        let roots = ton_net_cell::parse_boc(proof)?;
+        let roots = crate::cell::parse_boc(proof)?;
         let root = roots
             .first()
             .ok_or(BlockError::Malformed("a proof with no root cell"))?;

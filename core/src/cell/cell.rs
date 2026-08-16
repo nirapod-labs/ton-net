@@ -11,8 +11,8 @@
 use std::fmt;
 use std::sync::Arc;
 
-use crate::error::CellError;
-use crate::slice::Slice;
+use crate::cell::error::CellError;
+use crate::cell::slice::Slice;
 
 mod dump;
 mod exotic;
@@ -53,14 +53,14 @@ pub const MAX_REFS: usize = 4;
 /// # Examples
 ///
 /// ```
-/// use ton_net_cell::{parse_boc, CellType};
+/// use ton_net::cell::{parse_boc, CellType};
 ///
 /// let bytes = [0xb5, 0xee, 0x9c, 0x72, 0x01, 0x01, 0x01, 0x01, 0x00, 0x03, 0x00,
 ///              0x00, 0x02, 0xab];
 /// let roots = parse_boc(&bytes)?;
 /// assert_eq!(roots[0].cell_type(), CellType::Ordinary);
 /// assert_eq!(roots[0].bit_len(), 8);
-/// # Ok::<(), ton_net_cell::CellError>(())
+/// # Ok::<(), ton_net::cell::CellError>(())
 /// ```
 #[derive(Clone)]
 pub struct Cell {
@@ -254,12 +254,12 @@ impl Cell {
     /// # Examples
     ///
     /// ```
-    /// use ton_net_cell::parse_boc;
+    /// use ton_net::cell::parse_boc;
     /// let bytes = [0xb5, 0xee, 0x9c, 0x72, 0x01, 0x01, 0x01, 0x01, 0x00, 0x03, 0x00,
     ///              0x00, 0x02, 0xab];
     /// let roots = parse_boc(&bytes)?;
     /// assert_eq!(roots[0].dump(), "x{AB}");
-    /// # Ok::<(), ton_net_cell::CellError>(())
+    /// # Ok::<(), ton_net::cell::CellError>(())
     /// ```
     #[must_use]
     pub fn dump(&self) -> String {
@@ -274,12 +274,12 @@ impl Cell {
     /// # Examples
     ///
     /// ```
-    /// use ton_net_cell::parse_boc;
+    /// use ton_net::cell::parse_boc;
     /// let bytes = [0xb5, 0xee, 0x9c, 0x72, 0x01, 0x01, 0x01, 0x01, 0x00, 0x03, 0x00,
     ///              0x00, 0x02, 0xab];
     /// let roots = parse_boc(&bytes)?;
     /// assert_eq!(roots[0].dump_bits(), "b{10101011}");
-    /// # Ok::<(), ton_net_cell::CellError>(())
+    /// # Ok::<(), ton_net::cell::CellError>(())
     /// ```
     #[must_use]
     pub fn dump_bits(&self) -> String {
@@ -292,18 +292,18 @@ impl Cell {
     ///
     /// Returns [`CellError::TooManyCells`] if the graph is larger than the parse limit.
     pub fn to_boc(&self) -> Result<Vec<u8>, CellError> {
-        crate::boc::serialize_boc(std::slice::from_ref(self))
+        crate::cell::boc::serialize_boc(std::slice::from_ref(self))
     }
 
     /// Opens a builder holding a copy of this cell's bits and references.
     ///
     /// A cell is immutable, so this is the way to change one: read it into a builder, add to
-    /// it or rebuild from it, and [`build`](crate::Builder::build) a new cell.
+    /// it or rebuild from it, and [`build`](crate::cell::Builder::build) a new cell.
     ///
     /// # Errors
     ///
     /// Returns [`CellError`] if the bits or references do not fit a builder.
-    pub fn to_builder(&self) -> Result<crate::Builder, CellError> {
+    pub fn to_builder(&self) -> Result<crate::cell::Builder, CellError> {
         self.parse().to_builder()
     }
 
@@ -398,7 +398,7 @@ impl fmt::Debug for Cell {
             .field("bits", &self.inner.bits)
             .field("refs", &self.inner.refs.as_slice().len())
             .field("level_mask", &self.inner.identity.level_mask())
-            .field("hash", &crate::codec::hex_encode(self.hash()))
+            .field("hash", &crate::cell::codec::hex_encode(self.hash()))
             .finish()
     }
 }
@@ -406,7 +406,7 @@ impl fmt::Debug for Cell {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::Builder;
+    use crate::cell::Builder;
 
     /// A one-byte ordinary cell holding `byte`.
     fn cell_of(byte: u64) -> Cell {

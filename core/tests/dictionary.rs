@@ -16,10 +16,10 @@
 //! written from `block.tlb` rather than by the library's own.
 //!
 //! The tests live beside the block fixtures because that is where a real dictionary can
-//! be reached; what they exercise is `ton_net_cell::Dict`.
+//! be reached; what they exercise is `ton_net::cell::Dict`.
 
 use ton_net_block::{proof, Block, ShardState};
-use ton_net_cell::{Builder, Cell, CellError, Dict, Lookup, Slice};
+use ton_net::cell::{Builder, Cell, CellError, Dict, Lookup, Slice};
 
 /// One forward proof link, holding a key block's configuration.
 const CHAIN: &str = include_str!("fixtures/chain.hex");
@@ -541,10 +541,10 @@ struct Link {
 
 impl Link {
     fn parse(text: &str) -> Self {
-        let proof: ton_net_tl::lite::PartialBlockProof =
-            ton_net_tl::deserialize(&unhex(text)).expect("the fixture decodes");
+        let proof: ton_net::tl::lite::PartialBlockProof =
+            ton_net::tl::deserialize(&unhex(text)).expect("the fixture decodes");
         match proof.steps.into_iter().next().expect("one step") {
-            ton_net_tl::lite::BlockLink::Forward {
+            ton_net::tl::lite::BlockLink::Forward {
                 from, config_proof, ..
             } => Self {
                 from_root_hash: from.root_hash,
@@ -583,7 +583,7 @@ impl Read {
 
     /// The shard state a proof carries, checked against the block it claims to be of.
     fn state_of(bytes: &[u8], block_root_hash: &[u8; 32]) -> ShardState {
-        let roots = ton_net_cell::parse_boc(bytes).expect("the proof parses");
+        let roots = ton_net::cell::parse_boc(bytes).expect("the proof parses");
         let state_hash =
             proof::verify_block_state(&roots, block_root_hash).expect("the proof roots");
         proof::verify_shard_state(&roots, &state_hash).expect("the state is covered")

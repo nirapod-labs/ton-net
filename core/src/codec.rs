@@ -7,7 +7,7 @@
 //! crate already carries. They are written here rather than pulled as dependencies, the
 //! same choice the feasibility spike made for CRC32: each is a handful of lines and
 //! carries no supply-chain weight. Hex is the exception and is not written a second
-//! time here: [`decode_hex`] reads [`ton_net_cell::hex_decode`].
+//! time here: [`decode_hex`] reads [`ton_net::cell::hex_decode`].
 
 /// Decodes base64 from both alphabets, in canonical form within an alphabet.
 ///
@@ -121,13 +121,13 @@ pub fn crc16(data: &[u8]) -> u16 {
 /// Decodes a hex string to bytes, or `None` if the length is odd or a character is not a
 /// hex digit.
 ///
-/// The rule lives in [`ton_net_cell::hex_decode`], which every hex read on this crate's
+/// The rule lives in [`ton_net::cell::hex_decode`], which every hex read on this crate's
 /// own parse paths goes through, and it carries the refusal of the leading `+` that the
 /// standard library's `from_str_radix` accepts. The `Option` is what the parsers in this
 /// crate already read, and the reason for the failure has nowhere to go in an address
 /// error that quotes the whole string anyway.
 pub fn decode_hex(input: &str) -> Option<Vec<u8>> {
-    ton_net_cell::hex_decode(input).ok()
+    crate::cell::hex_decode(input).ok()
 }
 
 #[cfg(test)]

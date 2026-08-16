@@ -11,8 +11,8 @@
 
 use std::time::Duration;
 
-use ton_net_adnl::{AdnlConnection, TcpTransport};
-use ton_net_tl::{deserialize, lite, serialize};
+use ton_net::adnl::{AdnlConnection, TcpTransport};
+use ton_net::tl::{deserialize, lite, serialize};
 
 // One public mainnet liteserver and its Ed25519 key, from the feasibility spike. If this
 // node is retired the test skips at connect; the network job can point at another.

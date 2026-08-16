@@ -14,8 +14,8 @@
 //! it is consistent.
 
 use ton_net_block::{Block, BlockError, Lookup, ValidatorSet};
-use ton_net_cell::Dict;
-use ton_net_tl::{deserialize, lite};
+use ton_net::cell::Dict;
+use ton_net::tl::{deserialize, lite};
 
 /// One forward link from the block the mainnet config pins.
 const ORDINARY: &str = include_str!("fixtures/chain.hex");
@@ -149,7 +149,7 @@ fn a_key_block_names_the_set_a_second_source_reports() {
         // it, so a match means both are right.
         let key = unhex32(first_key);
         let found = set
-            .find(&ton_net_block::validators::short_id(&key))
+            .find(&ton_net::proof::validators::short_id(&key))
             .expect("the reported validator is in the set");
         assert_eq!(found.public_key, key);
         assert_eq!(found.weight, first_weight);

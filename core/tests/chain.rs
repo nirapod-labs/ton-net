@@ -15,8 +15,8 @@
 //! they claim.
 
 use ton_net_block::{verify_chain, BlockError};
-use ton_net_tl::deserialize;
-use ton_net_tl::lite::{BlockIdExt, BlockLink, PartialBlockProof, SignatureSet};
+use ton_net::tl::deserialize;
+use ton_net::tl::lite::{BlockIdExt, BlockLink, PartialBlockProof, SignatureSet};
 
 /// Three forward links from masterchain 46894135 to 46920655.
 const CHAIN: &str = include_str!("fixtures/chain.hex");
@@ -440,7 +440,7 @@ fn hostile_proof_bytes_never_panic() {
 }
 
 /// The signatures of a set, mutably, whichever form it takes.
-fn signatures_mut(set: &mut SignatureSet) -> &mut Vec<ton_net_tl::lite::Signature> {
+fn signatures_mut(set: &mut SignatureSet) -> &mut Vec<ton_net::tl::lite::Signature> {
     match set {
         SignatureSet::Ordinary { signatures, .. } | SignatureSet::Simplex { signatures, .. } => {
             signatures

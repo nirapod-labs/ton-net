@@ -100,5 +100,5 @@ fn hex(bytes: &[u8; 32]) -> String {
 fn unhex(text: &str) -> Option<[u8; 32]> {
     // Through the crate's own reader rather than `from_str_radix`, which accepts a leading
     // `+` and so reads "+f" as a second spelling of "0f".
-    ton_net_cell::hex_decode(text).ok()?.try_into().ok()
+    ton_net::cell::hex_decode(text).ok()?.try_into().ok()
 }

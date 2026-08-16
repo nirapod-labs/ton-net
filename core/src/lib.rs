@@ -78,13 +78,18 @@
 #![warn(missing_docs)]
 #![deny(rustdoc::broken_intra_doc_links)]
 
+pub mod adnl;
+pub mod cell;
+pub mod client;
+pub mod lite;
+pub mod proof;
+pub mod tl;
+pub mod tlb;
+
 mod address;
-mod client;
 mod codec;
 mod config;
 mod error;
-mod proof;
-mod sync;
 mod verified;
 
 /// Which set of things this build will accept as proven.
@@ -120,17 +125,18 @@ pub use address::Address;
 pub use client::Client;
 pub use config::Config;
 pub use error::{Error, ErrorCode};
-pub use proof::verify_account;
-pub use sync::SyncReport;
+pub use client::proof::verify_account;
+pub use client::sync::SyncReport;
 pub use verified::Verified;
 
-/// The read response types, defined in ton-net-lite and surfaced here.
-pub use ton_net_lite::{AccountState, BlockIdExt, MasterchainInfo, ServerReported};
+/// The read response types, defined in [`lite`] and surfaced here.
+pub use crate::lite::{AccountState, BlockIdExt, MasterchainInfo, ServerReported};
 
-/// The decoded chain structures, defined in ton-net-block and surfaced here.
-pub use ton_net_block::{Account, AccountRead, AccountStatus, Coins};
+/// The decoded chain structures, defined in [`tlb`] and [`proof`] and surfaced here.
+pub use crate::proof::AccountRead;
+pub use crate::tlb::{Account, AccountStatus, Coins};
 
-/// The cell model a decoded account carries, defined in ton-net-cell and surfaced here.
+/// The cell model a decoded account carries, defined in [`cell`] and surfaced here.
 ///
 /// The list is the closure of one rule over the cell model: a type a method on a
 /// re-exported cell type answers with is nameable here, or that method is unusable
@@ -148,15 +154,15 @@ pub use ton_net_block::{Account, AccountRead, AccountStatus, Coins};
 /// [`Address`]: that one is the form a person writes and a caller parses.
 ///
 /// The block layer is not closed the same way. [`Account::decode`] answers with a
-/// `BlockError`, which is not nameable here, so a caller reads that failure through the
-/// `From` conversion into [`Error`] rather than by naming it. Closing that is a separate
-/// decision about which layer's error a consumer sees.
+/// [`BlockError`](tlb::BlockError), which the root does not name, so a caller reads that
+/// failure through the `From` conversion into [`Error`] rather than by naming it. Closing
+/// that is a separate decision about which layer's error a consumer sees.
 ///
-/// What the rule does not pull in stays out. The augmented and prefix dictionaries, the
-/// proof builders, and the streaming readers are reachable from no method on a type this
-/// crate returns, so a consumer whose need is the cell engine on its own depends on
-/// ton-net-cell rather than finding half of it here.
-pub use ton_net_cell::{
+/// What the rule does not pull in is still reachable, one level down. The augmented and
+/// prefix dictionaries, the proof builders and the streaming readers are reachable from no
+/// method on a type this list returns, so they are not at the root; a consumer whose need
+/// is the cell engine names [`cell`] and has all of it.
+pub use crate::cell::{
     Builder, Cell, CellError, CellType, Dict, DictEntry, DictIter, Identity, Lookup, MsgAddress,
     Slice,
 };
@@ -168,7 +174,7 @@ pub use ton_net_cell::{
 /// [`parse_boc`] can write a bag out and cannot read one in. [`MAX_CELLS`] and
 /// [`MAX_DEPTH`] are the bounds a parse refuses past; [`MAX_BITS`] and [`MAX_REFS`] are
 /// the bounds one cell holds within.
-pub use ton_net_cell::{parse_boc, serialize_boc, MAX_BITS, MAX_CELLS, MAX_DEPTH, MAX_REFS};
+pub use crate::cell::{parse_boc, serialize_boc, MAX_BITS, MAX_CELLS, MAX_DEPTH, MAX_REFS};
 
 // The README ships to crates.io and cannot be replaced once a version is published,
 // so its examples are compiled here rather than trusted. Doc-only: this does not

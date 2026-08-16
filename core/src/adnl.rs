@@ -1,21 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileCopyrightText: 2026 Nirapod Labs
 
-// A library that decodes bytes from a peer it does not trust must fail by returning, not
-// by unwinding: a panic in a decoder is a denial of service in whatever process embedded
-// it. The lints sit on the library because a test is the opposite case, where an unwrap
-// is the assertion. Arithmetic is deliberately not in the set: every count these formats
-// carry is bounded before it is used, and each subtraction sits within a few lines of the
-// guard that makes it safe, so denying it would bury the real bounds under checked_sub.
-#![deny(
-    clippy::unwrap_used,
-    clippy::expect_used,
-    clippy::panic,
-    clippy::unreachable,
-    clippy::todo,
-    clippy::indexing_slicing
-)]
-
 //! ADNL transport for ton-net: the encrypted link to a liteserver.
 //!
 //! ADNL is the transport TON nodes speak. This crate opens and runs a liteserver
@@ -36,9 +21,6 @@
 //! live in ton-net-lite.
 //!
 //! This is an internal crate of the ton-net client.
-#![forbid(unsafe_code)]
-#![warn(missing_docs)]
-#![deny(rustdoc::broken_intra_doc_links)]
 
 use sha2::{Digest, Sha256};
 
@@ -65,9 +47,3 @@ pub(crate) fn sha256(parts: &[&[u8]]) -> [u8; 32] {
     hasher.finalize().into()
 }
 
-// The README ships to crates.io and cannot be replaced once a version is published,
-// so its examples are compiled here rather than trusted. Doc-only: this does not
-// appear in the rendered documentation.
-#[cfg(doctest)]
-#[doc = include_str!("../README.md")]
-struct Readme;

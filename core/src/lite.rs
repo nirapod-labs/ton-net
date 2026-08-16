@@ -1,21 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileCopyrightText: 2026 Nirapod Labs
 
-// A library that decodes bytes from a peer it does not trust must fail by returning, not
-// by unwinding: a panic in a decoder is a denial of service in whatever process embedded
-// it. The lints sit on the library because a test is the opposite case, where an unwrap
-// is the assertion. Arithmetic is deliberately not in the set: every count these formats
-// carry is bounded before it is used, and each subtraction sits within a few lines of the
-// guard that makes it safe, so denying it would bury the real bounds under checked_sub.
-#![deny(
-    clippy::unwrap_used,
-    clippy::expect_used,
-    clippy::panic,
-    clippy::unreachable,
-    clippy::todo,
-    clippy::indexing_slicing
-)]
-
 //! Liteserver read client for ton-net.
 //!
 //! [`LiteClient`] speaks the liteserver query protocol over an ADNL connection and
@@ -34,9 +19,6 @@
 //! block-proof types are the exception and are re-exported as they come off the wire,
 //! because their reader is a verifier rather than a person. It is an internal crate of
 //! the ton-net client.
-#![forbid(unsafe_code)]
-#![warn(missing_docs)]
-#![deny(rustdoc::broken_intra_doc_links)]
 
 mod client;
 mod types;
@@ -48,15 +30,9 @@ pub use types::{AccountState, BlockIdExt, MasterchainInfo, ServerReported};
 ///
 /// This is the account [`LiteClient::account_state`] reads, re-exported from ton-net-tl.
 /// The facade builds one from a parsed address.
-pub use ton_net_tl::lite::AccountId;
+pub use crate::tl::lite::AccountId;
 
 /// The block-proof types [`LiteClient::block_proof`] answers with, re-exported from
 /// ton-net-tl so a caller need not name that crate to read a chain.
-pub use ton_net_tl::lite::{BlockLink, PartialBlockProof, Signature, SignatureSet};
+pub use crate::tl::lite::{BlockLink, PartialBlockProof, Signature, SignatureSet};
 
-// The README ships to crates.io and cannot be replaced once a version is published,
-// so its examples are compiled here rather than trusted. Doc-only: this does not
-// appear in the rendered documentation.
-#[cfg(doctest)]
-#[doc = include_str!("../README.md")]
-struct Readme;

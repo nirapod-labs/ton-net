@@ -9,7 +9,7 @@
 //! refused rather than guessed, since this client sends to neither.
 
 use super::Slice;
-use crate::error::CellError;
+use crate::cell::error::CellError;
 
 /// An account address, as a message carries it.
 ///
@@ -70,7 +70,7 @@ impl Slice<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::Builder;
+    use crate::cell::Builder;
 
     /// Writes the cell an address stores to, then reads it back.
     fn round_trip(address: &MsgAddress) -> MsgAddress {

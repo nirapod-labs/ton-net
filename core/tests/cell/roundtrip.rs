@@ -5,7 +5,7 @@
 //!
 //! The cases here came out of the decode-boundary fuzz targets in [`fuzz`](super::fuzz).
 
-use ton_net_cell::{parse_boc, serialize_boc, CellError, ParseOptions};
+use ton_net::cell::{parse_boc, serialize_boc, CellError, ParseOptions};
 
 /// Two roots naming one cell survive a reserialization.
 ///
@@ -66,7 +66,7 @@ fn a_bag_naming_more_roots_than_the_ceiling_allows_is_refused() {
     // rather than stopping at the cell count above it.
     let narrowed = ParseOptions::default().with_max_cells(1);
     assert_eq!(
-        ton_net_cell::parse_boc_with(&bag, &narrowed).err(),
+        ton_net::cell::parse_boc_with(&bag, &narrowed).err(),
         Some(CellError::Header("root count")),
         "a root list past the ceiling is refused before it is allocated for"
     );

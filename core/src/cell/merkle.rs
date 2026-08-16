@@ -29,9 +29,9 @@ pub use proof::create_proof;
 pub use update::{apply_update, combine_updates, create_update, may_apply, validate_update};
 pub use virtualize::{is_virtualized, rebuild_with_refs, virtualize};
 
-use crate::builder::Builder;
-use crate::cell::{Cell, CellType};
-use crate::error::CellError;
+use crate::cell::builder::Builder;
+use crate::cell::cell::{Cell, CellType};
+use crate::cell::error::CellError;
 
 /// Builds an exotic cell that stands for one or more ordinary trees by hash.
 ///

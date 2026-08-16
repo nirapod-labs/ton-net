@@ -4,7 +4,7 @@
 //! Reading and checking a bag's header, before any cell is built.
 
 use super::{crc32c, Header, ParseOptions, Reader, MAGIC};
-use crate::error::CellError;
+use crate::cell::error::CellError;
 
 /// Reads and checks a bag's header, leaving `reader` at the first cell.
 ///

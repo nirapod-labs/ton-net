@@ -29,7 +29,7 @@ use std::collections::HashMap;
 use ton_net_block::{
     proof, verify_account, AccountRead, AccountStatus, BlockError, Coins, Lookup, ShardState,
 };
-use ton_net_cell::{parse_boc, Cell, CellType};
+use ton_net::cell::{parse_boc, Cell, CellType};
 
 /// A masterchain account: the zero address, which is deployed and holds a balance.
 const MASTERCHAIN: &str = include_str!("fixtures/read-masterchain.txt");
@@ -467,7 +467,7 @@ fn an_account_whose_contents_were_pruned_away_is_refused() {
         root.hash(),
         "the edit has to be invisible to the hash, or it proves nothing"
     );
-    assert!(rebuilt[0].refs().iter().all(ton_net_cell::Cell::is_exotic));
+    assert!(rebuilt[0].refs().iter().all(ton_net::cell::Cell::is_exotic));
 
     assert_eq!(
         verify_account(&read.with_state(&forged)),

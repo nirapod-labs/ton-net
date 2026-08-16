@@ -3,7 +3,7 @@
 
 //! The messages a validator signature covers.
 //!
-//! A signature in a [`crate::lite::SignatureSet`] is 64 bytes and a signer id. It says
+//! A signature in a [`crate::tl::lite::SignatureSet`] is 64 bytes and a signer id. It says
 //! nothing about what was signed, so a client that wants to check one has to rebuild
 //! the exact bytes the validator's key went over. There are two such forms, and a walk
 //! from the block the mainnet config pins to today crosses both: mainnet changed form
@@ -116,7 +116,7 @@ pub enum CandidateBlock {
     #[tl(id = 0xe8f9bcdc)]
     Ordinary {
         /// The block the candidate proposes.
-        block: crate::lite::BlockIdExt,
+        block: crate::tl::lite::BlockIdExt,
     },
     /// `consensus.candidateHashDataEmpty`, a candidate for a slot that produced no block
     /// of its own.
@@ -134,14 +134,14 @@ pub enum CandidateBlock {
     #[tl(id = 0x72b4d933)]
     Empty {
         /// The block the empty slot extends, and thereby finalizes.
-        block: crate::lite::BlockIdExt,
+        block: crate::tl::lite::BlockIdExt,
     },
 }
 
 impl CandidateBlock {
     /// The block identity the candidate names, whichever form it takes.
     #[must_use]
-    pub fn block(&self) -> &crate::lite::BlockIdExt {
+    pub fn block(&self) -> &crate::tl::lite::BlockIdExt {
         match self {
             Self::Ordinary { block } | Self::Empty { block } => block,
         }
@@ -151,14 +151,14 @@ impl CandidateBlock {
     ///
     /// The bytes a signature set carries are a whole `consensus.CandidateHashData`, and
     /// this reads its opening. Trailing bytes are expected and are not an error, which
-    /// is why this exists rather than a plain [`crate::deserialize`].
+    /// is why this exists rather than a plain [`crate::tl::deserialize`].
     ///
     /// # Errors
     ///
-    /// Returns [`crate::TlError::UnknownConstructor`] if the bytes are some other
-    /// candidate form, or [`crate::TlError::UnexpectedEof`] if they end before the
+    /// Returns [`crate::tl::TlError::UnknownConstructor`] if the bytes are some other
+    /// candidate form, or [`crate::tl::TlError::UnexpectedEof`] if they end before the
     /// identity does.
-    pub fn read_prefix(bytes: &[u8]) -> crate::TlResult<Self> {
+    pub fn read_prefix(bytes: &[u8]) -> crate::tl::TlResult<Self> {
         <Self as TlRead>::read_from(&mut &bytes[..])
     }
 }

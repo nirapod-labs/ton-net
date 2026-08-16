@@ -9,7 +9,7 @@
 pub enum BlockError {
     /// A cell could not be read.
     #[error(transparent)]
-    Cell(#[from] ton_net_cell::CellError),
+    Cell(#[from] crate::cell::CellError),
 
     /// A structure did not begin with the constructor tag it should.
     #[error("expected {expected}, found a different constructor")]

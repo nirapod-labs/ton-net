@@ -60,7 +60,7 @@ mod targets;
 use std::collections::HashSet;
 use std::fmt::Write as _;
 
-use ton_net_cell::{
+use ton_net::cell::{
     parse_boc, serialize_boc_with, BocOptions, Builder, Cell, MAX_CELLS, MAX_DEPTH,
 };
 
@@ -429,7 +429,7 @@ fn shared_subtree_dictionary(levels: usize) -> Vec<u8> {
 fn compressed_corpus() -> Vec<Vec<u8>> {
     let mut seeds: Vec<Vec<u8>> = corpus()
         .iter()
-        .map(|bag| ton_net_cell::compress::compress(bag))
+        .map(|bag| ton_net::cell::compress::compress(bag))
         .collect();
     // A prefix with nothing behind it, and one naming more than the cap allows: the two
     // shapes the checks in front of the decoder are written for.

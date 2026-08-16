@@ -3,9 +3,8 @@
 
 //! Checking a read that was fetched separately from the check.
 
-use ton_net_block::{proof, AccountRead};
-
 use crate::error::Error;
+use crate::proof::AccountRead;
 use crate::Account;
 
 /// Proves an account read against the block hash the read was checked to.
@@ -48,5 +47,5 @@ use crate::Account;
 /// # }
 /// ```
 pub fn verify_account(read: &AccountRead<'_>) -> Result<Account, Error> {
-    Ok(proof::verify_account(read)?)
+    Ok(crate::proof::verify_account(read)?)
 }

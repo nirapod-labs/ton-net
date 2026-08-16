@@ -14,8 +14,8 @@
 //! too large to hold as a graph can still be verified and its identity read.
 
 use super::{read_and_build, read_header, Header, ParseOptions, Reader};
-use crate::cell::Cell;
-use crate::error::CellError;
+use crate::cell::cell::Cell;
+use crate::cell::error::CellError;
 
 /// A bag of cells read only as far as its header.
 ///
@@ -124,7 +124,7 @@ impl<'a> BocView<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{parse_boc, serialize_boc, serialize_boc_with, BocOptions, Builder};
+    use crate::cell::{parse_boc, serialize_boc, serialize_boc_with, BocOptions, Builder};
 
     /// A one-cell bag holding `byte`, with or without the offset index, and a checksum.
     fn bag_of(byte: u64, index: bool) -> Vec<u8> {

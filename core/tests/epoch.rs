@@ -140,8 +140,8 @@ fn verdict(anchor: &[u8; 32], account: &[u8; 32], proof: &[u8], state: &[u8]) ->
 /// The cells are untouched and every root entry names one of them, so the proof this returns
 /// stands for exactly what the captured one stands for.
 fn roots_repeated(bag: &[u8]) -> Vec<u8> {
-    let roots = ton_net_cell::parse_boc(bag).expect("the captured proof parses");
-    let cells = ton_net_cell::BocView::open(bag)
+    let roots = ton_net::cell::parse_boc(bag).expect("the captured proof parses");
+    let cells = ton_net::cell::BocView::open(bag)
         .expect("the captured proof opens")
         .cell_count();
 
@@ -149,7 +149,7 @@ fn roots_repeated(bag: &[u8]) -> Vec<u8> {
     while repeated.len() <= cells {
         repeated.push(roots[0].clone());
     }
-    ton_net_cell::serialize_boc(&repeated).expect("the repeated roots write back")
+    ton_net::cell::serialize_boc(&repeated).expect("the repeated roots write back")
 }
 
 /// Flips one bit a good way into the buffer, past any header.

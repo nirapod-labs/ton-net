@@ -7,14 +7,18 @@ use std::fmt;
 use std::future::Future;
 use std::time::Duration;
 
-use ton_net_adnl::TcpTransport;
-use ton_net_block::{proof, verify_chain, Account, AccountRead};
-use ton_net_lite::{
+pub mod proof;
+pub mod sync;
+
+use crate::adnl::TcpTransport;
+use crate::proof::{verify_chain, AccountRead};
+use crate::tlb::Account;
+use crate::lite::{
     AccountId, AccountState, BlockIdExt, BlockLink, LiteClient, LiteError, MasterchainInfo,
     PartialBlockProof, ServerReported,
 };
 
-use crate::sync::{self, SyncReport};
+use crate::client::sync::{self, SyncReport};
 use crate::{Address, Config, Error, Verified};
 
 /// The deadline for one read, after which the call returns [`Error::Timeout`].
@@ -320,7 +324,7 @@ impl Client {
     /// masterchain the shard block holding it is derived from the masterchain state rather
     /// than taken from what the server named, and the state bytes are bound to the account
     /// the proof carries. An account the block's state does not hold comes back as
-    /// [`AccountStatus::Nonexistent`](ton_net_block::AccountStatus::Nonexistent), which is
+    /// [`AccountStatus::Nonexistent`](ton_net::tlb::AccountStatus::Nonexistent), which is
     /// a proved answer rather than a failure. An account the proof declines to cover is a
     /// failure.
     ///
@@ -380,7 +384,7 @@ impl Client {
             )
         };
 
-        let account = proof::verify_account(&read)?;
+        let account = crate::proof::verify_account(&read)?;
         Ok(Verified::new(account, trusted.clone()))
     }
 }

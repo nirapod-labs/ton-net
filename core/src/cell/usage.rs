@@ -17,10 +17,10 @@
 
 use std::collections::HashSet;
 
-use crate::builder::Builder;
-use crate::cell::{Cell, CellType};
-use crate::error::CellError;
-use crate::merkle::create_proof;
+use crate::cell::builder::Builder;
+use crate::cell::cell::{Cell, CellType};
+use crate::cell::error::CellError;
+use crate::cell::merkle::create_proof;
 
 mod trace;
 
@@ -187,7 +187,7 @@ fn mark_path_to(node: &Cell, target: &[u8; 32], used: &mut HashSet<[u8; 32]>) ->
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::merkle::virtualize;
+    use crate::cell::merkle::virtualize;
 
     /// An ordinary leaf cell holding one byte.
     fn leaf(byte: u64) -> Cell {

@@ -9,8 +9,8 @@
 //! be a whole number of bytes.
 
 use super::{Dict, DictEntry, Lookup};
-use crate::builder::Builder;
-use crate::error::CellError;
+use crate::cell::builder::Builder;
+use crate::cell::error::CellError;
 
 impl Dict {
     /// Looks up the entry under an unsigned integer key.
@@ -134,7 +134,7 @@ fn int_key(key: i64, key_bits: u16) -> Result<Vec<u8>, CellError> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{Builder, Dict, Lookup};
+    use crate::cell::{Builder, Dict, Lookup};
 
     /// A one-byte value to store.
     fn value(byte: u64) -> Builder {

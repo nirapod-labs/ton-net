@@ -12,7 +12,7 @@
 //! bytes every time.
 
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
-use ton_net_cell::{parse_boc, serialize_boc};
+use ton_net::cell::{parse_boc, serialize_boc};
 
 /// A real account proof, the size a single read carries.
 const PROOF_HEX: &str = include_str!("../tests/fixtures/account-proof.hex");

@@ -12,8 +12,8 @@
 //! bag's own size.
 
 use super::{build_cell, verify_roots, BocView, Reader};
-use crate::cell::Cell;
-use crate::error::CellError;
+use crate::cell::cell::Cell;
+use crate::cell::error::CellError;
 
 impl BocView<'_> {
     /// Hash-verifies every cell in the bag and returns its roots' identities, without
@@ -24,7 +24,7 @@ impl BocView<'_> {
     /// The saving is the graph on top of the bag rather than the bag: every cell is read
     /// before any is hashed, so a bag still has to fit. The returned hashes are the roots'
     /// representation hashes, the identities a [`materialize`](BocView::materialize) of the
-    /// same bag reports through [`Cell::repr_hash`](crate::Cell::repr_hash).
+    /// same bag reports through [`Cell::repr_hash`](crate::cell::Cell::repr_hash).
     ///
     /// # Errors
     ///
@@ -45,7 +45,7 @@ impl BocView<'_> {
     /// stores them, the roots first, up to [`cell_count`](BocView::cell_count).
     ///
     /// Each call reads the bag again. A caller wanting several cells wants
-    /// [`LazyBoc`](crate::LazyBoc), which reads once and keeps what it builds.
+    /// [`LazyBoc`](crate::cell::LazyBoc), which reads once and keeps what it builds.
     ///
     /// # Errors
     ///

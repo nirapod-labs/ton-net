@@ -4,7 +4,7 @@
 //! TON's prefix dictionary, `PfxHashmapE n X`: a dictionary over variable-length keys where
 //! no stored key is a prefix of another.
 //!
-//! Where [`Dict`](crate::Dict) keys are all one fixed width, a prefix dictionary stores keys
+//! Where [`Dict`](crate::cell::Dict) keys are all one fixed width, a prefix dictionary stores keys
 //! of any length up to a ceiling, and answers the longest stored key that is a prefix of a
 //! query. That is the shape a routing or code table takes, and the form the `PFXDICT`
 //! virtual-machine opcodes read.
@@ -23,18 +23,18 @@
 //!
 //! An edge is a label followed by a node. A node is one bit: `0` a leaf carrying its value
 //! inline, `1` a fork carrying its two children as references. The label codec is the same
-//! `HmLabel` a [`Dict`](crate::Dict) uses, so a prefix dictionary's canonical form rests on
+//! `HmLabel` a [`Dict`](crate::cell::Dict) uses, so a prefix dictionary's canonical form rests on
 //! the same shortest-encoding rule, already pinned against mainnet labels. This models the
 //! `PfxHashmap` edge; the `PfxHashmapE` wrapper, the maybe bit that says whether there is a
-//! root at all, is the caller's, exactly as [`Dict`](crate::Dict) leaves `HashmapE`'s bit.
+//! root at all, is the caller's, exactly as [`Dict`](crate::cell::Dict) leaves `HashmapE`'s bit.
 
 use super::label::{read_label_into, skip_label, store_label, Label};
 use super::{
     check_key_bits, diverges, extend_bits, key_bit, pack, rest, DictEntry, Lookup, NO_BRANCH,
 };
-use crate::builder::Builder;
-use crate::cell::Cell;
-use crate::error::CellError;
+use crate::cell::builder::Builder;
+use crate::cell::cell::Cell;
+use crate::cell::error::CellError;
 
 /// Where a [`lookup_prefix`](PfxDict::lookup_prefix) landed: the stored key that is a prefix
 /// of the query, by its length in bits and the value under it.
@@ -48,7 +48,7 @@ pub struct PfxMatch {
 
 /// A prefix dictionary: TON's `PfxHashmapE n X`.
 ///
-/// The tree of [`Dict`](crate::Dict), except a leaf may sit at any depth rather than only
+/// The tree of [`Dict`](crate::cell::Dict), except a leaf may sit at any depth rather than only
 /// where the key is fully spent, so the keys it holds are of varying length. No stored key
 /// is a prefix of another, which is what makes the longest-prefix answer of
 /// [`lookup_prefix`](PfxDict::lookup_prefix) unique.
@@ -56,7 +56,7 @@ pub struct PfxMatch {
 /// # Examples
 ///
 /// ```
-/// use ton_net_cell::{Builder, PfxDict};
+/// use ton_net::cell::{Builder, PfxDict};
 ///
 /// let mut dict = PfxDict::new(8)?;
 /// let mut value = Builder::new();
@@ -68,7 +68,7 @@ pub struct PfxMatch {
 /// let found = dict.lookup_prefix(&[0b1011_0000], 6)?.expect("a prefix matches");
 /// assert_eq!(found.matched, 2);
 /// assert_eq!(found.entry.slice()?.load_uint(8)?, 0xaa);
-/// # Ok::<(), ton_net_cell::CellError>(())
+/// # Ok::<(), ton_net::cell::CellError>(())
 /// ```
 #[derive(Debug, Clone)]
 pub struct PfxDict {
@@ -725,7 +725,7 @@ impl PfxDictIter {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::parse_boc;
+    use crate::cell::parse_boc;
 
     /// An eight-bit value builder.
     fn val(byte: u64) -> Builder {

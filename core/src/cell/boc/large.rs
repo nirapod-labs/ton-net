@@ -11,8 +11,8 @@
 
 use super::serialize::{byte_width, index_of, push_be, topological};
 use super::{crc32c_update, BocOptions, CRC32C_INIT, MAGIC, MAX_CELLS, WITH_HASHES};
-use crate::cell::Cell;
-use crate::error::CellError;
+use crate::cell::cell::Cell;
+use crate::cell::error::CellError;
 
 /// About how many bytes to gather into one body chunk before yielding it.
 const CHUNK_TARGET: usize = 16 * 1024;
@@ -206,7 +206,7 @@ impl Iterator for BocChunks {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{parse_boc, serialize_boc_with, Builder};
+    use crate::cell::{parse_boc, serialize_boc_with, Builder};
 
     /// Runs a chunk stream together into the bytes it spells out.
     fn run(chunks: BocChunks) -> Vec<u8> {

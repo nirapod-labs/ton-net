@@ -45,7 +45,7 @@
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::Cell;
 
-use ton_net_cell::{parse_boc, serialize_boc, BocView, Builder, Dict, Lookup};
+use ton_net::cell::{parse_boc, serialize_boc, BocView, Builder, Dict, Lookup};
 
 thread_local! {
     /// Calls to the allocator on this thread since the count was last cleared.

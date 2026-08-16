@@ -10,9 +10,9 @@
 //! tree.
 
 use super::UsageTree;
-use crate::cell::Cell;
-use crate::error::CellError;
-use crate::slice::Slice;
+use crate::cell::cell::Cell;
+use crate::cell::error::CellError;
+use crate::cell::slice::Slice;
 
 impl UsageTree {
     /// Whether a [`note`](UsageTree::note) currently records what it reads.
@@ -48,7 +48,7 @@ impl UsageTree {
     /// This is the load-notification a proof is built from: a reader that reaches every cell
     /// through `note` leaves behind exactly the set it touched, which is what a later
     /// [`prune`](UsageTree::prune) keeps. With tracing off the load is ignored and the
-    /// cursor is the one [`Cell::parse`](crate::Cell::parse) would give.
+    /// cursor is the one [`Cell::parse`](crate::cell::Cell::parse) would give.
     pub fn note<'c>(&mut self, cell: &'c Cell) -> Slice<'c> {
         if self.tracing {
             self.mark(cell);
@@ -79,7 +79,7 @@ impl UsageTree {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::builder::Builder;
+    use crate::cell::builder::Builder;
 
     /// An ordinary leaf holding one byte.
     fn leaf(byte: u64) -> Cell {

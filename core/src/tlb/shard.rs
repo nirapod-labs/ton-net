@@ -3,10 +3,10 @@
 
 //! The shard state, walked as far as one account or one shard binding.
 
-use ton_net_cell::{Cell, Dict, Lookup, Slice};
+use crate::cell::{Cell, Dict, Lookup, Slice};
 
-use crate::coins::Coins;
-use crate::error::BlockError;
+use crate::tlb::coins::Coins;
+use crate::tlb::error::BlockError;
 
 /// The constructor tag a shard state begins with.
 const SHARD_STATE_TAG: u32 = 0x9023_afe2;

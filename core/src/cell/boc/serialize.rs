@@ -8,8 +8,8 @@ use std::collections::{HashMap, HashSet};
 use sha2::{Digest, Sha256};
 
 use super::{crc32c, MAGIC, MAX_CELLS, WITH_HASHES};
-use crate::cell::Cell;
-use crate::error::CellError;
+use crate::cell::cell::Cell;
+use crate::cell::error::CellError;
 
 /// The number of bytes needed to hold `value`, at least one.
 pub(super) fn byte_width(value: u64) -> usize {
@@ -164,14 +164,14 @@ impl BocOptions {
 /// # Examples
 ///
 /// ```
-/// use ton_net_cell::{parse_boc, serialize_boc};
+/// use ton_net::cell::{parse_boc, serialize_boc};
 ///
 /// let bytes = [0xb5, 0xee, 0x9c, 0x72, 0x01, 0x01, 0x01, 0x01, 0x00, 0x03, 0x00,
 ///              0x00, 0x02, 0xab];
 /// let roots = parse_boc(&bytes)?;
 /// let again = parse_boc(&serialize_boc(&roots)?)?;
 /// assert_eq!(roots[0].hash(), again[0].hash());
-/// # Ok::<(), ton_net_cell::CellError>(())
+/// # Ok::<(), ton_net::cell::CellError>(())
 /// ```
 pub fn serialize_boc(roots: &[Cell]) -> Result<Vec<u8>, CellError> {
     serialize_boc_with(roots, &BocOptions::default())

@@ -89,9 +89,9 @@ pub struct BlockIdExt {
     pub file_hash: [u8; 32],
 }
 
-impl From<ton_net_tl::lite::BlockIdExt> for BlockIdExt {
+impl From<crate::tl::lite::BlockIdExt> for BlockIdExt {
     /// The sequence number is a height, so it becomes unsigned crossing into the domain.
-    fn from(wire: ton_net_tl::lite::BlockIdExt) -> Self {
+    fn from(wire: crate::tl::lite::BlockIdExt) -> Self {
         Self {
             workchain: wire.workchain,
             shard: wire.shard,
@@ -106,7 +106,7 @@ impl From<ton_net_tl::lite::BlockIdExt> for BlockIdExt {
     }
 }
 
-impl From<&BlockIdExt> for ton_net_tl::lite::BlockIdExt {
+impl From<&BlockIdExt> for crate::tl::lite::BlockIdExt {
     fn from(block: &BlockIdExt) -> Self {
         Self {
             workchain: block.workchain,

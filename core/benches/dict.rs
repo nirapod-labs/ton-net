@@ -11,7 +11,7 @@
 //! up here.
 
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
-use ton_net_cell::{Builder, Dict};
+use ton_net::cell::{Builder, Dict};
 
 /// `n` distinct 256-bit keys, the width an account dictionary uses.
 fn keys(n: u32) -> Vec<[u8; 32]> {

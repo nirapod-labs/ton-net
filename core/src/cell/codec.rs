@@ -7,7 +7,7 @@
 //! argument as text, and both spellings already appear in the surfaces this client
 //! reads: the block a network config pins names its hashes in standard base64, and a raw
 //! account address is written as hex. Both directions sit here so a caller holding a
-//! [`Cell`](crate::Cell) writes one down and reads it back without reaching outside this
+//! [`Cell`](crate::cell::Cell) writes one down and reads it back without reaching outside this
 //! crate. It admits no dependency, so NET-ADR-004 has nothing new to vet.
 //!
 //! # One base64 spelling for one value
@@ -50,7 +50,7 @@
 //! keying anything on the text of a hex string therefore lowers it first; for base64 no
 //! such step exists to forget.
 
-use crate::error::CellError;
+use crate::cell::error::CellError;
 
 /// Writes bytes as standard-alphabet base64, padded to a whole number of quanta.
 ///
@@ -60,7 +60,7 @@ use crate::error::CellError;
 /// # Examples
 ///
 /// ```
-/// use ton_net_cell::base64_encode;
+/// use ton_net::cell::base64_encode;
 ///
 /// assert_eq!(base64_encode(&[0xfb, 0xff]), "+/8=");
 /// assert_eq!(base64_encode(b""), "");
@@ -108,12 +108,12 @@ pub fn base64_encode(bytes: &[u8]) -> String {
 /// # Examples
 ///
 /// ```
-/// use ton_net_cell::base64_decode;
+/// use ton_net::cell::base64_decode;
 ///
 /// assert_eq!(base64_decode("+/8=")?, vec![0xfb, 0xff]);
 /// // The same bytes in the URL-safe alphabet, which is not this form.
 /// assert!(base64_decode("-_8=").is_err());
-/// # Ok::<(), ton_net_cell::CellError>(())
+/// # Ok::<(), ton_net::cell::CellError>(())
 /// ```
 pub fn base64_decode(text: &str) -> Result<Vec<u8>, CellError> {
     let bytes = text.as_bytes();
@@ -178,7 +178,7 @@ pub fn base64_decode(text: &str) -> Result<Vec<u8>, CellError> {
 /// # Examples
 ///
 /// ```
-/// use ton_net_cell::hex_encode;
+/// use ton_net::cell::hex_encode;
 ///
 /// assert_eq!(hex_encode(&[0x00, 0x0f, 0xff]), "000fff");
 /// ```
@@ -209,11 +209,11 @@ pub fn hex_encode(bytes: &[u8]) -> String {
 /// # Examples
 ///
 /// ```
-/// use ton_net_cell::hex_decode;
+/// use ton_net::cell::hex_decode;
 ///
 /// assert_eq!(hex_decode("000fff")?, vec![0x00, 0x0f, 0xff]);
 /// assert!(hex_decode("+f").is_err());
-/// # Ok::<(), ton_net_cell::CellError>(())
+/// # Ok::<(), ton_net::cell::CellError>(())
 /// ```
 pub fn hex_decode(text: &str) -> Result<Vec<u8>, CellError> {
     let bytes = text.as_bytes();
@@ -270,7 +270,7 @@ fn nibble(character: u8) -> Result<u8, CellError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{parse_boc, Builder};
+    use crate::cell::{parse_boc, Builder};
 
     /// A one-cell bag, and the hash of the cell it holds.
     fn bag_and_hash() -> (Vec<u8>, [u8; 32]) {

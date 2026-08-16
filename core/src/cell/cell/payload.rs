@@ -7,14 +7,14 @@
 //! so a cell can hold a window on that run instead of a copy of its own slice of it. The
 //! buffer lives as long as any cell taken from it, which is what makes the window safe and
 //! what it costs: keeping one cell of a bag keeps the bag's bytes.
-//! [`MAX_CELLS`](crate::MAX_CELLS) is what bounds how much that is.
+//! [`MAX_CELLS`](crate::cell::MAX_CELLS) is what bounds how much that is.
 //!
-//! A cell that comes from a [`Builder`](crate::Builder) rather than a bag owns its own
+//! A cell that comes from a [`Builder`](crate::cell::Builder) rather than a bag owns its own
 //! bytes, which is the same shape with a buffer of one cell in it.
 
 use std::sync::{Arc, OnceLock};
 
-use crate::error::CellError;
+use crate::cell::error::CellError;
 
 /// Where a cell's bytes sit in the buffer that holds them.
 #[derive(Debug, Clone, Copy)]

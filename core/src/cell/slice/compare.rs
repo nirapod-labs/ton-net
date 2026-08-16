@@ -74,7 +74,7 @@ impl Slice<'_> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{Builder, Cell};
+    use crate::cell::{Builder, Cell};
     use std::cmp::Ordering;
 
     /// A cell holding exactly the given bits.

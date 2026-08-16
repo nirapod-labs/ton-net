@@ -8,7 +8,7 @@
 //! they share, the magic, the bounds, the checksum, the byte reader, and the header those
 //! reads fill, stay here where both paths and the [`view`] over a bag reach them.
 
-use crate::error::CellError;
+use crate::cell::error::CellError;
 
 mod header;
 mod large;
@@ -83,7 +83,7 @@ pub const MAX_DEPTH: usize = 1024;
 /// # Examples
 ///
 /// ```
-/// use ton_net_cell::{parse_boc_with, CellError, ParseOptions, MAX_CELLS};
+/// use ton_net::cell::{parse_boc_with, CellError, ParseOptions, MAX_CELLS};
 ///
 /// // Nothing this type can be asked for takes more than the default takes.
 /// let wide = ParseOptions::default().with_max_cells(usize::MAX);
@@ -260,7 +260,7 @@ struct Header {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::cell::CellType;
+    use crate::cell::cell::CellType;
     use sha2::{Digest, Sha256};
 
     // One cell of eight bits holding 0xab.

@@ -6,7 +6,7 @@
 use sha2::{Digest, Sha256};
 
 use super::{bits_descriptor, hash_index, level_of, refs_descriptor, CellType};
-use crate::error::CellError;
+use crate::cell::error::CellError;
 
 /// The most representation hashes a cell can have: one per level a three-bit mask marks,
 /// and one besides.
@@ -46,7 +46,7 @@ const MAX_HASHES: usize = 4;
 /// A struct literal does not compile, because every field is private:
 ///
 /// ```compile_fail
-/// use ton_net_cell::Identity;
+/// use ton_net::cell::Identity;
 ///
 /// let forged = Identity {
 ///     level_mask: 0,
@@ -62,7 +62,7 @@ const MAX_HASHES: usize = 4;
 /// ```compile_fail
 /// let bytes = [0xb5, 0xee, 0x9c, 0x72, 0x01, 0x01, 0x01, 0x01, 0x00, 0x03, 0x00,
 ///              0x00, 0x02, 0xab];
-/// let roots = ton_net_cell::parse_boc(&bytes).expect("the bag parses");
+/// let roots = ton_net::cell::parse_boc(&bytes).expect("the bag parses");
 /// let mut identity = roots[0].identity().clone();
 ///
 /// identity.hash0 = [0u8; 32];
@@ -75,7 +75,7 @@ const MAX_HASHES: usize = 4;
 /// ```
 /// let bytes = [0xb5, 0xee, 0x9c, 0x72, 0x01, 0x01, 0x01, 0x01, 0x00, 0x03, 0x00,
 ///              0x00, 0x02, 0xab];
-/// let roots = ton_net_cell::parse_boc(&bytes).expect("the bag parses");
+/// let roots = ton_net::cell::parse_boc(&bytes).expect("the bag parses");
 /// let identity = roots[0].identity().clone();
 ///
 /// assert_eq!(identity.level_mask(), 0);

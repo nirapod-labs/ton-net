@@ -8,14 +8,14 @@
 //! reference. This is the form a jetton's metadata and other long strings on TON take.
 
 use super::Builder;
-use crate::error::CellError;
+use crate::cell::error::CellError;
 
 impl Builder {
     /// Writes `bytes` as a snake string, spilling into child cells when one will not hold
     /// the whole run.
     ///
     /// Each cell takes as many whole bytes as it has room for; the rest go in a child
-    /// chained through the first reference, which [`load_snake`](crate::Slice::load_snake)
+    /// chained through the first reference, which [`load_snake`](crate::cell::Slice::load_snake)
     /// reads back.
     ///
     /// # Errors
@@ -37,7 +37,7 @@ impl Builder {
 
 #[cfg(test)]
 mod tests {
-    use crate::Builder;
+    use crate::cell::Builder;
 
     #[test]
     fn a_short_string_stays_in_one_cell() {

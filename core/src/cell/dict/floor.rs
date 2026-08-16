@@ -12,8 +12,8 @@ use core::borrow::Borrow;
 
 use super::plain::Plain;
 use super::{build_all, key_of, reroot, Dict, DictEntry};
-use crate::builder::Builder;
-use crate::error::CellError;
+use crate::cell::builder::Builder;
+use crate::cell::error::CellError;
 
 impl Dict {
     /// A dictionary holding every item, built in one call.
@@ -35,13 +35,13 @@ impl Dict {
     /// # Examples
     ///
     /// ```
-    /// use ton_net_cell::{Builder, Dict};
+    /// use ton_net::cell::{Builder, Dict};
     ///
     /// let mut value = Builder::new();
     /// value.store_uint(1, 8)?;
     /// let dict = Dict::from_items(32, [(1u32.to_be_bytes(), &value), (2u32.to_be_bytes(), &value)])?;
     /// assert_eq!(dict.count()?, 2);
-    /// # Ok::<(), ton_net_cell::CellError>(())
+    /// # Ok::<(), ton_net::cell::CellError>(())
     /// ```
     ///
     /// # Errors
@@ -119,7 +119,7 @@ impl Dict {
     /// # Examples
     ///
     /// ```
-    /// use ton_net_cell::{Builder, Dict};
+    /// use ton_net::cell::{Builder, Dict};
     ///
     /// let mut value = Builder::new();
     /// value.store_uint(1, 8)?;
@@ -127,7 +127,7 @@ impl Dict {
     /// let under_ab = dict.subdict(&[0xab], 8)?;
     /// assert_eq!(under_ab.key_bits(), 8);
     /// assert_eq!(under_ab.count()?, 1);
-    /// # Ok::<(), ton_net_cell::CellError>(())
+    /// # Ok::<(), ton_net::cell::CellError>(())
     /// ```
     ///
     /// # Errors

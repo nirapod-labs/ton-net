@@ -13,9 +13,9 @@
 use std::collections::HashMap;
 
 use super::covering_cell;
-use crate::builder::Builder;
-use crate::cell::{Cell, CellType};
-use crate::error::CellError;
+use crate::cell::builder::Builder;
+use crate::cell::cell::{Cell, CellType};
+use crate::cell::error::CellError;
 
 /// The offset of a Merkle update's old-tree hash within its data, past the type byte.
 const OLD_HASH: usize = 1;
@@ -314,7 +314,7 @@ fn graft(node: &Cell, base: &HashMap<[u8; 32], Cell>) -> Result<Cell, CellError>
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::UsageTree;
+    use crate::cell::UsageTree;
 
     /// An ordinary leaf cell holding one byte.
     fn leaf(byte: u64) -> Cell {

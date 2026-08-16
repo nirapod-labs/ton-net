@@ -5,7 +5,7 @@
 //!
 //! These are the `liteServer.*` requests and responses the client reads, plus the
 //! shared block and account identifiers they carry. A request is wrapped in a
-//! [`Query`], whose bytes then travel inside an [`crate::adnl::Message::Query`].
+//! [`Query`], whose bytes then travel inside an [`crate::tl::adnl::Message::Query`].
 //!
 //! Every response here is the server's word. This crate decodes it and checks nothing,
 //! neither the Merkle proofs nor the validator signatures a liteserver returns.
@@ -61,7 +61,7 @@ pub struct AccountId {
 ///
 /// A liteserver method is serialized on its own, then placed in [`Query::data`] and
 /// serialized again; those bytes are the payload of an
-/// [`crate::adnl::Message::Query`].
+/// [`crate::tl::adnl::Message::Query`].
 #[derive(TlRead, TlWrite, Debug, Clone, PartialEq, Eq)]
 #[tl(boxed, id = 0x798c06df)]
 pub struct Query {
@@ -139,13 +139,13 @@ pub struct Signature {
 /// The two arms are not interchangeable: their first two integer fields are in the
 /// opposite order, so reading one as the other silently swaps them. The constructor id
 /// is what tells them apart, and a third form no version of this client knows is
-/// refused by [`TlError::UnknownConstructor`](crate::TlError::UnknownConstructor)
+/// refused by [`TlError::UnknownConstructor`](crate::tl::TlError::UnknownConstructor)
 /// rather than read as either.
 #[derive(TlRead, TlWrite, Debug, Clone, PartialEq, Eq)]
 #[tl(boxed)]
 #[non_exhaustive]
 pub enum SignatureSet {
-    /// The original form. The signatures cover a [`crate::signed::BlockId`].
+    /// The original form. The signatures cover a [`crate::tl::signed::BlockId`].
     ///
     /// Its scheme line carries an explicit constructor id, which is exactly the id the
     /// older unnamed `liteServer.signatureSet` line computes to. The union was added
@@ -159,7 +159,7 @@ pub enum SignatureSet {
         /// The signatures.
         signatures: Vec<Signature>,
     },
-    /// The Simplex form. The signatures cover a [`crate::signed::DataToSign`] wrapping
+    /// The Simplex form. The signatures cover a [`crate::tl::signed::DataToSign`] wrapping
     /// a finalize vote, built from `session_id`, `slot`, and the hash of `candidate`.
     #[tl(id = 0xac249800)]
     Simplex {

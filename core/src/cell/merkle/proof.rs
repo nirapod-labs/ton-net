@@ -8,8 +8,8 @@
 //! block crate's engine then accepts it against the root the tree hashes to.
 
 use super::covering_cell;
-use crate::cell::{Cell, CellType};
-use crate::error::CellError;
+use crate::cell::cell::{Cell, CellType};
+use crate::cell::error::CellError;
 
 /// Builds a Merkle proof standing for `content`.
 ///
@@ -27,7 +27,7 @@ use crate::error::CellError;
 /// ordinary tree and wrapping a pruned branch or another proof yields a shape nothing here
 /// reads, or if the proof cell does not form.
 ///
-/// [`UsageTree::prune`]: crate::UsageTree::prune
+/// [`UsageTree::prune`]: crate::cell::UsageTree::prune
 pub fn create_proof(content: &Cell) -> Result<Cell, CellError> {
     covering_cell(CellType::MerkleProof, &[content])
 }
@@ -35,8 +35,8 @@ pub fn create_proof(content: &Cell) -> Result<Cell, CellError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::builder::Builder;
-    use crate::merkle::virtualize;
+    use crate::cell::builder::Builder;
+    use crate::cell::merkle::virtualize;
 
     /// An ordinary leaf cell holding one byte.
     fn leaf(byte: u64) -> Cell {

@@ -11,7 +11,7 @@
 //! This is the check `spikes/proof-feasibility` ran against a live server, kept here as
 //! a test that never touches the network.
 
-use ton_net_cell::{parse_boc, serialize_boc, Cell, CellType};
+use ton_net::cell::{parse_boc, serialize_boc, Cell, CellType};
 
 /// The captured proof bytes, hex encoded.
 const PROOF_HEX: &str = include_str!("../fixtures/account-proof.hex");

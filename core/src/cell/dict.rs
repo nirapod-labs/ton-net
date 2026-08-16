@@ -22,10 +22,10 @@
 
 use core::borrow::Borrow;
 
-use crate::builder::Builder;
-use crate::cell::{Cell, MAX_BITS};
-use crate::error::CellError;
-use crate::slice::Slice;
+use crate::cell::builder::Builder;
+use crate::cell::cell::{Cell, MAX_BITS};
+use crate::cell::error::CellError;
+use crate::cell::slice::Slice;
 
 mod aug;
 mod floor;
@@ -111,7 +111,7 @@ impl DictEntry {
     }
 }
 
-/// What a [`traverse_extra`](crate::AugDict::traverse_extra) visitor asks for at each node.
+/// What a [`traverse_extra`](crate::cell::AugDict::traverse_extra) visitor asks for at each node.
 ///
 /// At a fork the three answers differ: descend into its subtree, leave that subtree
 /// unvisited, or end the walk. At a leaf there is nothing below to skip, so

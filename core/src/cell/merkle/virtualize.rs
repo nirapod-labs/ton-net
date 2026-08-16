@@ -9,9 +9,9 @@
 //! proof to that copy is virtualization: taking the content and requiring the proof's stored
 //! hash and depth to be the ones that content gives.
 
-use crate::builder::Builder;
-use crate::cell::{Cell, CellType};
-use crate::error::CellError;
+use crate::cell::builder::Builder;
+use crate::cell::cell::{Cell, CellType};
+use crate::cell::error::CellError;
 
 /// The offset of a Merkle proof's covered root hash within its data, past the type byte.
 const COVERED_HASH: usize = 1;
@@ -115,8 +115,8 @@ pub fn rebuild_with_refs(cell: &Cell, refs: &[Cell]) -> Result<Cell, CellError> 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::builder::Builder;
-    use crate::UsageTree;
+    use crate::cell::builder::Builder;
+    use crate::cell::UsageTree;
 
     /// A Merkle proof cell over `content`, claiming `hash` and `depth` for the tree it
     /// stands for.

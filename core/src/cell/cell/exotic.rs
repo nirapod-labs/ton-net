@@ -29,7 +29,7 @@ impl CellType {
     /// # Examples
     ///
     /// ```
-    /// use ton_net_cell::CellType;
+    /// use ton_net::cell::CellType;
     /// assert_eq!(CellType::MerkleProof.tag(), Some(0x03));
     /// assert_eq!(CellType::Ordinary.tag(), None);
     /// ```

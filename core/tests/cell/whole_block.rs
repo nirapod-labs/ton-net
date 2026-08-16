@@ -18,7 +18,7 @@
 //! state whose two subtrees are pruned, so they are also the only fixtures where exotic
 //! cells and stored hashes appear in the same bag.
 
-use ton_net_cell::{parse_boc, serialize_boc, serialize_boc_with, BocView, Cell, CellError};
+use ton_net::cell::{parse_boc, serialize_boc, serialize_boc_with, BocView, Cell, CellError};
 
 /// A masterchain block, and the basechain block the same head named.
 const MASTERCHAIN: &str = include_str!("../fixtures/block-masterchain.hex");
@@ -276,7 +276,7 @@ fn a_block_written_back_out_keeps_its_identity_without_the_stored_hashes() {
 fn a_bag_written_with_stored_hashes_grows_by_exactly_what_its_cells_call_for() {
     use std::collections::HashSet;
 
-    use ton_net_cell::BocOptions;
+    use ton_net::cell::BocOptions;
 
     for (what, text) in [("masterchain", MASTERCHAIN), ("basechain", BASECHAIN)] {
         let roots = parse_boc(&unhex(text)).expect("the block parses");

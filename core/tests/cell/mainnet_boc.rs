@@ -8,7 +8,7 @@
 //! parser to real bytes, and to hashes the node computed, is what keeps these tests from
 //! measuring this crate against itself.
 
-use ton_net_cell::{parse_boc, Cell, CellType};
+use ton_net::cell::{parse_boc, Cell, CellType};
 
 /// The captured proof bytes, hex encoded.
 const PROOF_HEX: &str = include_str!("../fixtures/account-proof.hex");
@@ -222,7 +222,7 @@ fn the_streaming_serializer_matches_the_whole_one_on_a_real_bag() {
     // The chunk stream has to be the one-buffer serializer byte for byte, on a bag the node
     // itself produced, not one this crate wrote. Run the chunks together and they are the
     // same bytes, and those bytes carry the same cell identities the proof did.
-    use ton_net_cell::{serialize_boc, serialize_boc_chunks};
+    use ton_net::cell::{serialize_boc, serialize_boc_chunks};
 
     let roots = parse_boc(&proof()).expect("the captured proof parses");
     let streamed: Vec<u8> = serialize_boc_chunks(&roots)

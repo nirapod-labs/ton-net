@@ -3,9 +3,9 @@
 
 //! A reading cursor over a cell's bits and references.
 
-use crate::cell::Cell;
-use crate::dict::Dict;
-use crate::error::CellError;
+use crate::cell::cell::Cell;
+use crate::cell::dict::Dict;
+use crate::cell::error::CellError;
 
 mod address;
 mod compare;
@@ -51,7 +51,7 @@ fn sign_extend_128(raw: u128, bits: u32) -> i128 {
 /// # Examples
 ///
 /// ```
-/// use ton_net_cell::parse_boc;
+/// use ton_net::cell::parse_boc;
 ///
 /// // One cell of eight bits holding 0xab.
 /// let bytes = [0xb5, 0xee, 0x9c, 0x72, 0x01, 0x01, 0x01, 0x01, 0x00, 0x03, 0x00,
@@ -61,7 +61,7 @@ fn sign_extend_128(raw: u128, bits: u32) -> i128 {
 /// assert_eq!(slice.load_uint(4)?, 0xa);
 /// assert_eq!(slice.load_uint(4)?, 0xb);
 /// assert_eq!(slice.remaining_bits(), 0);
-/// # Ok::<(), ton_net_cell::CellError>(())
+/// # Ok::<(), ton_net::cell::CellError>(())
 /// ```
 #[derive(Debug, Clone)]
 pub struct Slice<'a> {
@@ -113,7 +113,7 @@ impl<'a> Slice<'a> {
 
     /// Whether this many bits and references are still there to read.
     ///
-    /// The read side of [`Builder::can_extend_by`](crate::Builder::can_extend_by), for a
+    /// The read side of [`Builder::can_extend_by`](crate::cell::Builder::can_extend_by), for a
     /// decoder choosing between shapes before it spends anything on one.
     #[must_use]
     pub fn can_read(&self, bits: usize, refs: usize) -> bool {
@@ -261,14 +261,14 @@ impl<'a> Slice<'a> {
     /// # Examples
     ///
     /// ```
-    /// use ton_net_cell::parse_boc;
+    /// use ton_net::cell::parse_boc;
     ///
     /// // One cell of twelve bits: length 1, then the byte 0x2a.
     /// let bytes = [0xb5, 0xee, 0x9c, 0x72, 0x01, 0x01, 0x01, 0x01, 0x00, 0x04, 0x00,
     ///              0x00, 0x03, 0x12, 0xa8];
     /// let roots = parse_boc(&bytes)?;
     /// assert_eq!(roots[0].parse().load_var_uint(16)?, 42);
-    /// # Ok::<(), ton_net_cell::CellError>(())
+    /// # Ok::<(), ton_net::cell::CellError>(())
     /// ```
     pub fn load_var_uint(&mut self, max: u32) -> Result<u128, CellError> {
         self.read_var(max).map(|(raw, _)| raw)
@@ -284,7 +284,7 @@ impl<'a> Slice<'a> {
     /// The length is read as it was written. Nothing here refuses a length longer than the
     /// value needed, the same way `load_var_uint` does not, so a reader that has to hold a
     /// producer to the minimal form checks it against
-    /// [`store_var_int`](crate::Builder::store_var_int) rather than expecting a failure
+    /// [`store_var_int`](crate::cell::Builder::store_var_int) rather than expecting a failure
     /// from this.
     ///
     /// # Errors
@@ -336,7 +336,7 @@ impl<'a> Slice<'a> {
 
     /// Reads `n` bits, one to a `bool`, in the order they sit in the cell.
     ///
-    /// The read side of [`Builder::store_bits`](crate::Builder::store_bits), which was the
+    /// The read side of [`Builder::store_bits`](crate::cell::Builder::store_bits), which was the
     /// one store in this crate whose output nothing here could read back in the form it
     /// went in. The length is checked before anything is read, so a slice too short leaves
     /// the cursor where it was.
@@ -430,7 +430,7 @@ impl<'a> Slice<'a> {
 
     /// Reads a `HashmapE`: one bit, then a reference to the dictionary root when it is set.
     ///
-    /// This is the read mirror of [`Builder::store_dict`](crate::Builder::store_dict): an
+    /// This is the read mirror of [`Builder::store_dict`](crate::cell::Builder::store_dict): an
     /// unset bit is the empty dictionary, and a set bit takes the root from the next
     /// reference. `key_bits` is the fixed key width the dictionary's type carries and the
     /// wire form does not, so the caller supplies it.
@@ -439,7 +439,7 @@ impl<'a> Slice<'a> {
     ///
     /// Returns [`CellError::NotEnoughBits`] if the slice has no bits left,
     /// [`CellError::NotEnoughRefs`] if the bit is set and no reference is left, and otherwise
-    /// as [`Dict::from_root`](crate::Dict::from_root) for the root it reads.
+    /// as [`Dict::from_root`](crate::cell::Dict::from_root) for the root it reads.
     pub fn load_dict(&mut self, key_bits: u16) -> Result<Dict, CellError> {
         let root = self.load_maybe_ref()?.cloned();
         Dict::from_root(root, key_bits)
@@ -636,8 +636,8 @@ impl<'a> Slice<'a> {
     /// # Errors
     ///
     /// As the stores it performs; what a slice holds always fits one cell.
-    pub fn to_builder(&self) -> Result<crate::Builder, CellError> {
-        let mut builder = crate::Builder::new();
+    pub fn to_builder(&self) -> Result<crate::cell::Builder, CellError> {
+        let mut builder = crate::cell::Builder::new();
         builder.store_slice(self.clone())?;
         Ok(builder)
     }
@@ -654,7 +654,7 @@ impl<'a> Slice<'a> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{parse_boc, Builder, Cell, CellError, Dict, Slice};
+    use crate::cell::{parse_boc, Builder, Cell, CellError, Dict, Slice};
 
     // One cell of eight bits holding 0xab.
     const ONE_CELL: [u8; 14] = [

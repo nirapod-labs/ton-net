@@ -21,7 +21,7 @@
 
 use aes::cipher::{KeyIvInit, StreamCipher};
 
-use crate::{sha256, Aes256Ctr};
+use crate::adnl::{sha256, Aes256Ctr};
 
 /// The smallest a frame body can be: a 32-byte nonce and a 32-byte checksum around an
 /// empty payload. A shorter length means the stream is desynchronized.
@@ -42,7 +42,7 @@ const MAX_FRAME: usize = 1 << 24;
 ///
 /// `rx` decrypts bytes coming from the server; `tx` encrypts bytes going to it. Each is
 /// a counter-mode keystream that advances with every byte it processes, so frames must
-/// be sealed and opened in order. [`client_handshake`](crate::client_handshake) builds
+/// be sealed and opened in order. [`client_handshake`](crate::adnl::client_handshake) builds
 /// this from the session parameters the client put in its handshake packet.
 pub struct SessionCiphers {
     rx: Aes256Ctr,

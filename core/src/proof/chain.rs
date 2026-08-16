@@ -16,13 +16,13 @@
 //! header proof establishes what the block says about itself; the signatures establish
 //! that it is the block the network committed.
 
-use ton_net_tl::lite::{BlockIdExt, BlockLink, PartialBlockProof, Signature, SignatureSet};
-use ton_net_tl::signed::CandidateBlock;
+use crate::tl::lite::{BlockIdExt, BlockLink, PartialBlockProof, Signature, SignatureSet};
+use crate::tl::signed::CandidateBlock;
 
-use crate::block::Block;
-use crate::error::BlockError;
-use crate::signature;
-use crate::validators::ValidatorSet;
+use crate::tlb::block::Block;
+use crate::tlb::error::BlockError;
+use crate::proof::signature;
+use crate::proof::validators::ValidatorSet;
 
 /// The masterchain workchain id.
 const MASTERCHAIN: i32 = -1;

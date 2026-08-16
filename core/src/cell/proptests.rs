@@ -25,7 +25,7 @@
 
 use proptest::prelude::*;
 
-use crate::{
+use crate::cell::{
     boc::{bit_len, parse_boc, serialize_boc},
     cell::{Cell, CellType, Payload, Refs},
 };
@@ -210,7 +210,7 @@ proptest! {
 /// ones a caller actually meets.
 fn built_tree() -> impl Strategy<Value = Cell> {
     let leaf = data_and_bits().prop_map(|(bytes, bits)| {
-        let mut b = crate::Builder::new();
+        let mut b = crate::cell::Builder::new();
         for index in 0..bits {
             let byte = bytes.get(usize::from(index / 8)).copied().unwrap_or(0);
             b.store_bit((byte >> (7 - (index % 8))) & 1 == 1).unwrap();
@@ -220,7 +220,7 @@ fn built_tree() -> impl Strategy<Value = Cell> {
     leaf.prop_recursive(3, 16, 3, |inner| {
         (data_and_bits(), proptest::collection::vec(inner, 0..=4)).prop_map(
             |((bytes, bits), refs)| {
-                let mut b = crate::Builder::new();
+                let mut b = crate::cell::Builder::new();
                 for index in 0..bits {
                     let byte = bytes.get(usize::from(index / 8)).copied().unwrap_or(0);
                     b.store_bit((byte >> (7 - (index % 8))) & 1 == 1).unwrap();
@@ -239,7 +239,7 @@ proptest! {
     #[test]
     fn integers_round_trip_through_the_builder(value in any::<u64>(), bits in 1u32..=64) {
         let value = if bits == 64 { value } else { value & ((1u64 << bits) - 1) };
-        let mut b = crate::Builder::new();
+        let mut b = crate::cell::Builder::new();
         b.store_uint(value, bits).unwrap();
         prop_assert_eq!(b.build().unwrap().parse().load_uint(bits).unwrap(), value);
     }
@@ -252,7 +252,7 @@ proptest! {
         // range, which is where the cases worth generating are.
         #[allow(clippy::cast_possible_wrap, clippy::cast_sign_loss)]
         let value = (((value as u64) << (64 - bits)) as i64) >> (64 - bits);
-        let mut b = crate::Builder::new();
+        let mut b = crate::cell::Builder::new();
         b.store_int(value, bits).unwrap();
         prop_assert_eq!(b.build().unwrap().parse().load_int(bits).unwrap(), value);
     }
@@ -265,7 +265,7 @@ proptest! {
         // generated rather than skipped.
         #[allow(clippy::cast_possible_wrap, clippy::cast_sign_loss)]
         let value = (((value as u128) << (128 - bits)) as i128) >> (128 - bits);
-        let mut b = crate::Builder::new();
+        let mut b = crate::cell::Builder::new();
         b.store_int128(value, bits).unwrap();
         prop_assert_eq!(b.build().unwrap().parse().load_int128(bits).unwrap(), value);
     }
@@ -273,9 +273,9 @@ proptest! {
     /// A run of bits reads back as the bits that went in, in the order they went in.
     #[test]
     fn runs_of_bits_round_trip_through_the_builder(
-        bits in proptest::collection::vec(any::<bool>(), 0..=usize::from(crate::MAX_BITS)),
+        bits in proptest::collection::vec(any::<bool>(), 0..=usize::from(crate::cell::MAX_BITS)),
     ) {
-        let mut b = crate::Builder::new();
+        let mut b = crate::cell::Builder::new();
         b.store_bits(&bits).unwrap();
         let read = b.build().unwrap().parse().load_bits(bits.len()).unwrap();
         prop_assert_eq!(read, bits);
@@ -291,15 +291,15 @@ proptest! {
         // A `VarInteger 17` carries sixteen bytes, the whole of the type, behind a
         // five-bit length.
         const LEN_BITS: u16 = 5;
-        let mut b = crate::Builder::new();
+        let mut b = crate::cell::Builder::new();
         b.store_var_int(value, 17).unwrap();
         prop_assert_eq!((b.bits_used() - LEN_BITS) % 8, 0);
         let bytes = u32::from((b.bits_used() - LEN_BITS) / 8);
         prop_assert_eq!(b.build().unwrap().parse().load_var_int(17).unwrap(), value);
 
-        prop_assert!(crate::Builder::new().store_int128(value, bytes * 8).is_ok());
+        prop_assert!(crate::cell::Builder::new().store_int128(value, bytes * 8).is_ok());
         if bytes > 0 {
-            prop_assert!(crate::Builder::new()
+            prop_assert!(crate::cell::Builder::new()
                 .store_int128(value, (bytes - 1) * 8)
                 .is_err());
         }
@@ -310,7 +310,7 @@ proptest! {
     fn coins_round_trip_through_the_builder(value in any::<u128>()) {
         // `VarUInteger 16` carries fifteen bytes.
         let value = value >> 8;
-        let mut b = crate::Builder::new();
+        let mut b = crate::cell::Builder::new();
         b.store_coins(value).unwrap();
         prop_assert_eq!(b.build().unwrap().parse().load_coins().unwrap(), value);
     }
@@ -361,10 +361,10 @@ fn keys() -> impl Strategy<Value = (u16, Vec<Vec<u8>>)> {
 }
 
 /// The dictionary those keys build, each key stored under its own bytes.
-fn dict_of(key_bits: u16, keys: &[Vec<u8>]) -> crate::Dict {
-    let mut dict = crate::Dict::new(key_bits).unwrap();
+fn dict_of(key_bits: u16, keys: &[Vec<u8>]) -> crate::cell::Dict {
+    let mut dict = crate::cell::Dict::new(key_bits).unwrap();
     for key in keys {
-        let mut value = crate::Builder::new();
+        let mut value = crate::cell::Builder::new();
         value.store_bytes(key).unwrap();
         dict.set(key, &value).unwrap();
     }
@@ -423,18 +423,18 @@ proptest! {
 /// A summary that adds up, which is the shape of the augmentations TON itself uses.
 struct Total;
 
-impl crate::Augmentation for Total {
+impl crate::cell::Augmentation for Total {
     type Extra = u64;
 
-    fn read(&self, slice: &mut crate::Slice<'_>) -> Result<u64, crate::CellError> {
+    fn read(&self, slice: &mut crate::cell::Slice<'_>) -> Result<u64, crate::cell::CellError> {
         slice.load_uint(64)
     }
 
-    fn combine(&self, left: &u64, right: &u64) -> Result<u64, crate::CellError> {
+    fn combine(&self, left: &u64, right: &u64) -> Result<u64, crate::cell::CellError> {
         Ok(left + right)
     }
 
-    fn write(&self, extra: &u64, into: &mut crate::Builder) -> Result<(), crate::CellError> {
+    fn write(&self, extra: &u64, into: &mut crate::cell::Builder) -> Result<(), crate::cell::CellError> {
         into.store_uint(*extra, 64)?;
         Ok(())
     }
@@ -446,18 +446,18 @@ impl crate::Augmentation for Total {
 /// backwards. This one does not.
 struct Ordered;
 
-impl crate::Augmentation for Ordered {
+impl crate::cell::Augmentation for Ordered {
     type Extra = u64;
 
-    fn read(&self, slice: &mut crate::Slice<'_>) -> Result<u64, crate::CellError> {
+    fn read(&self, slice: &mut crate::cell::Slice<'_>) -> Result<u64, crate::cell::CellError> {
         slice.load_uint(64)
     }
 
-    fn combine(&self, left: &u64, right: &u64) -> Result<u64, crate::CellError> {
+    fn combine(&self, left: &u64, right: &u64) -> Result<u64, crate::cell::CellError> {
         Ok(left.wrapping_mul(31).wrapping_add(*right))
     }
 
-    fn write(&self, extra: &u64, into: &mut crate::Builder) -> Result<(), crate::CellError> {
+    fn write(&self, extra: &u64, into: &mut crate::cell::Builder) -> Result<(), crate::cell::CellError> {
         into.store_uint(*extra, 64)?;
         Ok(())
     }
@@ -471,14 +471,14 @@ fn leaf_extra(key: &[u8]) -> u64 {
 }
 
 /// The augmented dictionary those keys build, each summarised by its own leading bytes.
-fn aug_dict_of<A: crate::Augmentation<Extra = u64>>(
+fn aug_dict_of<A: crate::cell::Augmentation<Extra = u64>>(
     aug: A,
     key_bits: u16,
     keys: &[Vec<u8>],
-) -> crate::AugDict<A> {
-    let mut dict = crate::AugDict::new(aug, key_bits).unwrap();
+) -> crate::cell::AugDict<A> {
+    let mut dict = crate::cell::AugDict::new(aug, key_bits).unwrap();
     for key in keys {
-        let mut value = crate::Builder::new();
+        let mut value = crate::cell::Builder::new();
         value.store_bytes(key).unwrap();
         dict.set(key, &leaf_extra(key), &value).unwrap();
     }

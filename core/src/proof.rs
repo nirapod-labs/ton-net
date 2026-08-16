@@ -1,12 +1,21 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileCopyrightText: 2026 Nirapod Labs
 
-//! Checking an account read against a block hash the caller trusts.
+//! The verification engine: what this library is for.
 //!
-//! A liteserver's answer is worth what its proof is worth. This module turns one trusted
-//! hash into a checked account: every step recomputes a hash from bytes the server sent
-//! and requires it to equal a hash the previous step already established, so nothing the
-//! server says is believed except what the arithmetic forces.
+//! A liteserver's answer is worth what its proof is worth. Every step here recomputes a
+//! hash from bytes the server sent and requires it to equal a hash the previous step
+//! already established, so nothing the server says is believed except what the arithmetic
+//! forces.
+//!
+//! Three things are checked, and they compose. [`verify_chain`] walks from a block the
+//! caller already trusts to a later one, checking a [`ValidatorSet`] signature quorum at
+//! every step, which is how a client comes to hold a head it proved rather than one a
+//! server named. [`verify_account`], below, takes such a hash and checks an account read
+//! against it. [`signature::verify`] is the one primitive under both.
+//!
+//! This module decides. [`crate::tlb`] decodes, and the split is deliberate: a decoder
+//! that also judges is a decoder whose failures are hard to read.
 //!
 //! # What is trusted
 //!
@@ -17,7 +26,7 @@
 //!
 //! Where that hash comes from decides what the check is worth: a client that asks the
 //! same server for the anchor has proved nothing. Deriving it instead from a single
-//! pinned key block is block sync, which is [`crate::chain::verify_chain`] in this same
+//! pinned key block is block sync, which is [`crate::proof::chain::verify_chain`] in this same
 //! crate, and which the facade above runs before it calls in here.
 //!
 //! # The chain
@@ -37,13 +46,19 @@
 //! For a masterchain account the first two steps are skipped: the account is in the
 //! trusted block's own state.
 
-use ton_net_cell::{parse_boc, Cell, CellType};
+pub mod chain;
+pub mod signature;
+pub mod validators;
 
-use crate::account::Account;
-use crate::block::Block;
-use crate::error::BlockError;
-use crate::shard::ShardState;
-use ton_net_cell::Lookup;
+pub use chain::{verify_chain, ProvenBlock};
+pub use validators::{Validator, ValidatorSet};
+
+/// The block identity and proof-chain types [`verify_chain`] reads, re-exported from
+/// [`crate::tl`] so a caller need not name the codec to check a chain.
+pub use crate::tl::lite::{BlockIdExt, BlockLink, PartialBlockProof};
+
+use crate::cell::{parse_boc, Cell, CellType, Lookup};
+use crate::tlb::{Account, Block, BlockError, ShardState};
 
 /// The workchain id of the masterchain.
 const MASTERCHAIN: i32 = -1;

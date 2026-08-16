@@ -8,10 +8,10 @@ use super::{
     check_key_bits, collapse, descend, key_of, leaf, lookup, rebuild, rest, split, walk_step,
     DictEntry, Entry, Lookup, Pending, Shape,
 };
-use crate::builder::Builder;
-use crate::cell::Cell;
-use crate::error::CellError;
-use crate::slice::Slice;
+use crate::cell::builder::Builder;
+use crate::cell::cell::Cell;
+use crate::cell::error::CellError;
+use crate::cell::slice::Slice;
 
 /// The plain shape: a node holds its label and its value and nothing between them.
 pub(super) struct Plain;
@@ -50,7 +50,7 @@ impl Shape for Plain {
 /// # Examples
 ///
 /// ```
-/// use ton_net_cell::{Builder, Dict, Lookup};
+/// use ton_net::cell::{Builder, Dict, Lookup};
 ///
 /// let mut dict = Dict::new(32)?;
 /// let mut value = Builder::new();
@@ -61,7 +61,7 @@ impl Shape for Plain {
 ///     unreachable!("the key was just stored")
 /// };
 /// assert_eq!(entry.slice()?.load_uint(8)?, 7);
-/// # Ok::<(), ton_net_cell::CellError>(())
+/// # Ok::<(), ton_net::cell::CellError>(())
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Dict {

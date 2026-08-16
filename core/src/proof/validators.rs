@@ -38,10 +38,10 @@
 //! key block names, and the window is not a check.
 
 use sha2::{Digest, Sha256};
-use ton_net_cell::{Cell, Slice};
+use crate::cell::{Cell, Slice};
 
-use crate::error::BlockError;
-use ton_net_cell::{Dict, Lookup};
+use crate::tlb::error::BlockError;
+use crate::cell::{Dict, Lookup};
 
 /// The configuration parameter holding the current validator set.
 const CURRENT_VALIDATORS: i32 = 34;

@@ -1,21 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileCopyrightText: 2026 Nirapod Labs
 
-// A library that decodes bytes from a peer it does not trust must fail by returning, not
-// by unwinding: a panic in a decoder is a denial of service in whatever process embedded
-// it. The lints sit on the library because a test is the opposite case, where an unwrap
-// is the assertion. Arithmetic is deliberately not in the set: every count these formats
-// carry is bounded before it is used, and each subtraction sits within a few lines of the
-// guard that makes it safe, so denying it would bury the real bounds under checked_sub.
-#![deny(
-    clippy::unwrap_used,
-    clippy::expect_used,
-    clippy::panic,
-    clippy::unreachable,
-    clippy::todo,
-    clippy::indexing_slicing
-)]
-
 //! The TON cell model and bag-of-cells codec for ton-net.
 //!
 //! A [`Cell`] is TON's universal container: up to 1023 bits of data and up to four
@@ -66,7 +51,7 @@
 //! # Examples
 //!
 //! ```
-//! use ton_net_cell::parse_boc;
+//! use ton_net::cell::parse_boc;
 //!
 //! // A bag of cells holding one cell of eight bits.
 //! let bytes = [0xb5, 0xee, 0x9c, 0x72, 0x01, 0x01, 0x01, 0x01, 0x00, 0x03, 0x00,
@@ -74,11 +59,8 @@
 //! let roots = parse_boc(&bytes)?;
 //! let mut slice = roots[0].parse();
 //! assert_eq!(slice.load_uint(8)?, 0xab);
-//! # Ok::<(), ton_net_cell::CellError>(())
+//! # Ok::<(), ton_net::cell::CellError>(())
 //! ```
-#![forbid(unsafe_code)]
-#![warn(missing_docs)]
-#![deny(rustdoc::broken_intra_doc_links)]
 
 mod boc;
 mod builder;
@@ -120,9 +102,3 @@ pub use merkle::{
 pub use slice::{MsgAddress, Slice};
 pub use usage::UsageTree;
 
-// The README ships to crates.io and cannot be replaced once a version is published,
-// so its examples are compiled here rather than trusted. Doc-only: this does not
-// appear in the rendered documentation.
-#[cfg(doctest)]
-#[doc = include_str!("../README.md")]
-struct Readme;

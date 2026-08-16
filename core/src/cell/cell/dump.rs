@@ -123,7 +123,7 @@ pub(super) fn binary(cell: &Cell) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::Builder;
+    use crate::cell::Builder;
 
     #[test]
     fn the_hex_form_completes_a_partial_nibble() {

@@ -31,7 +31,7 @@ pub struct PublicKey {
 #[tl(boxed)]
 pub enum Message {
     /// A query: a `query_id` and the serialized request bytes. For the liteserver
-    /// path the request is a serialized [`crate::lite::Query`].
+    /// path the request is a serialized [`crate::tl::lite::Query`].
     #[tl(id = 0xb48bf97a)]
     Query {
         /// A caller-chosen 32-byte id the matching answer echoes.

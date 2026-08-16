@@ -15,7 +15,7 @@
 //! a real bag of cells: single flipped bytes, truncations, and splices reach the deep
 //! paths that arbitrary input never does.
 
-use ton_net_cell::{
+use ton_net::cell::{
     parse_boc, serialize_boc, BocView, Builder, Cell, CellError, LazyBoc, MAX_DEPTH,
 };
 

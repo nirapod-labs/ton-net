@@ -7,8 +7,8 @@ use std::num::NonZeroUsize;
 use std::sync::{Arc, OnceLock};
 
 use super::{bit_len, read_header, Header, ParseOptions, Reader, MAX_DEPTH};
-use crate::cell::{summarize, Cell, CellType, Identity, Payload, Refs, Span, MAX_BITS, MAX_REFS};
-use crate::error::CellError;
+use crate::cell::cell::{summarize, Cell, CellType, Identity, Payload, Refs, Span, MAX_BITS, MAX_REFS};
+use crate::cell::error::CellError;
 
 /// A cell as read from the bag, with its references still as indices and its bytes still
 /// in the bag.
@@ -58,14 +58,14 @@ impl RawCell {
 /// # Examples
 ///
 /// ```
-/// use ton_net_cell::parse_boc;
+/// use ton_net::cell::parse_boc;
 ///
 /// let bytes = [0xb5, 0xee, 0x9c, 0x72, 0x01, 0x01, 0x01, 0x01, 0x00, 0x03, 0x00,
 ///              0x00, 0x02, 0xab];
 /// let roots = parse_boc(&bytes)?;
 /// assert_eq!(roots.len(), 1);
 /// assert_eq!(roots[0].data(), &[0xab]);
-/// # Ok::<(), ton_net_cell::CellError>(())
+/// # Ok::<(), ton_net::cell::CellError>(())
 /// ```
 pub fn parse_boc(bytes: &[u8]) -> Result<Vec<Cell>, CellError> {
     parse_boc_with(bytes, &ParseOptions::default())
@@ -86,7 +86,7 @@ pub fn parse_boc(bytes: &[u8]) -> Result<Vec<Cell>, CellError> {
 /// # Examples
 ///
 /// ```
-/// use ton_net_cell::{parse_boc_with, CellError, ParseOptions};
+/// use ton_net::cell::{parse_boc_with, CellError, ParseOptions};
 ///
 /// let bytes = [0xb5, 0xee, 0x9c, 0x72, 0x01, 0x01, 0x01, 0x01, 0x00, 0x03, 0x00,
 ///              0x00, 0x02, 0xab];
@@ -974,7 +974,7 @@ fn check_stored(identity: &Identity, stored: &[u8]) -> Result<(), CellError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{serialize_boc, serialize_boc_with, BocOptions, Builder};
+    use crate::cell::{serialize_boc, serialize_boc_with, BocOptions, Builder};
 
     /// The captured mainnet account proof, read from the fixture the hostile corpus
     /// mutates so that the parity gate and that corpus work over one real bag.

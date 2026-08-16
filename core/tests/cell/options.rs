@@ -21,7 +21,7 @@
 //! lazy door is caught here and nowhere else; dropping it from the parse door is caught here
 //! and by the second property too, since that one reads through the same call.
 
-use ton_net_cell::{
+use ton_net::cell::{
     parse_boc, parse_boc_with, BocView, Cell, CellError, LazyBoc, ParseOptions, MAX_CELLS,
 };
 

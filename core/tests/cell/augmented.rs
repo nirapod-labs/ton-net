@@ -22,7 +22,7 @@
 //! eleventh has a real fork, whose root shares its cell with a reference the dictionary
 //! does not own; that one is held to the summary rule directly instead.
 
-use ton_net_cell::{
+use ton_net::cell::{
     parse_boc, AugDict, AugNode, Augmentation, Builder, Cell, CellError, CellType, Lookup, Slice,
     Traverse, MAX_BITS,
 };
@@ -604,7 +604,7 @@ fn a_summary_cannot_be_invented_for_a_subtree_a_proof_hid() {
 
 #[test]
 fn each_dictionary_refuses_the_other_shape_on_the_way_in() {
-    use ton_net_cell::Dict;
+    use ton_net::cell::Dict;
 
     // A plain writer refuses an augmented fork, because it would drop the summary it has
     // no reading for and rebuild a tree that hashes as a well-formed dictionary.

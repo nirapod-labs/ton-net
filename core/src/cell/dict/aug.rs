@@ -12,10 +12,10 @@ use super::{
     rebuild, reroot, rest, split, traverse, validate_tree, walk_step, AugNode, DictEntry, Entry,
     ForkExtra, Lookup, Pending, Shape, Traverse,
 };
-use crate::builder::Builder;
-use crate::cell::Cell;
-use crate::error::CellError;
-use crate::slice::Slice;
+use crate::cell::builder::Builder;
+use crate::cell::cell::Cell;
+use crate::cell::error::CellError;
+use crate::cell::slice::Slice;
 
 /// How a caller reads, writes and combines the summaries an augmented dictionary carries.
 ///
@@ -32,7 +32,7 @@ use crate::slice::Slice;
 /// # Examples
 ///
 /// ```
-/// use ton_net_cell::{Augmentation, Builder, CellError, Slice};
+/// use ton_net::cell::{Augmentation, Builder, CellError, Slice};
 ///
 /// /// A summary that counts the entries below it.
 /// struct Count;
@@ -142,7 +142,7 @@ pub type AugItem<E> = (Vec<u8>, AugEntry<E>);
 
 /// An augmented dictionary: TON's `HashmapAug n X Y`.
 ///
-/// The same tree as [`Dict`](crate::Dict), except every node also carries a `Y`
+/// The same tree as [`Dict`](crate::cell::Dict), except every node also carries a `Y`
 /// summarising everything below it, and a fork's is the combination of its two children's.
 /// What a `Y` is and how two combine come from the [`Augmentation`] this is built over.
 ///
@@ -152,12 +152,12 @@ pub type AugItem<E> = (Vec<u8>, AugEntry<E>);
 ///
 /// This models the `HashmapAug` edge. `HashmapAugE`'s wrapper, the bit saying whether
 /// there is a root at all and the summary beside it, belongs to the caller, exactly as
-/// [`Dict`](crate::Dict) leaves `HashmapE`'s bit to its own.
+/// [`Dict`](crate::cell::Dict) leaves `HashmapE`'s bit to its own.
 ///
 /// # Examples
 ///
 /// ```
-/// # use ton_net_cell::{Augmentation, AugDict, Builder, CellError, Lookup, Slice};
+/// # use ton_net::cell::{Augmentation, AugDict, Builder, CellError, Lookup, Slice};
 /// # struct Count;
 /// # impl Augmentation for Count {
 /// #     type Extra = u32;
@@ -182,7 +182,7 @@ pub type AugItem<E> = (Vec<u8>, AugEntry<E>);
 /// };
 /// assert_eq!(found.extra, 1);
 /// assert_eq!(found.entry.slice()?.load_uint(8)?, 7);
-/// # Ok::<(), ton_net_cell::CellError>(())
+/// # Ok::<(), ton_net::cell::CellError>(())
 /// ```
 #[derive(Debug, Clone)]
 pub struct AugDict<A: Augmentation> {
@@ -281,7 +281,7 @@ impl<A: Augmentation> AugDict<A> {
     /// Looks `key` up, returning the summary its leaf carries alongside the value.
     ///
     /// The three outcomes are described on [`Lookup`], and mean here what they mean for
-    /// [`Dict::get`](crate::Dict::get).
+    /// [`Dict::get`](crate::cell::Dict::get).
     ///
     /// # Errors
     ///
@@ -392,7 +392,7 @@ impl<A: Augmentation> AugDict<A> {
     ///
     /// Wherever [`set`](AugDict::set) can build that dictionary at all, this builds the same
     /// tree. It can also build ones [`set`](AugDict::set) cannot, for the reason
-    /// [`Dict::from_items`](crate::Dict::from_items) gives: a first key inserted alone carries
+    /// [`Dict::from_items`](crate::cell::Dict::from_items) gives: a first key inserted alone carries
     /// a label its whole width, and a value that fits beside the finished tree's short label
     /// may not fit beside that one.
     ///
@@ -532,7 +532,7 @@ impl<A: Augmentation> AugDict<A> {
 
     /// The sub-dictionary of every entry whose key begins with `prefix`.
     ///
-    /// As [`Dict::subdict`](crate::Dict::subdict), over the narrower `key_bits -
+    /// As [`Dict::subdict`](crate::cell::Dict::subdict), over the narrower `key_bits -
     /// prefix_bits`-bit key that remains. The carve leaves every subtree it keeps untouched,
     /// so each fork it carries still summarises the same two children and the result is a
     /// consistent augmented dictionary its own [`validate`](AugDict::validate) accepts.
@@ -649,7 +649,7 @@ impl<'a, A: Augmentation> IntoIterator for &'a AugDict<A> {
 
 /// A walk over every entry of an augmented dictionary, in ascending key order.
 ///
-/// Built by [`AugDict::iter`]. Like [`DictIter`](crate::DictIter) it stops at a pruned
+/// Built by [`AugDict::iter`]. Like [`DictIter`](crate::cell::DictIter) it stops at a pruned
 /// branch rather than walking past it.
 pub struct AugDictIter<'a, A: Augmentation> {
     aug: &'a A,

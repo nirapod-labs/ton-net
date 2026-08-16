@@ -3,10 +3,10 @@
 
 //! An account, decoded from the state cell a liteserver returns.
 
-use ton_net_cell::{parse_boc, Cell, Slice};
+use crate::cell::{parse_boc, Cell, Slice};
 
-use crate::coins::Coins;
-use crate::error::BlockError;
+use crate::tlb::coins::Coins;
+use crate::tlb::error::BlockError;
 
 /// The `StorageExtraInfo` tag for an account carrying no storage extra.
 const STORAGE_EXTRA_NONE: u64 = 0b000;

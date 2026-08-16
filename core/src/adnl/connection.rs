@@ -9,12 +9,12 @@
 //! sends it, and reads frames until the answer to that id comes back. The liteserver
 //! methods that build the query bytes and decode the answer live in ton-net-lite.
 
-use ton_net_tl::{adnl, deserialize, serialize};
+use crate::tl::{adnl, deserialize, serialize};
 
-use crate::frame::FrameError;
-use crate::frame::SessionCiphers;
-use crate::handshake::{client_handshake, HandshakeError, HandshakeSecrets};
-use crate::transport::{Transport, TransportError};
+use crate::adnl::frame::FrameError;
+use crate::adnl::frame::SessionCiphers;
+use crate::adnl::handshake::{client_handshake, HandshakeError, HandshakeSecrets};
+use crate::adnl::transport::{Transport, TransportError};
 
 /// The most frames to read while waiting for one answer before giving up.
 ///

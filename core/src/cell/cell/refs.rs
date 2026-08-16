@@ -11,7 +11,7 @@
 //! that tells them apart.
 
 use super::{Cell, MAX_REFS};
-use crate::error::CellError;
+use crate::cell::error::CellError;
 
 /// A cell's references, in order, held inline.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -86,7 +86,7 @@ impl Refs {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::Builder;
+    use crate::cell::Builder;
 
     fn cell_of(byte: u64) -> Cell {
         let mut builder = Builder::new();

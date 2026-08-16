@@ -24,7 +24,7 @@ use curve25519_dalek::scalar::Scalar;
 use curve25519_dalek::traits::Identity;
 use curve25519_dalek::EdwardsPoint;
 use ed25519_dalek::{Signer, SigningKey, VerifyingKey};
-use ton_net_block::signature::verify;
+use ton_net::proof::signature::verify;
 
 /// A fixed-seed generator, so every case below is the same on every run.
 fn xorshift(state: &mut u64) -> u64 {

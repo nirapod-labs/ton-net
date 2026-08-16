@@ -25,10 +25,10 @@
 use aes::cipher::{KeyIvInit, StreamCipher};
 use curve25519_dalek::edwards::{CompressedEdwardsY, EdwardsPoint};
 use sha2::{Digest, Sha512};
-use ton_net_tl::{adnl::PublicKey, serialize};
+use crate::tl::{adnl::PublicKey, serialize};
 
-use crate::frame::SessionCiphers;
-use crate::{sha256, Aes256Ctr};
+use crate::adnl::frame::SessionCiphers;
+use crate::adnl::{sha256, Aes256Ctr};
 
 /// The fresh randomness one handshake consumes.
 ///

@@ -12,7 +12,7 @@
 
 use std::fmt::Write as _;
 
-use ton_net_adnl::{client_handshake, HandshakeSecrets};
+use ton_net::adnl::{client_handshake, HandshakeSecrets};
 
 fn hex(bytes: &[u8]) -> String {
     bytes.iter().fold(String::new(), |mut out, b| {

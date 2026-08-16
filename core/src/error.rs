@@ -222,18 +222,18 @@ impl Error {
 
     /// Classifies a block-structure failure from a read that checked nothing.
     ///
-    /// The same [`BlockError`](ton_net_block::BlockError) means two different things
+    /// The same [`BlockError`](ton_net::tlb::BlockError) means two different things
     /// depending on which call produced it, and the difference is what a caller acts on.
     /// Out of the proof engine it is a server that did not prove its answer, and the
     /// conversion below says so. Out of `Client::account_reported` there was no proof to
     /// fail, so the same failure is only bytes that did not read, and calling it a proof
     /// failure would report a check that never ran.
-    pub(crate) fn decoding(error: &ton_net_block::BlockError) -> Self {
+    pub(crate) fn decoding(error: &crate::tlb::BlockError) -> Self {
         Self::Cell(error.to_string())
     }
 }
 
-impl From<ton_net_block::BlockError> for Error {
+impl From<crate::tlb::BlockError> for Error {
     /// Every way the proof engine fails is a proof failure, bytes that are not cells
     /// included.
     ///
@@ -246,22 +246,22 @@ impl From<ton_net_block::BlockError> for Error {
     ///
     /// A read that verified nothing must not use this. It has a classifier of its own, so
     /// a failure out of one stays a failure to read bytes.
-    fn from(error: ton_net_block::BlockError) -> Self {
+    fn from(error: crate::tlb::BlockError) -> Self {
         Self::Proof(error.to_string())
     }
 }
 
-impl From<ton_net_adnl::TransportError> for Error {
-    fn from(error: ton_net_adnl::TransportError) -> Self {
+impl From<crate::adnl::TransportError> for Error {
+    fn from(error: crate::adnl::TransportError) -> Self {
         // A connect timeout reads as unreachable at this layer: the deadline for a whole
         // call is separate and surfaces as `Timeout`.
         Self::Transport(error.to_string())
     }
 }
 
-impl From<ton_net_adnl::AdnlError> for Error {
-    fn from(error: ton_net_adnl::AdnlError) -> Self {
-        use ton_net_adnl::AdnlError;
+impl From<crate::adnl::AdnlError> for Error {
+    fn from(error: crate::adnl::AdnlError) -> Self {
+        use crate::adnl::AdnlError;
         match error {
             AdnlError::Transport(transport) => transport.into(),
             AdnlError::Handshake(_) => Self::Handshake,
@@ -276,9 +276,9 @@ impl From<ton_net_adnl::AdnlError> for Error {
     }
 }
 
-impl From<ton_net_lite::LiteError> for Error {
-    fn from(error: ton_net_lite::LiteError) -> Self {
-        use ton_net_lite::LiteError;
+impl From<crate::lite::LiteError> for Error {
+    fn from(error: crate::lite::LiteError) -> Self {
+        use crate::lite::LiteError;
         match error {
             LiteError::Adnl(adnl) => adnl.into(),
             LiteError::LiteServer { code, message } => Self::LiteServer { code, message },
@@ -291,7 +291,7 @@ impl From<ton_net_lite::LiteError> for Error {
 #[cfg(test)]
 mod tests {
     use super::Error;
-    use ton_net_block::BlockError;
+    use crate::tlb::BlockError;
 
     #[test]
     fn a_failed_proof_never_arrives_as_something_softer() {
@@ -306,14 +306,14 @@ mod tests {
             BlockError::NotBound,
             BlockError::WrongConstructor { expected: "block" },
             BlockError::Malformed("shard state"),
-            BlockError::Cell(ton_net_cell::CellError::LabelTooLong),
+            BlockError::Cell(crate::cell::CellError::LabelTooLong),
             // Bytes that are not cells belong on this list too. The engine parses the
             // proof with no precondition, so four bytes of junk where a shard proof
             // should be is a server failing to prove its answer in the cheapest way
             // there is, and a caller weighing whether to keep asking this server has to
             // see it alongside the rest.
-            BlockError::Cell(ton_net_cell::CellError::NotABagOfCells),
-            BlockError::Cell(ton_net_cell::CellError::Truncated),
+            BlockError::Cell(crate::cell::CellError::NotABagOfCells),
+            BlockError::Cell(crate::cell::CellError::Truncated),
         ] {
             let mapped = Error::from(failure.clone());
             assert!(
@@ -330,7 +330,7 @@ mod tests {
         // would report a check that never ran.
         for failure in [
             BlockError::Malformed("account address"),
-            BlockError::Cell(ton_net_cell::CellError::NotABagOfCells),
+            BlockError::Cell(crate::cell::CellError::NotABagOfCells),
         ] {
             let mapped = Error::decoding(&failure);
             assert!(

@@ -9,8 +9,8 @@
 
 use std::time::Duration;
 
-use ton_net_adnl::TcpTransport;
-use ton_net_lite::{AccountId, LiteClient};
+use ton_net::adnl::TcpTransport;
+use ton_net::lite::{AccountId, LiteClient};
 
 const SERVER: &str = "5.9.10.47:19949";
 const SERVER_KEY: &str = "9f85439d2094b92a639c2c9493d7b740e39dea8d08b525986d39d6dd69e7f309";

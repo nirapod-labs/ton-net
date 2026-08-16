@@ -28,7 +28,7 @@ use curve25519_dalek::edwards::CompressedEdwardsY;
 use curve25519_dalek::scalar::Scalar;
 use curve25519_dalek::EdwardsPoint;
 use sha2::{Digest, Sha256, Sha512};
-use ton_net_tl::{serialize, signed};
+use crate::tl::{serialize, signed};
 
 /// The message the older signed form covers: the identity of the block being committed.
 ///
@@ -50,7 +50,7 @@ pub fn block_id_message(root_hash: &[u8; 32], file_hash: &[u8; 32]) -> Vec<u8> {
 /// beside the session id, so a signature raised in one consensus session cannot be
 /// replayed into another. The candidate is hashed whole and never decoded here; which
 /// block it names is a separate question, answered by
-/// [`ton_net_tl::signed::CandidateBlock`].
+/// [`ton_net::tl::signed::CandidateBlock`].
 #[must_use]
 pub fn simplex_message(session_id: &[u8; 32], slot: i32, candidate: &[u8]) -> Vec<u8> {
     let hash: [u8; 32] = Sha256::digest(candidate).into();

@@ -5,7 +5,7 @@
 //!
 //! The ADNL protocol logic is sans-I/O: it produces bytes to send and consumes bytes
 //! received. A [`Transport`] is the one thing that moves those bytes over a real link.
-//! Keeping the seam this narrow is what lets the same [`AdnlConnection`](crate::AdnlConnection)
+//! Keeping the seam this narrow is what lets the same [`AdnlConnection`](crate::adnl::AdnlConnection)
 //! run over TCP today and over a browser WebSocket in a later release without the
 //! protocol code changing.
 

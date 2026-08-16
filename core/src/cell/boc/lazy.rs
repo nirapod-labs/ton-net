@@ -16,8 +16,8 @@
 use std::cell::RefCell;
 
 use super::{build_at, read_cells, read_header, Build, Header, ParseOptions, RawCells, Reader};
-use crate::cell::Cell;
-use crate::error::CellError;
+use crate::cell::cell::Cell;
+use crate::cell::error::CellError;
 
 /// A bag of cells read once, with its cells built on demand and kept.
 ///
@@ -95,7 +95,7 @@ impl LazyBoc {
     /// This is [`built_count`](LazyBoc::built_count) plus whatever work was repeated, so the
     /// two are equal exactly when nothing has been built more than once. A rebuilt cell is
     /// equal to the one it replaced and takes the same place, so no count of cells held says
-    /// it happened. The other thing that does is [`Cell::ptr_eq`](crate::Cell::ptr_eq), which
+    /// it happened. The other thing that does is [`Cell::ptr_eq`](crate::cell::Cell::ptr_eq), which
     /// asks whether two handles are one cell rather than two equal ones.
     #[must_use]
     pub fn builds_run(&self) -> usize {
@@ -167,7 +167,7 @@ impl LazyBoc {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{parse_boc, serialize_boc, Builder};
+    use crate::cell::{parse_boc, serialize_boc, Builder};
 
     /// A two-cell bag: a root holding `0xab` and a reference holding `0xcd`.
     fn two_cell_bag() -> Vec<u8> {

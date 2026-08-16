@@ -14,7 +14,7 @@
 
 use criterion::{criterion_group, criterion_main, Criterion};
 use ton_net_block::{verify_chain, BlockIdExt, PartialBlockProof};
-use ton_net_tl::deserialize;
+use ton_net::tl::deserialize;
 
 /// Three forward links from masterchain 46894135, crossing a validator-set rotation.
 const CHAIN: &str = include_str!("../tests/fixtures/chain.hex");

@@ -16,10 +16,10 @@
 //! a sink and the writer over a run, so a [`Label`] and a plain `[bool]` of key bits go
 //! through the same codec.
 
-use crate::builder::Builder;
-use crate::cell::MAX_BITS;
-use crate::error::CellError;
-use crate::slice::Slice;
+use crate::cell::builder::Builder;
+use crate::cell::cell::MAX_BITS;
+use crate::cell::error::CellError;
+use crate::cell::slice::Slice;
 
 /// Bytes enough for a label of every width a cell could carry.
 const LABEL_BYTES: usize = (MAX_BITS as usize).div_ceil(8);
