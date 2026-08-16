@@ -22,9 +22,11 @@
 
 use sha2::{Digest, Sha256};
 
-// The socket and the per-session randomness it draws are the whole of what needs a
-// runtime, so they are the whole of what the `net` feature gates. The handshake and the
-// frame cipher are pure functions over bytes and build for any target.
+// The handshake and the frame cipher are pure functions over bytes and build for any
+// target, so neither is gated. The message layer is gated whole, and that is wider than
+// what it needs: it is generic over the seam and reaches the OS at exactly one line, the
+// per-session randomness at `connection.rs`. Narrowing it means a constructor that takes
+// the randomness rather than drawing it, which is a surface addition rather than a move.
 #[cfg(feature = "net")]
 #[cfg_attr(docsrs, doc(cfg(feature = "net")))]
 mod connection;

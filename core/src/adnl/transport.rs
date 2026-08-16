@@ -4,13 +4,13 @@
 //! The transport seam.
 //!
 //! The ADNL protocol logic is sans-I/O: it produces bytes to send and consumes bytes
-//! received. A [`Transport`] is the one thing that moves those bytes over a real link.
-//! Keeping the seam this narrow is what lets the same [`AdnlConnection`](crate::adnl::AdnlConnection)
-//! run over TCP today and over a browser WebSocket in a later release without the
-//! protocol code changing.
+//! received. A [`Transport`] is the one thing that moves those bytes over a real link, so
+//! a second implementation reaches the same protocol code without touching it.
 //!
-//! The seam is also where the `net` feature cuts. The trait and its error are pure and
-//! build for any target; [`TcpTransport`] is the socket and is the part that is gated.
+//! The trait and its error are pure and build for any target; [`TcpTransport`] is the
+//! socket and is gated behind `net`. So is the driver above it, which is wider than the
+//! seam alone would require: a build without `net` has this trait and nothing in the tree
+//! that consumes it.
 
 use std::future::Future;
 

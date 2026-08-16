@@ -278,8 +278,9 @@ fn read_validator(s: &mut Slice<'_>) -> Result<Validator, BlockError> {
 /// This is the value a signature names its signer by, and the same computation the ADNL
 /// handshake performs on a server key. The two are written separately: this one runs once
 /// per validator over a set of several hundred on every link of a chain, and the codec's
-/// own serializer allocates. `the_short_id_is_the_serialized_key_hashed` holds them to the
-/// same bytes, which is a test the six-crate split could not have written.
+/// own serializer allocates. `the_short_id_is_the_serialized_key_hashed` holds the two
+/// spellings to the same bytes, so a change to one that is not made to the other lands
+/// there.
 #[must_use]
 pub fn short_id(public_key: &[u8; 32]) -> [u8; 32] {
     let mut hasher = Sha256::new();
