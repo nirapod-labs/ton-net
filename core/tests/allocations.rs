@@ -38,12 +38,28 @@
 //! depth whose forks carry no label between them, which is the property held below: a write costs
 //! what its forks cost to rebuild, and the labels read on the way cost nothing.
 //!
+//! Three quantities come off the one allocator and they answer different questions. A call count
+//! and a byte sum are both cumulative: they rise on every request and never fall, so what they
+//! report is what a body asked for across the whole of its run. What that body holds at one
+//! moment is a different number and it needs the release side counted too, so `dealloc` debits
+//! what `alloc` credited and `realloc` does both. The high-water mark of that difference is the
+//! peak, and it is the quantity NET-ADR-012 states a budget against: a bound on what a parse
+//! holds while it runs is not a bound on what it asked for on the way.
+//!
+//! **The peak is per thread, and it is exact only for a body that releases on the thread it took
+//! from.** A block credited on one thread and released on another debits a counter that never
+//! credited it, and the live figure stops at zero rather than going below, so such a body reads
+//! low from that point on. Every body measured in this file takes and releases on the thread it
+//! runs on, which is the same scope the counts above are stated at and for the same reason: no
+//! bag here is wide enough for a wave to leave this thread.
+//!
 //! Counting them at all means installing a global allocator, and a global allocator means
 //! `unsafe`. That is why this is a test binary and not the library: the library forbids
 //! unsafe code and goes on forbidding it, and a test binary is a crate of its own.
 
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::Cell;
+use std::hint::black_box;
 
 use ton_net::cell::{parse_boc, serialize_boc, BocView, Builder, Dict, Lookup};
 
@@ -60,6 +76,19 @@ thread_local! {
     /// for a byte are both one call. Where the property being held is that a read takes memory
     /// in proportion to the bag it was handed, the size is the quantity and the count is not.
     static BYTES: Cell<usize> = const { Cell::new(0) };
+
+    /// Bytes this thread has taken and not yet released, since the count was last cleared.
+    ///
+    /// The counterpart of [`BYTES`] with the release side in it. A sum that only rises reports
+    /// the same figure for a body holding a megabyte throughout and a body taking a kilobyte a
+    /// thousand times over, and a budget is a statement about the first of those.
+    static LIVE: Cell<usize> = const { Cell::new(0) };
+
+    /// The largest [`LIVE`] has reached since the count was last cleared.
+    ///
+    /// Read at the end rather than sampled, so no moment of the body is missed: every credit
+    /// compares against this and raises it, which is the only place the figure can move.
+    static PEAK: Cell<usize> = const { Cell::new(0) };
 }
 
 /// The system allocator, counting every call that asks it for memory.
@@ -78,14 +107,43 @@ fn record(bytes: usize) {
     let _ = BYTES.try_with(|counter| counter.set(counter.get().saturating_add(bytes)));
 }
 
+/// Adds a block this thread now holds, and raises the peak if it is the most so far.
+fn credit(bytes: usize) {
+    let _ = LIVE.try_with(|live| {
+        let held = live.get().saturating_add(bytes);
+        live.set(held);
+        let _ = PEAK.try_with(|peak| {
+            if held > peak.get() {
+                peak.set(held);
+            }
+        });
+    });
+}
+
+/// Removes a block this thread no longer holds.
+///
+/// Saturating rather than wrapping, because a block released here that was taken before the
+/// counter was cleared, or on another thread, has no credit to remove: the live figure stops at
+/// nothing rather than passing under it, which is the scope the module documentation states.
+fn debit(bytes: usize) {
+    let _ = LIVE.try_with(|live| live.set(live.get().saturating_sub(bytes)));
+}
+
 unsafe impl GlobalAlloc for Counting {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
         count();
         record(layout.size());
-        System.alloc(layout)
+        let taken = System.alloc(layout);
+        // A request that failed is a request all the same, so the call and the size are
+        // recorded above either way. Nothing is held by it, so the live figure is not.
+        if !taken.is_null() {
+            credit(layout.size());
+        }
+        taken
     }
 
     unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
+        debit(layout.size());
         System.dealloc(ptr, layout);
     }
 
@@ -94,7 +152,14 @@ unsafe impl GlobalAlloc for Counting {
         // whether or not the old block could be extended in place.
         count();
         record(new_size);
-        System.realloc(ptr, layout, new_size)
+        let moved = System.realloc(ptr, layout, new_size);
+        // The old block is gone and the new one is held only where the move succeeded. A
+        // realloc that failed left the old block where it was, so neither side moves.
+        if !moved.is_null() {
+            debit(layout.size());
+            credit(new_size);
+        }
+        moved
     }
 }
 
@@ -115,6 +180,20 @@ fn bytes_to_allocate<T>(body: impl FnOnce() -> T) -> (T, usize) {
     let value = body();
     let counted = BYTES.with(Cell::get);
     (value, counted)
+}
+
+/// Runs `body` and reports the most bytes it held at once.
+///
+/// The live count starts at nothing rather than at what this thread already holds, so the figure
+/// is what `body` added at its widest and not the process's residency. Whatever `body` returns is
+/// still held when the peak is read, so a body handing back its result is measured with that
+/// result inside the figure.
+fn peak_bytes<T>(body: impl FnOnce() -> T) -> (T, usize) {
+    LIVE.with(|counter| counter.set(0));
+    PEAK.with(|counter| counter.set(0));
+    let value = body();
+    let reached = PEAK.with(Cell::get);
+    (value, reached)
 }
 
 /// Headroom over what a workload costs beyond the thing its cost is counted against.
@@ -253,6 +332,86 @@ fn a_second_read_of_the_same_bag_costs_the_same() {
     let (_, first) = calls_to_allocate(|| parse_boc(&bag).expect("parses"));
     let (_, second) = calls_to_allocate(|| parse_boc(&bag).expect("parses"));
     assert_eq!(first, second, "reading a bag is not allowed to vary");
+}
+
+/// One block of a size chosen so nothing else in a measurement is near it.
+///
+/// A vector of bytes asks for exactly its capacity, so a body built out of these holds a figure
+/// known from the source rather than read off the instrument being tested. A megabyte is far
+/// above the handful of words a `Vec` header or a test harness costs, so a stray allocation
+/// inside the body would have to be enormous to move the equalities below.
+const BLOCK: usize = 1 << 20;
+
+#[test]
+fn what_a_body_holds_is_not_what_it_asked_for() {
+    // Two blocks of the same size, the second taken after the first is released. The demand is
+    // both of them and the residency is one, and a counter that never debits reports the demand
+    // for both questions. This is the whole of what the live count adds, so it is held as an
+    // equality on each side rather than as a comparison between them.
+    let taken_in_turn = || {
+        drop(black_box(Vec::<u8>::with_capacity(BLOCK)));
+        drop(black_box(Vec::<u8>::with_capacity(BLOCK)));
+    };
+
+    let ((), asked) = bytes_to_allocate(taken_in_turn);
+    assert_eq!(
+        asked,
+        BLOCK * 2,
+        "two blocks of {BLOCK} bytes were asked for one after the other"
+    );
+
+    let ((), peak) = peak_bytes(taken_in_turn);
+    assert_eq!(
+        peak, BLOCK,
+        "the second block was taken after the first was released, so one was ever held"
+    );
+
+    // And the same instrument on a body that does hold both at once, which is the case a peak
+    // stuck at the size of one block would pass just as happily.
+    let ((), peak) = peak_bytes(|| {
+        let first = black_box(Vec::<u8>::with_capacity(BLOCK));
+        let second = black_box(Vec::<u8>::with_capacity(BLOCK * 2));
+        drop(black_box((first, second)));
+    });
+    assert_eq!(
+        peak,
+        BLOCK * 3,
+        "a block and one twice its size, held together, are three blocks held"
+    );
+}
+
+#[test]
+fn a_peak_of_the_same_read_is_the_same() {
+    // The peak is a measurement, so it is held to what NET-ADR-012 holds a count to: a figure
+    // that moves between two reads of one bag is not one. A body that returns its result has
+    // that result inside the figure, so `parse_boc` is measured with its roots held.
+    let bag = unhex(BLOCK_HEX);
+    let (_, first) = peak_bytes(|| parse_boc(&bag).expect("parses"));
+    let (_, second) = peak_bytes(|| parse_boc(&bag).expect("parses"));
+    assert_eq!(first, second, "what a read holds is not allowed to vary");
+}
+
+#[test]
+fn a_read_asks_for_more_than_it_holds() {
+    // The two figures part on whatever a read takes and releases before it returns, and one
+    // thing it does that to is known by name: the height of every cell is a machine word each,
+    // read to plan the waves and released before a cell is built. So the demand stands at least
+    // that far above the residency, and a peak that had quietly become another cumulative sum
+    // would sit exactly on it instead.
+    let bag = unhex(BLOCK_HEX);
+    let cells = cells_in(&bag);
+
+    let (_, asked) = bytes_to_allocate(|| parse_boc(&bag).expect("parses"));
+    let (_, peak) = peak_bytes(|| parse_boc(&bag).expect("parses"));
+
+    let released = asked
+        .checked_sub(peak)
+        .expect("a read cannot hold more than it asked for");
+    assert!(
+        released >= cells * size_of::<usize>(),
+        "reading {cells} cells asked for {asked} bytes and held {peak} at once, which parts by \
+         {released} and so by less than the word per cell the heights take"
+    );
 }
 
 /// A 256-bit key whose `forks` significant bits sit at every other position, counting the
