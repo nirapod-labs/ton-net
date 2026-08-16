@@ -229,7 +229,10 @@ pub(super) fn fresh_enough(gen_utime: u32, limit_seconds: u32) -> Result<(), Err
 ///
 /// A zero bound refuses every head by design, so a walk under one is allowed its first
 /// reply and fails as stale, which is the failure the caller asked for.
-pub(super) fn worth_continuing(elapsed: std::time::Duration, limit_seconds: u32) -> Result<(), Error> {
+pub(super) fn worth_continuing(
+    elapsed: std::time::Duration,
+    limit_seconds: u32,
+) -> Result<(), Error> {
     if limit_seconds == 0 {
         return Ok(());
     }

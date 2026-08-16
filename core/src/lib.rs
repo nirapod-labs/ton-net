@@ -130,9 +130,9 @@ pub const VERIFY_EPOCH: u32 = 2;
 pub use address::Address;
 pub use client::proof::verify_account;
 #[cfg(feature = "net")]
-pub use client::SyncReport;
-#[cfg(feature = "net")]
 pub use client::Client;
+#[cfg(feature = "net")]
+pub use client::SyncReport;
 pub use config::Config;
 pub use error::{Error, ErrorCode};
 pub use verified::Verified;
