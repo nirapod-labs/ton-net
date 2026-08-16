@@ -9,11 +9,11 @@
 #
 # What release-plz contributes is the bookkeeping nobody does reliably by hand: it
 # reads the conventional commits since the last tag, works out the version, writes it
-# into seven crate manifests and eight package files, and runs a semver check that
-# refuses a bump the public API does not admit. What it does not contribute is the
-# changelog, which release-plz.toml turns off with the reasoning: a generated entry
-# says "check a block proof chain" where a reader upgrading a verifier needs to know
-# whether they were exposed to anything.
+# into the workspace manifest both crates read it from and into eight package files, and
+# runs a semver check that refuses a bump the public API does not admit. What it does not
+# contribute is the changelog, which release-plz.toml turns off with the reasoning: a
+# generated entry says "check a block proof chain" where a reader upgrading a verifier
+# needs to know whether they were exposed to anything.
 name: release-plz
 
 # A release here is a milestone rather than a commit. On a push trigger this opened a
@@ -85,7 +85,7 @@ jobs:
             echo "v$version is tagged; release.yml owns it from here"
             exit 0
           fi
-          # Proves this one string is the version in all seven crates and all eight
+          # Proves this one string is the version in both crates and in all eight
           # packages before anyone signs a tag over it.
           node scripts/check-versions.mjs
           echo "::notice::v$version is declared and untagged. Sign and push the tag to release it."
