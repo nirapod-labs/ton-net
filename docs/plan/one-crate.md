@@ -60,7 +60,14 @@ The property is nonetheless real in the code as written. Counting over the three
 
 `ton-net-cell` carries eleven `std::thread` references, all in `boc/parse.rs`. **Eight are under the `parallel` feature. Three are not**, and the reason is worth writing down because it is the same class of error this section is about. `parse.rs:349` guards with `cfg!(feature = "parallel")`, the macro rather than the `#[cfg]` attribute, so the body compiles in every configuration and `std::thread::available_parallelism()` at `:351` is in the default build. `parse.rs:1523,1525` sit in a `#[test]` at `:1499` that carries no feature attribute at all.
 
-**And randomness arrives the same way, unnoticed.** `ton-net-cell` declares no `getrandom` and reaches OS randomness anyway, nineteen times, through `HashMap` and `HashSet`: `std`'s default hasher seeds `RandomState` from the OS on first use. The sites are `cell.rs:420-421`, `boc/serialize.rs:6,41,79`, `usage.rs:18,51,65,133,173` and eight in `merkle/update.rs`. Nothing in `just gate` reads for it, and the wasm build would not catch it either, since `std::net`, `std::fs` and `SystemTime` all compile for `wasm32-unknown-unknown` and fail only at runtime.
+**And randomness arrives the same way, unnoticed.** `ton-net-cell` declares no `getrandom` and reaches OS randomness anyway, on eighteen source lines, through `HashMap` and `HashSet`: `std`'s default hasher seeds `RandomState` from the OS on first use. The lines, all under `crates/ton-net-cell/src/`, are `cell.rs:420-421`, `boc/serialize.rs:6,41,79`, `usage.rs:18,51,65,133,173` and eight in `merkle/update.rs`. The unit is lines rather than tokens because two of those lines name both types, which puts the token count at twenty:
+
+```sh
+git grep -n -E 'Hash(Map|Set)' 6bddcd3 -- crates/ton-net-cell/src | wc -l           # 18
+git grep -o -E 'Hash(Map|Set)' 6bddcd3 -- crates/ton-net-cell/src | wc -l           # 20
+```
+
+Nothing in `just gate` reads for it, and the wasm build would not catch it either, since `std::net`, `std::fs` and `SystemTime` all compile for `wasm32-unknown-unknown` and fail only at runtime.
 
 So the discipline holds today by nobody having broken it, not by anything refusing to compile. **A merge therefore surrenders no enforcement, because there is none to surrender.**
 
@@ -86,7 +93,7 @@ This catches the four `std` reaches the crate graph never could. **It is strictl
 
 `std::thread` stays permitted inside `core/src/cell/boc/`, because the threaded parse is a deliberate capability with its own feature. That exception is named in the check rather than left as a hole in the pattern, and the three ungated references section 2 found are fixed rather than exempted.
 
-**What the check deliberately does not flag: `HashMap` and `HashSet`.** They are how randomness actually arrives in the cell engine today, and flagging nineteen legitimate uses to catch a property nobody is attacking would be noise that gets turned off within a release. The reach is stated in section 2 rather than checked, and that gap is named rather than closed.
+**What the check deliberately does not flag: `HashMap` and `HashSet`.** They are how randomness actually arrives in the cell engine today, and flagging eighteen legitimate lines to catch a property nobody is attacking would be noise that gets turned off within a release. The reach is stated in section 2 rather than checked, and that gap is named rather than closed.
 
 ## 4. The module tree
 
