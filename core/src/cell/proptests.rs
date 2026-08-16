@@ -340,10 +340,19 @@ proptest! {
     /// question is the one an example cannot cover cheaply: a refusal at any width has to
     /// leave the builder equal to what it was, or some width writes a discriminator or a
     /// presence bit it cannot follow.
+    ///
+    /// The header is drawn twice over, and the second draw is what makes the refusal
+    /// reachable. A fresh builder never runs out of reference slots, so the only way
+    /// either form refuses is with fewer than two bits left, which is three of the
+    /// thousand and twenty-four widths. A uniform draw finds that region so rarely that
+    /// the refusal arm below was dead when it was written uniformly.
     #[test]
     fn an_either_round_trips_or_refuses_having_written_nothing(
         payload in built_tree(),
-        header in 0u16..=crate::cell::MAX_BITS,
+        header in prop_oneof![
+            3 => 0u16..=crate::cell::MAX_BITS,
+            1 => (crate::cell::MAX_BITS - 2)..=crate::cell::MAX_BITS,
+        ],
         behind_a_presence_bit in any::<bool>(),
     ) {
         let mut builder = crate::cell::Builder::new();
