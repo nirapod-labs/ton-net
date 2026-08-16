@@ -29,7 +29,7 @@ mod types;
 #[cfg(feature = "net")]
 #[cfg_attr(docsrs, doc(cfg(feature = "net")))]
 pub use client::{LiteClient, LiteError};
-pub use types::{AccountState, BlockIdExt, MasterchainInfo, ServerReported};
+pub use types::{Accepted, AccountState, BlockIdExt, MasterchainInfo, ServerReported};
 
 /// An account identifier: a workchain and a 256-bit account id.
 ///
