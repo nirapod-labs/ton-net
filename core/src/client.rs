@@ -3,25 +3,39 @@
 
 //! The client: one ADNL channel to one liteserver, with reads over it.
 
-use std::fmt;
-use std::future::Future;
-use std::time::Duration;
-
 pub mod proof;
+
+// The walk exists to serve `Client::sync` and reads the local clock to judge freshness,
+// which is a thing a target with no clock cannot answer. Both reasons point the same way,
+// so it is gated with the socket rather than beside the standalone check.
+#[cfg(feature = "net")]
 pub mod sync;
 
+#[cfg(feature = "net")]
+use std::fmt;
+#[cfg(feature = "net")]
+use std::future::Future;
+#[cfg(feature = "net")]
+use std::time::Duration;
+
+#[cfg(feature = "net")]
 use crate::adnl::TcpTransport;
-use crate::proof::{verify_chain, AccountRead};
-use crate::tlb::Account;
+#[cfg(feature = "net")]
+use crate::client::sync::SyncReport;
+#[cfg(feature = "net")]
 use crate::lite::{
     AccountId, AccountState, BlockIdExt, BlockLink, LiteClient, LiteError, MasterchainInfo,
     PartialBlockProof, ServerReported,
 };
-
-use crate::client::sync::SyncReport;
+#[cfg(feature = "net")]
+use crate::proof::{verify_chain, AccountRead};
+#[cfg(feature = "net")]
+use crate::tlb::Account;
+#[cfg(feature = "net")]
 use crate::{Address, Config, Error, Verified};
 
 /// The deadline for one read, after which the call returns [`Error::Timeout`].
+#[cfg(feature = "net")]
 const CALL_TIMEOUT: Duration = Duration::from_secs(15);
 
 /// The deadline for one block-proof reply, which is a different size of thing.
@@ -30,12 +44,15 @@ const CALL_TIMEOUT: Duration = Duration::from_secs(15);
 /// hundred, because every link in it carries a configuration proof exposing a validator
 /// set of several hundred entries. Holding both to the same deadline means either
 /// refusing an honest proof on a slow link or letting a dead read hang.
+#[cfg(feature = "net")]
 const PROOF_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// The workchain id of the masterchain, whose accounts need no shard proof.
+#[cfg(feature = "net")]
 const MASTERCHAIN: i32 = -1;
 
 /// The masterchain's shard: an empty prefix, so the whole workchain in one shard.
+#[cfg(feature = "net")]
 const MASTERCHAIN_SHARD: u64 = 0x8000_0000_0000_0000;
 
 /// A connection to a single TON liteserver.
@@ -50,6 +67,7 @@ const MASTERCHAIN_SHARD: u64 = 0x8000_0000_0000_0000;
 /// A `Client` serializes its queries: overlapping calls on the same client run one after
 /// another over the single channel, because each takes `&mut self`. Open more than one
 /// client for real concurrency.
+#[cfg(feature = "net")]
 pub struct Client {
     lite: LiteClient<TcpTransport>,
     /// The key block trust rests on. `None` until a sync has established one.
@@ -60,6 +78,7 @@ pub struct Client {
     max_head_age: u32,
 }
 
+#[cfg(feature = "net")]
 impl Client {
     /// Connects to a liteserver from the config and completes the ADNL handshake.
     ///
@@ -389,6 +408,7 @@ impl Client {
     }
 }
 
+#[cfg(feature = "net")]
 impl fmt::Debug for Client {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Client").finish_non_exhaustive()
@@ -399,6 +419,7 @@ impl fmt::Debug for Client {
 ///
 /// Only safe to read after [`verify_chain`] has returned, because that is what ties each
 /// link's key-block flag to the destination block's own header.
+#[cfg(feature = "net")]
 fn last_key_block(reply: &PartialBlockProof) -> Option<BlockIdExt> {
     reply.steps.iter().rev().find_map(|step| match step {
         BlockLink::Forward {
@@ -411,11 +432,13 @@ fn last_key_block(reply: &PartialBlockProof) -> Option<BlockIdExt> {
 }
 
 /// Runs one liteserver read under the ordinary deadline.
+#[cfg(feature = "net")]
 async fn bounded<T>(call: impl Future<Output = Result<T, LiteError>>) -> Result<T, Error> {
     within(CALL_TIMEOUT, call).await
 }
 
 /// Runs one liteserver call under a given deadline, mapping its error into [`Error`].
+#[cfg(feature = "net")]
 async fn within<T>(
     deadline: Duration,
     call: impl Future<Output = Result<T, LiteError>>,
@@ -426,7 +449,7 @@ async fn within<T>(
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "net"))]
 mod tests {
     use super::*;
 

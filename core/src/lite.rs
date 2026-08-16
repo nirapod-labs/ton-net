@@ -20,9 +20,13 @@
 //! because their reader is a verifier rather than a person. It is an internal crate of
 //! the ton-net client.
 
+// The query driver holds an ADNL connection, so it needs the socket. The response types
+// are decoding and nothing else, and stay reachable without one.
+#[cfg(feature = "net")]
 mod client;
 mod types;
 
+#[cfg(feature = "net")]
 pub use client::{LiteClient, LiteError};
 pub use types::{AccountState, BlockIdExt, MasterchainInfo, ServerReported};
 

@@ -24,15 +24,22 @@
 
 use sha2::{Digest, Sha256};
 
+// The socket and the per-session randomness it draws are the whole of what needs a
+// runtime, so they are the whole of what the `net` feature gates. The handshake and the
+// frame cipher are pure functions over bytes and build for any target.
+#[cfg(feature = "net")]
 pub mod connection;
 pub mod frame;
 pub mod handshake;
 pub mod transport;
 
+#[cfg(feature = "net")]
 pub use connection::{AdnlConnection, AdnlError};
 pub use frame::{FrameError, SessionCiphers};
 pub use handshake::{client_handshake, Handshake, HandshakeError, HandshakeSecrets};
-pub use transport::{TcpTransport, Transport, TransportError};
+pub use transport::{Transport, TransportError};
+#[cfg(feature = "net")]
+pub use transport::TcpTransport;
 
 /// AES-256 in counter mode with a 128-bit big-endian counter: the ADNL stream cipher,
 /// used both to wrap the handshake parameters and to frame every session byte after.

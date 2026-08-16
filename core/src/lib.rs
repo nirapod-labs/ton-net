@@ -77,6 +77,12 @@
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 #![deny(rustdoc::broken_intra_doc_links)]
+// Six crate-private items serve only the networked half: the two wrappers' constructors,
+// the config's liteserver list and its fields, and the decode-error mapping. A build
+// without `net` keeps them rather than giving `Config` and `Verified` a second shape, so
+// it sees them unused. The allowance is conditioned on that build and cannot hide dead
+// code in the one that ships.
+#![cfg_attr(not(feature = "net"), allow(dead_code))]
 
 pub mod adnl;
 pub mod cell;
@@ -122,11 +128,13 @@ mod verified;
 pub const VERIFY_EPOCH: u32 = 2;
 
 pub use address::Address;
+#[cfg(feature = "net")]
 pub use client::Client;
+#[cfg(feature = "net")]
+pub use client::sync::SyncReport;
+pub use client::proof::verify_account;
 pub use config::Config;
 pub use error::{Error, ErrorCode};
-pub use client::proof::verify_account;
-pub use client::sync::SyncReport;
 pub use verified::Verified;
 
 /// The read response types, defined in [`lite`] and surfaced here.

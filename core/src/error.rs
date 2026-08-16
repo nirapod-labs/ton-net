@@ -259,6 +259,7 @@ impl From<crate::adnl::TransportError> for Error {
     }
 }
 
+#[cfg(feature = "net")]
 impl From<crate::adnl::AdnlError> for Error {
     fn from(error: crate::adnl::AdnlError) -> Self {
         use crate::adnl::AdnlError;
@@ -276,6 +277,7 @@ impl From<crate::adnl::AdnlError> for Error {
     }
 }
 
+#[cfg(feature = "net")]
 impl From<crate::lite::LiteError> for Error {
     fn from(error: crate::lite::LiteError) -> Self {
         use crate::lite::LiteError;
