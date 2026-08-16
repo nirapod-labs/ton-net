@@ -33,7 +33,8 @@
 //   - anything inside a fenced code block, where the author chose every break
 //   - a line ending a sentence where the next begins a new one, since a writer may break
 //     there on purpose. Both halves are read: the line ends in a stop and the next opens on
-//     a capital, so a stop mid-sentence does not buy an exemption
+//     `[A-Z`[(]`, so a stop mid-sentence does not buy an exemption. The class is quoted
+//     rather than described, so an edit to it that leaves this line behind is greppable
 //
 //   node scripts/check-doc-wrap.mjs
 
@@ -94,15 +95,12 @@ const paragraphs = (body) => {
     run.push({ number: index + 1, width: line.length, text });
   });
   if (run.length > 0) runs.push(run);
-  if (fenced) {
-    // An unclosed fence drops every paragraph after it, which would read as a clean file.
-    unbalanced.push(true);
-  }
-  return runs;
+  // `open` reports an unclosed fence, which drops every paragraph after it and would
+  // otherwise read as a clean file.
+  return { runs, open: fenced };
 };
 
 const problems = [];
-const unbalanced = [];
 
 // Reports the breaks in one paragraph that greedy wrapping would not have produced.
 const readParagraph = (rel, run) => {
@@ -147,7 +145,7 @@ const probe = () => {
   ].join("\n");
   const count = (body) => {
     const before = problems.length;
-    paragraphs(body).forEach((run) => readParagraph("probe", run));
+    paragraphs(body).runs.forEach((run) => readParagraph("probe", run));
     const found = problems.length - before;
     problems.length = before;
     return found;
@@ -169,9 +167,8 @@ if (files.length === 0) {
 
 let counted = 0;
 for (const rel of files) {
-  unbalanced.length = 0;
-  const runs = paragraphs(readFileSync(join(root, rel), "utf8"));
-  if (unbalanced.length > 0) {
+  const { runs, open } = paragraphs(readFileSync(join(root, rel), "utf8"));
+  if (open) {
     problems.push(`${rel} leaves a documentation fence open, so the paragraphs after it were not read`);
   }
   counted += runs.length;
