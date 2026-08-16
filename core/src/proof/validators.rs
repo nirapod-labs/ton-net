@@ -10,11 +10,13 @@
 //! standing set and parameter 35 the temporary one, and the rule is **35 when the
 //! configuration carries it, 34 otherwise**, with nothing else conditioning the choice:
 //! not the block's generation time, and not the window either set names. That is the
-//! selection the reference implementation's configuration accessor performs, and the
-//! reason to copy it is that a set read from the wrong parameter fails quietly: what
-//! comes back is a real set that simply did not sign the block in hand, so the weight
-//! threshold is missed rather than the parameter refused, and the refusal arrives under
-//! a name that sends a reader looking at signatures.
+//! selection the reference implementation makes where it extracts the signing set out of
+//! a key block, which is the one path a forward-link proof check reaches. Other readers
+//! of the same configuration take 34 alone, so the rule is scoped to this use rather than
+//! general. The reason to copy it is that a set read from the wrong parameter fails
+//! quietly: what comes back is a real set that simply did not sign the block in hand, so
+//! the weight threshold is missed rather than the parameter refused, and the refusal
+//! arrives under a name that sends a reader looking at signatures.
 //!
 //! **Parameter 35 is not what a mainnet rotation installs**, which is worth saying
 //! because the opposite is easy to assume from the name. No configuration read while
@@ -26,10 +28,16 @@
 //!
 //! **A pruned parameter 35 is not an absent one.** The configuration arrives inside a
 //! Merkle proof, so a lookup answers found, absent, or unknown, and only the middle
-//! answer licenses reading 34. Every configuration proof captured in this tree covers
-//! the walk to 35 and shows it absent, which is what a server sending the smallest proof
-//! that answers the question produces when it selects the set the same way; the pruned
-//! case is refused as uncovered rather than assumed empty.
+//! answer licenses reading 34; the pruned case is refused as uncovered rather than
+//! assumed empty.
+//!
+//! What makes that refusal safe to make is a property of the server rather than of the
+//! captures. A node building the configuration proof for a forward link records the cells
+//! that one extraction of the signing set reads, and that extraction looks 35 up before
+//! it falls back, so the walk to 35 is inside what the proof carries and arrives covered
+//! whether or not the parameter is there. Every configuration captured in this tree bears
+//! that out, showing 35 absent rather than pruned, which is the observation and not the
+//! reason.
 //!
 //! Both parameters carry the same shape: a count of `total` validators, a count of
 //! `main`, a declared total weight, and a dictionary of descriptors keyed by index. The
