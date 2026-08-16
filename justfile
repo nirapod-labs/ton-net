@@ -87,19 +87,19 @@ wasm:
 
 # What the hot paths cost, over committed fixtures, so it runs offline.
 bench:
-    cargo bench -p ton-net-cell --bench cells
-    cargo bench -p ton-net-block --bench verify
+    cargo bench --bench cells
+    cargo bench --bench verify
 
 # Removes one check at a time and reruns the suite, which answers the question a
 # passing suite cannot: would a test notice. Slow, so it is a scheduled job in CI.
 mutants:
-    cargo mutants -p ton-net-cell -p ton-net-block --timeout 120
+    cargo mutants -p ton-net --timeout 120
 
 # The decode boundary under more cases than `test` runs on every push. Slow, so it is a
 # scheduled job in CI as well. docs/fuzzing.md covers the seed, how a failing case
 # reproduces, and why this is not a release profile.
 fuzz iterations="250000":
-    TON_NET_FUZZ_ITERATIONS={{ iterations }} cargo test -p ton-net-cell --all-features fuzz -- --nocapture
+    TON_NET_FUZZ_ITERATIONS={{ iterations }} cargo test -p ton-net --all-features fuzz -- --nocapture
 
 versions-fix:
     node scripts/check-versions.mjs --fix
