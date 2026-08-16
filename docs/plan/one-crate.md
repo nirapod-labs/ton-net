@@ -68,21 +68,23 @@ So the discipline holds today by nobody having broken it, not by anything refusi
 
 A module-import check over the source text, in the shape `scripts/check-default-deps.mjs` and `scripts/check-unsafe-posture.mjs` already use, with the same two-reading discipline: assert the absence, and assert the same reading finds a present edge, so a matcher that matches nothing cannot pass for free.
 
-`scripts/check-layers.mjs` refuses, inside `src/{cell,tlb,proof,tl,wallet}/`:
+`scripts/check-layers.mjs` refuses, inside `core/src/{cell,tlb,proof,tl}/` and `core/src/client/wallet/`:
 
-- `use crate::{adnl, lite, client, sync, send}`
+- `use crate::{adnl, lite, client}`
 - `tokio`, `getrandom`
 - `std::net`, `std::fs`, `std::process`, `std::env`, `std::time::SystemTime`, `std::time::Instant`
 
-and inside `src/lite/`:
+and inside `core/src/lite/`:
 
 - `use crate::cell`
 
-and asserts, in the same reading, that `src/tlb/` does reach `crate::cell` and `src/proof/` does reach both, so a matcher that finds nothing cannot pass for free.
+and asserts, in the same reading, that `core/src/tlb/` does reach `crate::cell` and `core/src/proof/` does reach both, so a matcher that finds nothing cannot pass for free.
+
+The refused set is three module names rather than five because `sync` and `send` moved under `client` in section 4, so refusing `crate::client` refuses them with it. The wallet is guarded even though it lives inside `client/`, because building an external message needs no socket and is the one thing in that package that must stay reachable from the browser build.
 
 This catches the four `std` reaches the crate graph never could. **It is strictly stronger than the current arrangement on the property that matters, and it is work that has to be done in either structure**, since the survey established that adding `tokio.workspace = true` to `ton-net-block` today passes every check in `just gate` in silence.
 
-`std::thread` stays permitted inside `src/cell/boc/`, because the threaded parse is a deliberate capability with its own feature. That exception is named in the check rather than left as a hole in the pattern, and the three ungated references section 2 found are fixed rather than exempted.
+`std::thread` stays permitted inside `core/src/cell/boc/`, because the threaded parse is a deliberate capability with its own feature. That exception is named in the check rather than left as a hole in the pattern, and the three ungated references section 2 found are fixed rather than exempted.
 
 **What the check deliberately does not flag: `HashMap` and `HashSet`.** They are how randomness actually arrives in the cell engine today, and flagging nineteen legitimate uses to catch a property nobody is attacking would be noise that gets turned off within a release. The reach is stated in section 2 rather than checked, and that gap is named rather than closed.
 
@@ -106,12 +108,12 @@ One module, and a 32-line package sits at the top of it beside a 20,392-line one
 Adopting the shape:
 
 ```
-crates/ton-net/
-  Cargo.toml
+core/
+  Cargo.toml              name = "ton-net", which is still the published name
   src/
-    lib.rs                  the facade: re-exports, VERIFY_EPOCH, the crate docs
+    lib.rs                the crate docs, the re-exports, VERIFY_EPOCH
 
-    cell/                   the cell engine, one tree, unchanged internally
+    cell.rs  cell/        the cell engine, one tree, unchanged internally
       boc.rs  boc/          compress, header, large, lazy, parse, random, serialize, view
       builder.rs builder/   address, snake
       cell.rs cell/         dump, exotic, hash, json, level, payload, refs
@@ -121,36 +123,52 @@ crates/ton-net/
       usage.rs usage/       trace
       codec.rs  error.rs  proptests.rs
 
-    tlb/                    TON's typed structures
-      account.rs block.rs coins.rs shard.rs
-      message/              W3
+    tlb.rs  tlb/          TON's typed structures
+      account.rs  block.rs  coins.rs  shard.rs
+      message.rs message/                                        W3
       error.rs
 
-    proof/                  the verification engine, which is what this library is for
-      chain.rs validators.rs signature.rs account.rs
+    proof.rs  proof/      the verification engine, which is what this library is for
+      chain.rs  validators.rs  signature.rs
 
-    tl/                     adnl.rs lite.rs signed.rs
-    adnl/                   connection, frame, handshake, transport      [feature: net]
-    lite/                   client, types                                [feature: net]
+    tl.rs  tl/            adnl.rs  lite.rs  signed.rs
 
-    wallet/                 families, and what a family needs            W4
-      v4r2.rs seed.rs address.rs
+    adnl.rs  adnl/        connection, frame, handshake, transport     [feature: net]
+    lite.rs  lite/        client, types                               [feature: net]
 
-    address.rs  codec.rs  config.rs  error.rs  proof.rs  verified.rs
-    client.rs  sync.rs  send.rs                                          [feature: net]
+    client.rs  client/    the facade
+      sync.rs  send.rs                                               [feature: net]
+      proof.rs              the standalone check, at the facade's error type
+      wallet.rs wallet/     v4r2, seed, address                       W4
 
-crates/ton-net-node/        unchanged, still its own crate
+    address.rs  codec.rs  config.rs  error.rs  verified.rs
+
+bindings/node/            unchanged, still its own crate
 ```
+
+`crates/` goes away with the last thing in it. A directory named for a plurality, holding one, says something about the project that has stopped being true.
+
+### The facade is a package, not a scatter, and an earlier draft got that wrong
+
+That draft put `client.rs`, `sync.rs`, `send.rs`, `proof.rs` and the wallet at the crate root as loose files. It is worth saying why that is wrong, because the reason is not taste.
+
+**The language refuses it.** `src/proof.rs` and `src/proof/` are not two modules in Rust, they are one: the file is the module's body and the directory holds its children. So a root `proof.rs` carrying the facade's fifty-two-line check and a root `proof/` carrying the three-hundred-line engine are the same name twice, and no re-export resolves that. Section 6 counted `proof.rs` among the basenames that dissolve under different parents. Under the flattened tree it did not dissolve, and the tree hid it.
+
+Grouping the facade under `client/` is also the closer adoption, not the looser one: the shape being followed has one client package, and its own table above puts 4,549 lines in it. So `client/proof.rs` beside `proof/`, and the collision is gone because the parents are genuinely different rather than drawn that way.
 
 ### Two places this departs from the shape it follows, and why
 
-**The cell engine stays one nested tree rather than being promoted to the crate root.** An earlier draft of this plan promoted its ten modules to the root, on the reasoning that they are 70.6% of the library. That was wrong: it scatters `boc/`, `dict/`, `merkle/` and `slice/` across the same level as `client.rs` and `config.rs`, mixing an engine with a facade. The reference keeps its equivalent as one package and that is the better call. It also dissolves both of the naming collisions section 6 was written to resolve.
+**The cell engine stays one nested tree rather than being promoted to the crate root.** An earlier draft promoted its ten modules to the root, on the reasoning that they are 70.6% of the library. That was wrong: it scatters `boc/`, `dict/`, `merkle/` and `slice/` across the same level as `client.rs` and `config.rs`, mixing an engine with a facade. The reference keeps its equivalent as one package and that is the better call.
 
-**The verification engine gets its own top-level module, which the reference does not do.** There the proof code is split between the cell package and the client package. Here it is `proof/`, holding `chain`, `validators`, `signature` and the account check, because verifying every answer rather than trusting the server is what this library is for and it should be one named thing a reader can find. `ton-net-block` today mixes it with the typed structures; `tlb/` and `proof/` separate them.
+It costs one stutter. `src/cell/cell.rs` is real, so `ton_net_cell::cell::Cell` becomes `crate::cell::cell::Cell` internally. A reader never types it, because `lib.rs` re-exports `Cell` at the root and always has, but the internal paths carry it and renaming a module to avoid it would be a cosmetic edit inside the largest tree in the library.
+
+**The verification engine gets its own top-level module, which the reference does not do.** There the proof code is split between the cell package and the client package. Here it is `proof/`, holding `chain`, `validators` and `signature` beside the engine body, because verifying every answer rather than trusting the server is what this library is for and it should be one named thing a reader can find. `ton-net-block` today mixes it with the typed structures; `tlb/` and `proof/` separate them.
+
+**`account.rs` goes to `tlb/`, once.** An earlier draft listed it under both, which cannot be: there is one `crates/ton-net-block/src/account.rs` and it is a decoder, `Account`, `AccountStatus`, `skip_address`, `load_status`. The account *check* is not a file at all, it is `verify_account` inside `crates/ton-net-block/src/proof.rs:255`, and it travels with the engine body.
 
 ### One placement question the shape answers outright
 
-Seed-phrase handling sits **inside the wallet package** in the reference, beside the families that consume what it derives, not in a crypto package and not in a module of its own. So: `src/wallet/seed.rs`. TON Connect proof verification sits there too, for the same reason.
+Seed-phrase handling sits **inside the wallet package** in the reference, beside the families that consume what it derives, not in a crypto package and not in a module of its own. So: `core/src/client/wallet/seed.rs`. TON Connect proof verification sits there too, for the same reason.
 
 That is where a month of argument about a seventh crate lands: **it is a file next to the wallet.**
 
@@ -171,21 +189,25 @@ After the merge it is `cargo build --target wasm32-unknown-unknown --no-default-
 
 Two corrections to what gets gated, both from reading the sources rather than from the module names:
 
-- **`sync.rs` does not need the gate.** It names `std::time::Duration` once, as a parameter type at `:235`, and never reads a clock. `Duration` is arithmetic and builds for this target.
+- **`client/sync.rs` does not need the gate.** It names `std::time::Duration` once, as a parameter type at `crates/ton-net/src/sync.rs:235`, and never reads a clock. `Duration` is arithmetic and builds for this target.
 - **`adnl/transport.rs` cannot be gated whole.** It holds `TcpTransport`, which is a socket, and the `Transport` trait and `TransportError`, which are pure and which `lite/client.rs` needs. The trait moves to its own file so the socket can be gated without taking the trait with it. That split is a migration step, not a follow-up.
 
 ## 6. The collisions dissolve, but one of them was a real finding
 
-Seven basenames appear twice across the six `src` trees: `address.rs`, `client.rs`, `codec.rs`, `error.rs`, `lib.rs`, `proof.rs`, `snake.rs`. Under the tree of section 4 every one of them lands under a different parent, so none collides: `cell/codec.rs` beside `codec.rs`, `cell/error.rs` beside `tlb/error.rs` beside `error.rs`, `lite/client.rs` beside `client.rs`, `proof/` beside `proof.rs`.
+Seven basenames appear twice across the six `src` trees: `address.rs`, `client.rs`, `codec.rs`, `error.rs`, `lib.rs`, `proof.rs`, `snake.rs`. Five land under a different parent and cost nothing: `cell/codec.rs` beside `codec.rs`, `cell/error.rs` beside `tlb/error.rs` beside `error.rs`, `lite/client.rs` beside `client.rs`, `cell/builder/snake.rs` beside `cell/slice/snake.rs`, four `address.rs` under four parents. `lib.rs` is not a collision at all: one survives as the crate root and the other five dissolve into the module bodies they became.
 
-**One of them is two base64 decoders in one library, and an earlier draft of this plan got the resolution wrong.** That draft said to merge them behind a differential, and to treat disagreement as a bug the migration found. They disagree, and it is not a bug: each rule is deliberate and each has a test pinning it.
+**Two of the seven cost something, and an earlier draft of this plan got both wrong.**
+
+**`proof.rs` was counted as free and is not.** Section 4 carries the correction: a root `proof.rs` and a root `proof/` are one module in this language, not two, so the facade's check and the engine collided under the flattened tree the draft drew. The facade moves into `client/` and the parents become genuinely different. Two functions named `verify_account` survive that move, at `proof::verify_account` returning `BlockError` and `client::proof::verify_account` returning `Error`, and they survive because two error types survive. That is an adapter, not a duplicate, and it is one line.
+
+**The other is two base64 decoders in one library.** That draft said to merge them behind a differential, and to treat disagreement as a bug the migration found. They disagree, and it is not a bug: each rule is deliberate and each has a test pinning it.
 
 - `crates/ton-net-cell/src/codec.rs:37` **refuses** the URL-safe alphabet, pinned by `base64_refuses_the_url_safe_alphabet` at `:362`. A bag of cells and a cell hash travel in standard base64, and accepting a second spelling of the same bytes would give one bag two encodings.
 - `crates/ton-net/src/codec.rs:14-16` **accepts both**, pinned by `base64_decodes_the_url_safe_alphabet` at `:157` and `both_alphabets_spell_one_value` at `:176`. It serves config keys, which are standard, and user-friendly addresses, which are URL-safe.
 
 Two domains, two acceptance rules, both correct. Merging them into one function breaks one test set and would silently widen what the cell decoder accepts, which is the opposite of what this library is for.
 
-**Resolution: two named functions in one `codec.rs`**, the strict one and the permissive one, each keeping its own tests and its own doc sentence saying which domain it serves. The duplication that does go away is smaller than it looked: the facade's side is decode only, it has no encoder, and `crates/ton-net/src/codec.rs:9-10` already records that hex is not duplicated because it calls the cell crate's. **One function was duplicated, not a module.**
+**Resolution: two named decoders, each staying where its domain is.** The strict one is a cell concern and stays in `cell/codec.rs`; the permissive one serves config keys and friendly addresses, which are not cell concerns, and stays at `codec.rs`. They already sit under different parents in section 4's tree, so the basename never collided, and each keeps its own tests and gains a doc sentence naming the domain it serves. The duplication that looked large is small: the facade's side is decode only, it has no encoder, and `crates/ton-net/src/codec.rs:9-10` already records that hex is not duplicated because it calls the cell crate's. **One function was duplicated, not a module.**
 
 ## 7. The five published names
 
@@ -242,20 +264,19 @@ Three of these change the shape of the work.
 
 Ordered so the tree compiles at as many points as it can, and so history survives.
 
-1. `git mv` each crate's `src` tree into `crates/ton-net/src/` at its new path, one commit per source crate, no content edits. History follows the file. `ton-net-block` splits across two destinations here, `tlb/` and `proof/`, which is the one move that is not a straight rename.
-2. Convert each moved `lib.rs` into the module's `mod.rs`, or dissolve it into the parent where it only re-exported.
-3. Rewrite paths: `ton_net_cell::X` becomes `crate::X`, and so on for the other four. This is the largest mechanical step and it is the one to review by count rather than by eye.
+1. `git mv crates/ton-net core`, then `git mv` each of the other five `src` trees into `core/src/` at its new path, one commit per source crate, no content edits. History follows the file. Two of the six are not straight renames: `ton-net-block` splits across `tlb/` and `proof/`, and `ton-net`'s own root files split between `client/` and the crate root.
+2. Turn each moved `lib.rs` into the module's body file beside its directory, `tlb.rs` beside `tlb/`, and dissolve it into the parent where it only re-exported. Not `mod.rs`: the tree the six crates already use is the file-beside-directory form, and mixing the two forms inside one crate is the kind of inconsistency a reader pays for.
+3. Rewrite paths: `ton_net_cell::X` becomes `crate::cell::X`, and so on for the other four. This is the largest mechanical step and it is the one to review by count rather than by eye.
 4. Drop cross-crate `pub` to `pub(crate)` or `pub(super)` wherever the item has no external user, per `NET-ADR-009:67-69`, which already names `pub(super)` as the currency a child exposes to its parent.
-5. Merge the two `codec.rs` behind the differential of section 6.
-6. Reparent `error.rs` into `src/error/`.
-7. Feature-gate `adnl/`, `lite/`, `client.rs`, `sync.rs` and `send.rs` behind `net`. `verified.rs`, `address.rs`, `proof.rs` and `config.rs` stay ungated, which is what gives the browser target the three capabilities section 5 names.
-8. Merge `tests/` trees. One target collides, `mainnet`, three ways, and becomes `mainnet_adnl`, `mainnet_lite`, `mainnet_client`. No `#[test]` function name collides across crates, so nothing else renames. Four fixture pairs are byte-identical and dedupe to one copy each, removing 101,871 bytes of 680,647. Merge `benches/`; `cells`, `dict` and `verify` do not collide.
-9. One `Cargo.toml`; workspace `members` drops to two entries.
-10. `deny.toml`, `about.hbs`, the notices, and the release workflow.
-11. `scripts/check-versions.mjs`, `docs/release-process.md`, `docs/architecture.md`, `docs/api-design.md`, `docs/design/system-design.md`, `NET-ADR-008`, `NET-ADR-009`.
-12. `scripts/check-layers.mjs` and its `just gate` entry, per section 3.
-13. Split the `Transport` trait out of `adnl/transport.rs` so the socket can be gated without it, per section 5.
-14. The five deprecation releases, per section 7.
+5. Give each base64 decoder the doc sentence naming its domain, per section 6. They are not merged and neither moves.
+6. Feature-gate `adnl/`, `lite/`, `client.rs`, `client/sync.rs` and `client/send.rs` behind `net`. `verified.rs`, `address.rs`, `config.rs`, `proof/` and `client/proof.rs` stay ungated, which is what gives the browser target the three capabilities section 5 names.
+7. Merge `tests/` trees. One target collides, `mainnet`, three ways, and becomes `mainnet_adnl`, `mainnet_lite`, `mainnet_client`. No `#[test]` function name collides across crates, so nothing else renames. Four fixture pairs are byte-identical and dedupe to one copy each, removing 101,871 bytes of 680,647. Merge `benches/`; `cells`, `dict` and `verify` do not collide.
+8. One `Cargo.toml` at `core/`. Workspace `members` drops to `core` and `bindings/node`, and `default-members` to `core`.
+9. `deny.toml`, `about.hbs`, the notices, and the release workflow.
+10. `scripts/check-versions.mjs`, `docs/release-process.md`, `docs/architecture.md`, `docs/api-design.md`, `docs/design/system-design.md`, `NET-ADR-008`, `NET-ADR-009`.
+11. `scripts/check-layers.mjs` and its `just gate` entry, per section 3, reading `core/src/` rather than six crate roots.
+12. Split the `Transport` trait out of `adnl/transport.rs` so the socket can be gated without it, per section 5.
+13. The five deprecation releases, per section 7.
 
 ## 11. The floor: what proves the move changed nothing
 
@@ -271,7 +292,7 @@ Plus the standing floor: `just gate` green, and `just wasm` replaced by the `--n
 
 ## 12. What this does not do
 
-- It does not merge the binding. `crates/ton-net-node` stays its own crate, with its own MSRV of 1.88 against the library's 1.85 (`justfile:165-166`).
+- It does not merge the binding. `bindings/node` stays its own crate, published as `ton-net-node`, with its own MSRV of 1.88 against the library's 1.85 (`justfile:172-174`). It is also the one place in the repository that needs no path edit at all, per section 9.
 - It does not change any public type, function signature, or wire behaviour. A consumer's `use ton_net::X` keeps working; a consumer's `use ton_net_cell::X` does not, which is why the five get a deprecation release rather than silence.
 - It does not raise the verification epoch.
 - It does not settle where seed-phrase import lands. That is the v0.5.0 plan's, and this migration is what makes it a placement question rather than a publishing one.
