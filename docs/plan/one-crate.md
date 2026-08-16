@@ -101,9 +101,22 @@ The shape is taken from a widely deployed client in the surveyed corpus, which i
 | `<adnl>` | 3,929 | `ton-net-adnl`, 1,002 |
 | `<liteclient>` | 2,262 | `ton-net-lite`, 541 |
 | `<tl>` | 2,159 | `ton-net-tl`, 612 |
+| `<address>` | 427 | `address.rs` |
 | `<crc16>` | 32 | part of `codec.rs` |
 
 One module, and a 32-line package sits at the top of it beside a 20,392-line one. In that language a package is a namespace and the module is the published artifact, which is the same relation a Rust module has to a crate. **This tree currently publishes what that one namespaces.**
+
+### How much of that shape is taken, and how much is not
+
+Nine packages are listed above. The reference has 38 outside its examples, and 110,109 lines. **The nine are 49,294 of them, and the other 60,815 are two subsystems this library does not have and is not going to grow:** a TVM emulator at 43,045 lines, and a peer-to-peer stack, DHT, RLDP, overlays and QUIC, at 15,139. Neither is in scope for a client whose job is to verify what a server answers.
+
+So the shape is followed where the scope overlaps and nowhere else. What that yields, concretely:
+
+- **Taken as-is:** `tl`, `adnl`, `liteclient`, `tlb` and `address` at the top level, each one package there and one module here.
+- **Taken with the parent dropped:** their cell engine sits under the emulator package, at `<vm>/cell`. There is no emulator here, so it is `cell/` at the root rather than nested under a thing that does not exist.
+- **Taken including the nesting:** the wallet is a subpackage of the client there and a submodule of the client here. That is not a detail; it is what answers the seed-phrase placement question below.
+- **A growth shape taken on credit:** the client package there also holds `<client>/nft`, `<client>/jetton` and `<client>/dns`, contract families as siblings of the wallet. When a second family lands here it goes to `client/`, beside `wallet/`, for the same reason and without a new argument.
+- **Not taken:** the emulator, the peer-to-peer stack, an HTTP API client, and an examples tree. Their absence is scope, not disagreement.
 
 Adopting the shape:
 
@@ -162,13 +175,15 @@ Grouping the facade under `client/` is also the closer adoption, not the looser 
 
 It costs one stutter. `src/cell/cell.rs` is real, so `ton_net_cell::cell::Cell` becomes `crate::cell::cell::Cell` internally. A reader never types it, because `lib.rs` re-exports `Cell` at the root and always has, but the internal paths carry it and renaming a module to avoid it would be a cosmetic edit inside the largest tree in the library.
 
-**The verification engine gets its own top-level module, which the reference does not do.** There the proof code is split between the cell package and the client package. Here it is `proof/`, holding `chain`, `validators` and `signature` beside the engine body, because verifying every answer rather than trusting the server is what this library is for and it should be one named thing a reader can find. `ton-net-block` today mixes it with the typed structures; `tlb/` and `proof/` separate them.
+**The verification engine gets its own top-level module, and the reference has no package for it at all.** Its proof code is six files under four different packages: two in the cell package, two in the client package, one in the emulator, and one in the wallet. Nothing there is named for the thing.
+
+Here it is `proof/`, holding `chain`, `validators` and `signature` beside the engine body, because verifying every answer rather than trusting the server is what this library is for and it should be one named thing a reader can find. That is the one place the shape is refused rather than adapted, and the reason is a difference in what the two libraries are: a general client where proof is a feature, against a client where proof is the product. `ton-net-block` today mixes it with the typed structures; `tlb/` and `proof/` separate them.
 
 **`account.rs` goes to `tlb/`, once.** An earlier draft listed it under both, which cannot be: there is one `crates/ton-net-block/src/account.rs` and it is a decoder, `Account`, `AccountStatus`, `skip_address`, `load_status`. The account *check* is not a file at all, it is `verify_account` inside `crates/ton-net-block/src/proof.rs:255`, and it travels with the engine body.
 
 ### One placement question the shape answers outright
 
-Seed-phrase handling sits **inside the wallet package** in the reference, beside the families that consume what it derives, not in a crypto package and not in a module of its own. So: `core/src/client/wallet/seed.rs`. TON Connect proof verification sits there too, for the same reason.
+Seed-phrase handling sits **inside the wallet package** in the reference, beside the families that consume what it derives, not in a crypto package and not in a module of its own. So: `core/src/client/wallet/seed.rs`. TON Connect proof verification sits there too, and that one is not an inference: it is a file in that package, which is why it is the one piece of proof code that does not move to `proof/` here either.
 
 That is where a month of argument about a seventh crate lands: **it is a file next to the wallet.**
 
