@@ -67,8 +67,8 @@ The out-of-scope list is a boundary, not a backlog: the items on it are declined
 read-and-send client, able to back a wallet end to end, as the floor the project holds itself
 to. The write path is that send half: it constructs an external message, sends it with
 confirmation, and can follow a transaction to its result. Its first contact with key material
-is a signer seam, where the caller supplies the signing operation and the library never sees a
-private key or a seed. The custody section states what that does and does not settle.
+is a signer seam, where the caller supplies the signing operation and the library never holds
+or sees a private key or a seed. The custody section states what that does and does not settle.
 
 **3. Every part of the surface, present and future, is built under five invariant trust
 properties.** A part that cannot be built under them is escalated rather than shipped

@@ -105,8 +105,10 @@ TON-specific (NET-ADR-002). Composing several chains lives above ton-net, in the
 ## Custody and security
 
 No user keys today. The write path first touches key material through the signer seam, where
-a caller supplies a callback and the library never sees a key; whether any part of that
-creates custody is settled before that code is written (NET-ADR-003). This record fixes
+a caller supplies the signing operation and the library never holds or sees a key; whether any
+part of that creates custody is settled before that code is written (NET-ADR-003). The seam is
+a value boundary rather than a callback: a signature crosses inward and the library invokes
+nothing, which is what the write-path plan builds. This record fixes
 purpose and priority and does not change the custody position.
 
 ## Verification
