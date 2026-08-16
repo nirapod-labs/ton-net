@@ -5,11 +5,11 @@ TL over ADNL over TCP, and verifies what a liteserver returns against validator
 signatures rather than trusting the server that sent them. No HTTP indexer sits in
 the path.
 
-This crate is the facade over the layered core. It composes the crates beneath it:
-`ton-net-tl` (the TL codec), `ton-net-cell` (the cell model and bag-of-cells codec),
-`ton-net-block` (the block and account structures and the proof engine),
-`ton-net-adnl` (ADNL over TCP), and `ton-net-lite` (the liteserver query layer). A
-consumer depends on `ton-net` and reaches the read path through one type.
+One crate, laid out in modules a reader can name: `tl` (the TL codec), `cell` (the
+cell model and the bag-of-cells codec), `tlb` (the block and account structures),
+`proof` (the verification engine), `adnl` (ADNL over TCP), `lite` (the liteserver
+query layer), and `client` (the reads over all of it). A consumer depends on
+`ton-net` and reaches the read path through one type.
 
 ## What it does
 
@@ -49,6 +49,19 @@ changed; it cannot say whether an upgrade changed what the library accepts as pr
 because that boundary moves independently of any signature. This number rises only
 when the accept and reject boundary moves, so a caller that stored the epoch a result
 was verified under can decide whether to verify it again.
+
+## Features
+
+`net` is on by default and carries the socket and the per-session randomness it
+draws. Everything the library decides rather than fetches builds without it, which
+is what `--no-default-features` is for and what makes the crate usable from
+`wasm32-unknown-unknown`: the cell engine, the typed structures, the proof engine,
+the ADNL handshake and frame ciphers, address parsing, the configuration reader, and
+`verify_account` as a standalone check over bytes that arrived some other way.
+
+`compress` adds LZ4 over a serialized bag, `json` renders an ordinary cell tree, and
+`parallel` splits a wide finalization wave across scoped threads. All three are off
+by default.
 
 ## Usage
 
@@ -90,11 +103,11 @@ over a cell engine wider than this client's own use of it: builders and slices a
 pair, three dictionary shapes, Merkle proofs and updates built as well as checked,
 usage trees, virtualization, and the bag-of-cells codec.
 
-This facade re-exports the cell types its own methods answer with. The augmented and
+The crate root names the cell types its own methods answer with. The augmented and
 prefix dictionaries, the proof builders and the streaming readers are not among them,
-because no method here returns one; a program whose need is the cell engine itself
-depends on [`ton-net-cell`](https://crates.io/crates/ton-net-cell) directly. The Node
-binding is published as [`ton-net` on npm](https://www.npmjs.com/package/ton-net).
+because no method there returns one; a program whose need is the cell engine names
+`ton_net::cell` and has all of it. The Node binding is published as
+[`ton-net` on npm](https://www.npmjs.com/package/ton-net).
 
 The rest is committed scope, not yet built. Among the larger pieces: the write path
 and wallets, the DHT, RLDP, and the local TVM. The order they arrive in is
