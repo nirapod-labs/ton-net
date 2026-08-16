@@ -17,7 +17,7 @@
 // for this repository's own rules.
 //
 // The predicate is greedy wrapping rather than a width. A fixed threshold cannot work: doc
-// blocks in this tree fill anywhere from the high seventies to ninety-nine, so any constant
+// blocks in this tree fill anywhere from the low eighties to past a hundred, so any constant
 // is either blind in one file or noise in another. What is read instead is the block's own
 // fill width, taken as its longest line, and a break is unfilled when the first word of the
 // next line would have fitted inside that width. That is the exact condition a greedy
@@ -32,7 +32,8 @@
 //     break carries structure rather than width
 //   - anything inside a fenced code block, where the author chose every break
 //   - a line ending a sentence where the next begins a new one, since a writer may break
-//     there on purpose
+//     there on purpose. Both halves are read: the line ends in a stop and the next opens on
+//     a capital, so a stop mid-sentence does not buy an exemption
 //
 //   node scripts/check-doc-wrap.mjs
 
@@ -43,14 +44,19 @@ import { fileURLToPath } from "node:url";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 
-/// How far under the block's fill width a break has to sit before it is worth reporting.
-/// A word that fits by one or two characters is inside the noise of anybody's wrapping.
+// How far under the block's fill width a break has to sit before it is reported.
+//
+// Swept at 2, 8, 12, 16, 20, 24 and 30 with every hit read. Under 12 the hits are
+// hand-wrapping rather than defects; at 16 a real unfilled break drops out. The sweep is
+// against the tree as it stood before the seven paragraphs below were refilled, so running
+// it now reports nothing at 12 and above, and redoing it means reading a tree that carries
+// the defects.
 const SLACK = 12;
 
-/// A break before one of these is structure rather than width.
+// A break before one of these is structure rather than width.
 const STRUCTURAL = /^(?:[-*+]\s|\d+[.)]\s|\||#|>|\s)/;
 
-/// A doc line, as its indent, its marker, and the text after it.
+// A doc line, as its indent, its marker, and the text after it.
 const DOC = /^(\s*)(\/\/\/|\/\/!)(?: (.*))?$/;
 
 const sources = () =>
@@ -61,12 +67,11 @@ const sources = () =>
     .split("\n")
     .filter((rel) => rel.endsWith(".rs"));
 
-/// Splits a file into runs of consecutive doc lines carrying text.
-///
-/// A blank `///` ends a run, because it ends a paragraph, and so does any line that is not a
-/// doc comment. A fenced block inside a run is dropped rather than ending it, since the
-/// prose either side of a fence is still one paragraph to a reader and neither half should
-/// be measured against the fence's own line lengths.
+// Splits a file into runs of consecutive doc lines carrying text.
+//
+// A blank doc line ends a run, because it ends a paragraph, and so does any line that is not
+// a doc comment. A fence ends the run too, so the prose either side of one is read as two
+// paragraphs and neither half is measured against the fence's own line lengths.
 const paragraphs = (body) => {
   const lines = body.split("\n");
   const runs = [];
@@ -89,12 +94,17 @@ const paragraphs = (body) => {
     run.push({ number: index + 1, width: line.length, text });
   });
   if (run.length > 0) runs.push(run);
+  if (fenced) {
+    // An unclosed fence drops every paragraph after it, which would read as a clean file.
+    unbalanced.push(true);
+  }
   return runs;
 };
 
 const problems = [];
+const unbalanced = [];
 
-/// Reports the breaks in one paragraph that greedy wrapping would not have produced.
+// Reports the breaks in one paragraph that greedy wrapping would not have produced.
 const readParagraph = (rel, run) => {
   if (run.length < 2) return;
   // The fill width is read off the lines that could have been wrapped. A line holding one
@@ -108,10 +118,12 @@ const readParagraph = (rel, run) => {
     const here = run[i];
     const next = run[i + 1];
     if (STRUCTURAL.test(next.text)) continue;
-    // A writer may end a line on a full stop and start the next sentence fresh.
-    if (/[.!?]["')\]]?$/.test(here.text)) continue;
-    const word = next.text.trimStart().split(/\s+/)[0] ?? "";
-    if (word === "") continue;
+    // Non-blank by construction: a blank doc line ended the run above.
+    const word = next.text.trimStart().split(/\s+/)[0];
+    // A writer may end a line on a full stop and start the next sentence fresh. The next
+    // line has to look like a new sentence for that to be what happened, so an abbreviation
+    // or a version number mid-sentence does not earn the exemption.
+    if (/[.!?]["')\]]?$/.test(here.text) && /^[A-Z`[(]/.test(word)) continue;
     if (here.width + 1 + word.length + SLACK <= fill) {
       problems.push(
         `${rel}:${here.number} breaks at ${here.width} where the paragraph fills to ${fill}, and \`${word}\` would have fitted`,
@@ -120,9 +132,9 @@ const readParagraph = (rel, run) => {
   }
 };
 
-/// The check has to be able to fail, so it is run against a paragraph built to trip it and
-/// one built not to, before it is run over the tree. An absence check whose reading matches
-/// nothing passes for free, and this file exists because that shape was shipped twice.
+// The check has to be able to fail, so it is run against a paragraph built to trip it and
+// one built not to, before it is run over the tree. An absence check whose reading matches
+// nothing passes for free.
 const probe = () => {
   const filled = [
     "/// aaaaaaaaaa bbbbbbbbbb cccccccccc dddddddddd eeeeeeeeee ffffffffff gggg",
@@ -157,7 +169,11 @@ if (files.length === 0) {
 
 let counted = 0;
 for (const rel of files) {
+  unbalanced.length = 0;
   const runs = paragraphs(readFileSync(join(root, rel), "utf8"));
+  if (unbalanced.length > 0) {
+    problems.push(`${rel} leaves a documentation fence open, so the paragraphs after it were not read`);
+  }
   counted += runs.length;
   runs.forEach((run) => readParagraph(rel, run));
 }
