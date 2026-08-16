@@ -150,6 +150,20 @@ fn param_value(cell: Cell) -> Builder {
     value
 }
 
+/// Marks `cell` and everything below it, so a prune keeps the whole subtree.
+///
+/// [`UsageTree::mark_path`] keeps a cell reachable and stops at it, which is enough to
+/// walk a dictionary to a parameter and not enough to read what the parameter holds: a
+/// validator set's descriptor dictionary hangs below the parameter cell and prunes away
+/// with everything else unmarked. A narrowing meant to leave one parameter readable has
+/// to mark both, the path down and the subtree under.
+fn mark_subtree(usage: &mut UsageTree, cell: &Cell) {
+    usage.mark(cell);
+    for child in cell.refs() {
+        mark_subtree(usage, child);
+    }
+}
+
 /// Reads the validator set the source key block of a link names.
 fn set_of(link: &Link) -> ValidatorSet {
     let block = proof::covered_block(&link.config_proof, &link.from.root_hash)
@@ -458,11 +472,14 @@ fn a_pruned_parameter_35_is_refused_rather_than_read_as_an_absent_one() {
         .expect("the parameter fits");
     let root = config.root().expect("an edited configuration has a root");
 
+    // The whole of 34 is kept, not merely the walk to it. Marking the path alone leaves
+    // the descriptor dictionary hanging under the parameter cell pruned, so 34 reads as
+    // uncovered too and the refusal below arrives whichever branch produced it. The test
+    // then passes with the preference deleted, which is the shape this narrowing avoids.
+    let param_34 = param_cell(&config, CURRENT_VALIDATORS);
     let mut usage = UsageTree::new(root.clone());
-    assert!(
-        usage.mark_path(&param_cell(&config, CURRENT_VALIDATORS)),
-        "the walk to 34 is in the tree"
-    );
+    assert!(usage.mark_path(&param_34), "the walk to 34 is in the tree");
+    mark_subtree(&mut usage, &param_34);
     let narrowed = Dict::from_root(Some(usage.prune().expect("the tree prunes")), 32)
         .expect("a 32-bit dictionary");
 
@@ -477,14 +494,15 @@ fn a_pruned_parameter_35_is_refused_rather_than_read_as_an_absent_one() {
         Err(BlockError::NotCovered)
     ));
 
-    // The walk to 34 survives the narrowing, so the refusal above is the preference
-    // declining an uncovered 35 rather than the pruning having taken 34 away with it.
-    assert!(matches!(
-        narrowed
-            .get(&CURRENT_VALIDATORS.to_be_bytes())
-            .expect("the lookup runs"),
-        Lookup::Found(_)
-    ));
+    // Parameter 34 survives the narrowing all the way down to its last descriptor, so it
+    // reads: it answers with round A's set. That is what makes the refusal above the
+    // preference declining an uncovered 35 rather than the pruning having taken 34 away
+    // with it, and it is what a fall-through to 34 would have returned here instead.
+    assert_eq!(
+        ValidatorSet::from_cell(&param_cell(&narrowed, CURRENT_VALIDATORS))
+            .expect("the narrowing kept the whole of 34"),
+        set_of(&a)
+    );
 }
 
 #[test]
