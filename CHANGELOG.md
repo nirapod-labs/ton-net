@@ -13,6 +13,32 @@ never published.
 
 ## [Unreleased]
 
+### Changed
+
+- **The six library crates are one.** `ton-net` is the only crate this repository
+  publishes to crates.io. `ton-net-tl`, `ton-net-cell`, `ton-net-adnl` and
+  `ton-net-lite` are modules inside it under the same names, and `ton-net-block`
+  is two: `tlb` for the decoded block and account structures, `proof` for the
+  engine that checks them.
+- Every `use ton_net::X` that resolved before resolves now. The root re-export
+  list is unchanged item for item, and the layers are public modules besides, so
+  `ton_net::cell` reaches the whole cell engine rather than the part the root
+  re-exports. `use ton_net_cell::X`, and the same for the other four names, no
+  longer resolves against a current version.
+- The five retired names stay published on crates.io at `0.4.2` rather than being
+  yanked, so a build that pinned one keeps resolving. Each takes one final release
+  whose `lib.rs` is a deprecation notice naming the module that replaced it.
+- `compress`, `json` and `parallel` are now features of `ton-net`, where they were
+  features of `ton-net-cell` and the facade forwarded none of them. All three stay
+  off by default and what they add is reached through `ton_net::cell`.
+- `default-features = false` reaches further than a wasm build could take before,
+  when it was three of the six crates. It carries the cell engine, the typed
+  structures, the proof engine, the ADNL handshake and frame crypto, `Verified`,
+  address parsing and the config reader, with neither tokio nor a socket in the
+  graph. The socket and the per-session randomness sit behind the `net` feature,
+  which is on by default and is what `Client` and `SyncReport` need.
+- `VERIFY_EPOCH` stays at `2`. Nothing moved in what the library accepts as proven.
+
 ## [0.4.2] - 2026-08-14
 
 The release 0.4.1 could not finish. `npm pack --json` was read for a file list at a
