@@ -18,6 +18,7 @@ use crate::cell::error::CellError;
 use crate::cell::slice::Slice;
 
 mod address;
+mod either;
 mod snake;
 
 /// Accumulates the bits and references of a cell under construction.
