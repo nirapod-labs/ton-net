@@ -20,7 +20,7 @@ default:
     @just --list
 
 # Everything the hermetic CI gate runs. No network.
-gate: fmt-check lint typos licenses workflows versions default-deps unsafe-posture census test doc
+gate: fmt-check lint typos licenses workflows versions default-deps unsafe-posture layers census test doc
 
 # A moved action tag is somebody else's code in this build. Also checks that a workflow
 # states what it may write and that a fork's schedule does not run it.
@@ -60,6 +60,16 @@ default-deps:
 # for a reading of the source text to close is that.
 unsafe-posture:
     node scripts/check-unsafe-posture.mjs
+
+# Which way the layers run, read out of the source text under core/src rather than out of
+# the crate graph. The graph was the old answer and it never held: `std` needs no
+# dependency edge, so a socket opened in a layer that only decides changed no manifest and
+# failed nothing here. This reads for a lower layer naming the transport above it, naming
+# tokio or getrandom, or reaching a thread, a socket, a file, the process, the environment
+# or the clock. It reads the edges that are supposed to be present in the same pass,
+# because a pattern that has stopped matching passes every absence for free.
+layers:
+    node scripts/check-layers.mjs
 
 # Regenerates the notices the npm tarballs carry. The `.node` links its whole
 # dependency tree in, so publishing it redistributes eighty-odd other projects and
