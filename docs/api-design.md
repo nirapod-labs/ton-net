@@ -59,9 +59,13 @@ The re-exported surface, and the modules it is drawn from:
 - Nothing from `adnl` or `tl`. The wire codec and the transport are what the layers
   above them are for, and a consumer who needs one names the module.
 
-`Client` and `SyncReport` are the two names that need the socket, so they are the
-two the `net` feature gates. That is a feature rather than an export, which is why
-it is written here and not in the list.
+The `net` feature gates every name that reaches a socket or the randomness drawn for
+one: `Client` and `SyncReport` at the root, `LiteClient` and `LiteError` in `lite`,
+and `AdnlConnection`, `AdnlError` and `TcpTransport` in `adnl`. That is wider than the
+socket itself, because the ADNL message layer and the liteserver query client are
+generic over the transport seam and are gated with their one consumer rather than
+apart from it. A feature is not an export, which is why this is written here and not
+in the list.
 
 Which types the cell layer contributes is decided by a rule rather than by
 taste, because a closed facade is a promise that fails quietly otherwise. A

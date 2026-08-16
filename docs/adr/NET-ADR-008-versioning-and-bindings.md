@@ -181,8 +181,10 @@ per-platform packages.
 
 The five retired names are published on crates.io at 0.4.2 and stay published. Yanking them
 would break every consumer that pinned one, and a pre-1.0 library that yanks is not one worth
-depending on. Each takes one final release whose `lib.rs` is a deprecation notice naming the
-module inside `ton-net` that replaced it, and after that they stop moving. The rule this
+depending on. Each takes one final release whose `lib.rs` is a deprecation notice naming what
+inside `ton-net` replaced it, and after that they stop moving. Four map to one module of the
+same name; `ton-net-block` maps to two, `tlb` for what it decoded and `proof` for what it
+checked. The rule this
 record already fixes covers them: a published version is immutable in both registries, so a
 name that has shipped is dealt with by publishing again rather than by withdrawal.
 

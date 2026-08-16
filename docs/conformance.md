@@ -301,4 +301,4 @@ the conformance evidence.
 | Verification epoch | `core/tests/epoch.rs` | `fixtures/read-masterchain.txt`, `read-basechain.txt` |
 | Live-network checks (`#[ignore]`) | `core/tests/mainnet_adnl.rs`, `core/tests/mainnet_lite.rs`, `core/tests/mainnet_client.rs`, `core/tests/snapshot.rs` | live |
 
-Fixture paths are relative to the `tests/` directory of the crate named in the same row.
+Fixture paths are relative to `core/tests/`, where every path in the table above sits.
