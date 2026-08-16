@@ -13,6 +13,26 @@ never published.
 
 ## [Unreleased]
 
+### Added
+
+- `Builder::store_either_ref` and `Builder::store_maybe_either_ref`, writing the
+  `Either X ^X` a `Message` uses for its `init` and `body` fields, with the
+  inline-or-reference choice made in one place rather than at each field. Both
+  encodings are well formed for the same value, so a writer that chooses
+  differently produces a different cell with a different hash, and one function
+  deciding is what keeps that answer the same everywhere. Room is tested for the
+  whole field before any of it is written, so a refusal leaves the builder as it
+  was; room is tested for nothing behind the field, which is stated where the
+  methods are documented because the message level is where the remaining fields
+  are known.
+- `Slice::load_either_ref`, `Slice::load_maybe_either_ref` and the `EitherRef`
+  they answer with, re-exported from the facade under the closure rule in
+  `docs/api-design.md`. The encoding carries the discriminator and not the width
+  of an inline payload, so the reader says where the payload sits and the caller
+  parses `X` from there. A set discriminator with no reference behind it consumes
+  its bit before failing, which is the weaker rule composite reads in this crate
+  are held to.
+
 ### Changed
 
 - **The six library crates are one.** `ton-net` is the only crate this repository

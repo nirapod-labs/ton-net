@@ -108,5 +108,5 @@ pub use merkle::{
     apply_update, combine_updates, create_proof, create_update, is_virtualized, may_apply,
     rebuild_with_refs, validate_update, virtualize,
 };
-pub use slice::{MsgAddress, Slice};
+pub use slice::{EitherRef, MsgAddress, Slice};
 pub use usage::UsageTree;

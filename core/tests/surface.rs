@@ -33,7 +33,7 @@
 
 use ton_net::{
     parse_boc, serialize_boc, Builder, Cell, CellError, CellType, Dict, DictEntry, DictIter,
-    Identity, Lookup, MsgAddress, Slice, MAX_BITS, MAX_CELLS, MAX_DEPTH, MAX_REFS,
+    EitherRef, Identity, Lookup, MsgAddress, Slice, MAX_BITS, MAX_CELLS, MAX_DEPTH, MAX_REFS,
 };
 
 /// The address stored in the sample cell and read back out of it.
@@ -122,6 +122,53 @@ fn a_slice_answers_with_types_the_facade_names() {
 
     let rest: Builder = slice.to_builder().expect("what is left converts");
     assert_eq!(rest.refs_used(), 1, "the reference the dictionary left");
+}
+
+#[test]
+fn an_either_read_answers_with_the_arm_type_the_facade_names() {
+    // Both arms are reached, because the answer is the whole point of the method: the
+    // encoding gives a reader no other way to tell where the payload went, so a caller
+    // outside this workspace has to be able to match on the type to find out.
+    let mut inner = Builder::new();
+    inner
+        .store_uint(0x5a, 8)
+        .expect("a byte fits an empty builder");
+    let payload: Cell = inner.build().expect("a one-byte cell builds");
+
+    let mut inline = Builder::new();
+    inline
+        .store_either_ref(payload.clone())
+        .expect("a byte fits inline beside the discriminator");
+    let inline = inline.build().expect("the inline cell builds");
+    let arm: EitherRef<'_> = inline
+        .parse()
+        .load_either_ref()
+        .expect("the discriminator reads");
+    assert_eq!(arm, EitherRef::Inline);
+
+    // Eight bits left, and the inline arm needs ten: the presence bit, the discriminator
+    // and the payload's eight. So the payload takes the reference arm.
+    let mut spilled = Builder::new();
+    spilled
+        .store_same_bit(false, MAX_BITS - 8)
+        .expect("the fill fits one cell");
+    assert_eq!(
+        spilled.bits_left(),
+        8,
+        "the width the arm below is chosen at"
+    );
+    spilled
+        .store_maybe_either_ref(Some(payload.clone()))
+        .expect("the reference arm fits");
+    let spilled = spilled.build().expect("the spilled cell builds");
+    let mut slice: Slice<'_> = spilled.parse();
+    slice
+        .skip_bits(usize::from(MAX_BITS - 8))
+        .expect("the fill is there");
+    let present: Option<EitherRef<'_>> = slice
+        .load_maybe_either_ref()
+        .expect("the presence bit and the discriminator read");
+    assert_eq!(present, Some(EitherRef::Ref(&payload)));
 }
 
 #[test]

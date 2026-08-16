@@ -197,8 +197,8 @@ pub use crate::tlb::{Account, AccountStatus, Coins};
 
 pub use crate::cell::{parse_boc, serialize_boc, MAX_BITS, MAX_CELLS, MAX_DEPTH, MAX_REFS};
 pub use crate::cell::{
-    Builder, Cell, CellError, CellType, Dict, DictEntry, DictIter, Identity, Lookup, MsgAddress,
-    Slice,
+    Builder, Cell, CellError, CellType, Dict, DictEntry, DictIter, EitherRef, Identity, Lookup,
+    MsgAddress, Slice,
 };
 
 // The README ships to crates.io and cannot be replaced once a version is published,

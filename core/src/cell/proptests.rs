@@ -330,6 +330,64 @@ proptest! {
         let copy = root.parse().to_cell().unwrap();
         prop_assert_eq!(copy.repr_hash(), root.repr_hash());
     }
+
+    /// An `Either X ^X` either round-trips or refuses having written nothing.
+    ///
+    /// The examples beside the two methods pin the widths either side of the inline
+    /// boundary for one fixed payload. This asks the same two questions for a generated
+    /// payload, whose own bits and references move that boundary, over the whole range of
+    /// header widths a cell has room for, and for the bare and the `Maybe` form alike. The second
+    /// question is the one an example cannot cover cheaply: a refusal at any width has to
+    /// leave the builder equal to what it was, or some width writes a discriminator or a
+    /// presence bit it cannot follow.
+    ///
+    /// The header is drawn twice over, and the second draw is what makes the refusal
+    /// reachable. A fresh builder never runs out of reference slots, so the bare form
+    /// refuses only with no bit left for the discriminator and the `Maybe` form only with
+    /// fewer than two, which is two of the thousand and twenty-four widths. Those two are
+    /// enumerated rather than described by
+    /// [`the_refusing_widths_are_the_last_two`](super::builder::either::tests::the_refusing_widths_are_the_last_two).
+    /// A uniform draw finds that region so rarely that the refusal arm below was dead when
+    /// it was written uniformly.
+    #[test]
+    fn an_either_round_trips_or_refuses_having_written_nothing(
+        payload in built_tree(),
+        header in prop_oneof![
+            3 => 0u16..=crate::cell::MAX_BITS,
+            1 => (crate::cell::MAX_BITS - 2)..=crate::cell::MAX_BITS,
+        ],
+        behind_a_presence_bit in any::<bool>(),
+    ) {
+        let mut builder = crate::cell::Builder::new();
+        builder.store_same_bit(false, header).unwrap();
+        let before = builder.clone();
+
+        let stored = if behind_a_presence_bit {
+            builder.store_maybe_either_ref(Some(payload.clone())).map(|_| ())
+        } else {
+            builder.store_either_ref(payload.clone()).map(|_| ())
+        };
+
+        if stored.is_err() {
+            prop_assert_eq!(builder, before, "a refused store wrote something");
+        } else {
+            let cell = builder.build().unwrap();
+            let mut slice = cell.parse();
+            slice.skip_bits(usize::from(header)).unwrap();
+            let arm = if behind_a_presence_bit {
+                slice.load_maybe_either_ref().unwrap().expect("a payload was written")
+            } else {
+                slice.load_either_ref().unwrap()
+            };
+            // Inline leaves the cursor on the payload and says nothing about its width,
+            // so what stands for the payload is the whole of the rest.
+            let read_back = match arm {
+                crate::cell::EitherRef::Inline => slice.to_cell().unwrap(),
+                crate::cell::EitherRef::Ref(cell) => cell.clone(),
+            };
+            prop_assert_eq!(read_back, payload);
+        }
+    }
 }
 
 /// A key width and a set of distinct keys of that width.
