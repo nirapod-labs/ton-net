@@ -234,16 +234,19 @@ jobs:
       # turns the feature off and builds what is left. That reaches wider than the three
       # crates it used to name: everything the library decides rather than fetches has to
       # compile with no threads, no sockets and no clock, which is the cell engine, the
-      # typed structures, the TL codec, the offline proof check, `Verified`, address
-      # parsing and the config reader. The socket and the per-session randomness are the
-      # whole of what `net` holds back.
+      # typed structures, the TL codec, the proof engine, the ADNL handshake and frame
+      # ciphers, `Verified`, address parsing and the config reader. What `net` holds back is
+      # the socket and the randomness it draws, and with them the three consumers of the
+      # transport seam: the ADNL message layer, the liteserver query client, and `Client`.
       - name: the library without the socket, on wasm32
         run: cargo build --target wasm32-unknown-unknown --no-default-features
       # A build says the code compiles; it does not say the capabilities the manifest
       # names are still reachable. This runs on the host, because the question is which
       # items survive the feature and not which target they run on.
       - name: what the build without the socket still carries
-        run: cargo test --no-default-features --test sans_io
+        run: |
+          cargo test --no-default-features --test sans_io
+          cargo check --no-default-features --all-targets
 
   release-ready:
     name: versions and packaging

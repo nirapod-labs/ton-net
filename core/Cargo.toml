@@ -85,6 +85,41 @@ tokio = { workspace = true, features = [
   "test-util",
 ] }
 
+# Four targets open a socket, and the examples all connect. Without this a
+# `--no-default-features --all-targets` build fails on them rather than on the library,
+# which is the configuration `just sans-io` exists to read.
+[[test]]
+name = "mainnet_adnl"
+required-features = ["net"]
+
+[[test]]
+name = "mainnet_client"
+required-features = ["net"]
+
+[[test]]
+name = "mainnet_lite"
+required-features = ["net"]
+
+[[test]]
+name = "snapshot"
+required-features = ["net"]
+
+[[example]]
+name = "balance"
+required-features = ["net"]
+
+[[example]]
+name = "freshness"
+required-features = ["net"]
+
+[[example]]
+name = "own_anchor"
+required-features = ["net"]
+
+[[example]]
+name = "resume"
+required-features = ["net"]
+
 [[bench]]
 name = "cells"
 harness = false

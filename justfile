@@ -93,10 +93,12 @@ notices-check: notices
 
 # The sans-I/O core, on a target with no threads, no sockets and no clock. What that
 # covers is wider than the three crates this used to name: the core is now everything the
-# `net` feature does not gate, so the build reaches `Verified`, address parsing, the
-# config reader and the offline proof check as well as the cells, the typed structures and
-# the TL codec. The socket and the per-session randomness are what `net` holds, and they
-# are the whole of what turning it off leaves out.
+# `net` feature does not gate, which is the cells, the typed structures, the TL codec, the
+# proof engine, the ADNL handshake and frame ciphers, `Verified`, address parsing, the
+# config reader and the offline account check. What `net` holds back is the socket and the
+# randomness it draws, and with them the three consumers of the transport seam: the ADNL
+# message layer, the liteserver query client and `Client` with its walk. That is wider than
+# the socket alone, and `just sans-io` is what says which side each capability is on.
 wasm:
     cargo build --target wasm32-unknown-unknown --no-default-features
 
@@ -166,6 +168,7 @@ test:
 # ever reads this resolution. Gating one of the named items stops the file compiling here.
 sans-io:
     cargo test --no-default-features --test sans_io
+    cargo check --no-default-features --all-targets
 
 doc:
     RUSTDOCFLAGS="-D warnings" cargo doc --no-deps
