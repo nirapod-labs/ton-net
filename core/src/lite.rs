@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileCopyrightText: 2026 Nirapod Labs
 
-//! Liteserver read client for ton-net.
+//! The liteserver read client: one query in, one decoded answer out.
 //!
 //! [`LiteClient`] speaks the liteserver query protocol over an ADNL connection and
 //! decodes the read responses into the domain types this crate defines. Nothing here
@@ -22,10 +22,12 @@
 // The query driver holds an ADNL connection, so it needs the socket. The response types
 // are decoding and nothing else, and stay reachable without one.
 #[cfg(feature = "net")]
+#[cfg_attr(docsrs, doc(cfg(feature = "net")))]
 mod client;
 mod types;
 
 #[cfg(feature = "net")]
+#[cfg_attr(docsrs, doc(cfg(feature = "net")))]
 pub use client::{LiteClient, LiteError};
 pub use types::{AccountState, BlockIdExt, MasterchainInfo, ServerReported};
 

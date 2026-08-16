@@ -58,6 +58,11 @@ napi-build = "2"
 # Clippy's default groups catch a wrong program. Pedantic catches where this one is
 # loose about what it is doing, which on a decoder reading bytes from a peer it does not
 # trust is most of what is worth catching.
+# docs.rs builds with `--cfg docsrs` so the feature pills render. Nothing else sets it,
+# and an unknown cfg is a warning the gate turns into an error, so it is declared here.
+[workspace.lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(docsrs)'] }
+
 [workspace.lints.clippy]
 pedantic = { level = "warn", priority = -1 }
 

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileCopyrightText: 2026 Nirapod Labs
 
-//! The TON cell model and bag-of-cells codec for ton-net.
+//! The TON cell model and the bag-of-cells codec.
 //!
 //! A [`Cell`] is TON's universal container: up to 1023 bits of data and up to four
 //! references to other cells, forming a directed acyclic graph. Every structure on TON,
@@ -12,8 +12,9 @@
 //! [`parse_boc`] reads the serialized form, a bag of cells, into the root cells it
 //! holds, and [`serialize_boc`] writes one back. [`Cell::parse`] opens a [`Slice`], a
 //! cursor that reads typed values out of a cell's bits and references, and [`Builder`]
-//! is the way back: outside this crate a cell comes from parsing or from a builder and
-//! from nowhere else.
+//! is the way back: outside this library a cell comes from parsing or from a builder and
+//! from nowhere else. Inside it, `Cell::from_parts` and `Builder::finish` are crate-private
+//! and no module but this one calls either.
 //!
 //! A bag and a hash travel as text more often than as bytes, so [`base64_encode`] and
 //! [`hex_encode`] write one down and [`base64_decode`] and [`hex_decode`] read it back.
@@ -60,7 +61,15 @@
 //! # Ok::<(), ton_net::cell::CellError>(())
 //! ```
 
-mod boc;
+// A module is public here when it is a subject a reader navigates to, not merely a file:
+// each of these four owns a group of the re-exports below and carries the argument for it,
+// and that argument reaches nobody from behind a private module. The flat re-exports stay,
+// so every path a caller already writes keeps resolving.
+pub mod boc;
+pub mod codec;
+pub mod dict;
+pub mod merkle;
+
 mod builder;
 // `cell::cell` stutters and is kept rather than renamed. The engine is one nested tree
 // rather than ten modules promoted to the crate root, so the inner name is the cell
@@ -68,10 +77,7 @@ mod builder;
 // the library. No reader types the path: `Cell` is re-exported here and at the root.
 #[allow(clippy::module_inception)]
 mod cell;
-mod codec;
-mod dict;
 mod error;
-mod merkle;
 mod slice;
 mod usage;
 

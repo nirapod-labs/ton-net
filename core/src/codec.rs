@@ -3,8 +3,8 @@
 
 //! Small self-contained encoders: base64 and CRC16.
 //!
-//! These are the primitives the config and address parsers need beyond what the cell
-//! crate already carries. They are written here rather than pulled as dependencies, the
+//! These are the primitives the config and address parsers need beyond what
+//! [`crate::cell`] already carries. They are written here rather than pulled as dependencies, the
 //! same choice the feasibility spike made for CRC32: each is a handful of lines and
 //! carries no supply-chain weight. Hex is the exception and is not written a second
 //! time here: [`decode_hex`] reads [`crate::cell::hex_decode`].

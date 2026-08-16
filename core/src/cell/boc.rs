@@ -3,10 +3,10 @@
 
 //! The bag of cells: the serialized form of a cell graph.
 //!
-//! The read path and the write path each take a child module: [`parse`] reads a bag's
-//! cells once [`header`] has checked its header, and [`serialize`] writes one. The parts
+//! The read path and the write path each take a child module: `parse` reads a bag's
+//! cells once `header` has checked its header, and `serialize` writes one. The parts
 //! they share, the magic, the bounds, the checksum, the byte reader, and the header those
-//! reads fill, stay here where both paths and the [`view`] over a bag reach them.
+//! reads fill, stay here where both paths and the `view` over a bag reach them.
 
 use crate::cell::error::CellError;
 

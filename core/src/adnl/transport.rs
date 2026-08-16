@@ -15,9 +15,11 @@
 use std::future::Future;
 
 #[cfg(feature = "net")]
+#[cfg_attr(docsrs, doc(cfg(feature = "net")))]
 mod tcp;
 
 #[cfg(feature = "net")]
+#[cfg_attr(docsrs, doc(cfg(feature = "net")))]
 pub use tcp::TcpTransport;
 
 /// A bidirectional byte stream to one liteserver.

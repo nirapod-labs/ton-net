@@ -1,12 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileCopyrightText: 2026 Nirapod Labs
 
-//! The facade error type and the mappings from the lower crates into it.
+//! The error type a caller of the root meets, and the mappings into it.
+//!
+//! Every module below answers with an error of its own, narrow to what it does. This is
+//! where those become one type, so a caller reading a chain does not hold five.
 
-/// The error type for every fallible operation in this crate.
+/// The error type for every fallible operation on the root surface.
 ///
 /// A closed, `#[non_exhaustive]` enum: variants can be added before 1.0 without a
-/// breaking change. The lower crates' narrow errors are mapped into this set.
+/// breaking change. The narrow errors the modules answer with are mapped into this set.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum Error {

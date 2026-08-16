@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileCopyrightText: 2026 Nirapod Labs
 
-//! Checking a read that was fetched separately from the check.
+//! Checking a read that was fetched separately from the check, at the root's error type.
 
 use crate::error::Error;
 use crate::proof::AccountRead;
@@ -19,33 +19,43 @@ use crate::Account;
 /// The check is pure. It touches no socket and depends on nothing but its arguments, so
 /// the same bytes always give the same answer.
 ///
+/// This is the one the root re-exports, as `ton_net::verify_account`, because it answers
+/// with [`Error`], the only error type a root-level caller can name. The engine's own
+/// [`crate::proof::verify_account`] runs the identical check and answers with
+/// [`BlockError`](crate::tlb::BlockError), which is the one to reach for inside a caller
+/// already working at that layer.
+///
 /// # Errors
 ///
 /// Returns [`Error::Proof`] if a proof does not root at the trusted hash or the account
 /// does not bind to it, and [`Error::Cell`] if the bytes are not cells at all.
 ///
-/// # Example
-///
-/// ```no_run
-/// use ton_net::{AccountRead, Address, Client, Config};
-///
-/// # async fn run() -> Result<(), ton_net::Error> {
-/// # let mut client = Client::connect(&Config::mainnet()).await?;
-/// # let trusted = client.masterchain_info().await?.into_value().last;
-/// let address = Address::parse("-1:3333333333333333333333333333333333333333333333333333333333333333")?;
-/// let reported = client.account_state(&address, &trusted).await?;
-/// let state = reported.value();
-///
-/// let read = AccountRead::masterchain(
-///     &trusted.root_hash,
-///     address.account_id(),
-///     reported.proof(),
-///     &state.state,
-/// );
-/// let account = ton_net::verify_account(&read)?;
-/// # Ok(())
-/// # }
-/// ```
+#[cfg_attr(
+    feature = "net",
+    doc = r#"# Example
+
+```no_run
+use ton_net::{AccountRead, Address, Client, Config};
+
+# async fn run() -> Result<(), ton_net::Error> {
+# let mut client = Client::connect(&Config::mainnet()).await?;
+# let trusted = client.masterchain_info().await?.into_value().last;
+let address = Address::parse("-1:3333333333333333333333333333333333333333333333333333333333333333")?;
+let reported = client.account_state(&address, &trusted).await?;
+let state = reported.value();
+
+let read = AccountRead::masterchain(
+    &trusted.root_hash,
+    address.account_id(),
+    reported.proof(),
+    &state.state,
+);
+let account = ton_net::verify_account(&read)?;
+# Ok(())
+# }
+```
+"#
+)]
 pub fn verify_account(read: &AccountRead<'_>) -> Result<Account, Error> {
     Ok(crate::proof::verify_account(read)?)
 }

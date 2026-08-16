@@ -22,6 +22,32 @@
 //! HTTP indexer in the path. It speaks the wire protocols directly: the TL codec, the
 //! ADNL transport, and the liteserver query layer.
 //!
+#![cfg_attr(
+    feature = "net",
+    doc = r#"# Example
+
+```no_run
+use ton_net::{Address, Client, Config};
+
+# async fn run() -> Result<(), ton_net::Error> {
+let config = Config::mainnet();
+let mut client = Client::connect(&config).await?;
+let elector = Address::parse("-1:3333333333333333333333333333333333333333333333333333333333333333")?;
+
+// Proved against a block the client walked to itself. The first call pays for the
+// walk; save `client.anchor()` and hand it to `connect_from` next time.
+let account = client.account(&elector).await?;
+println!("proved balance: {}", account.value().balance);
+
+// The server's word, for a caller who asks for it by name.
+let reported = client.account_reported(&elector).await?;
+println!("reported balance: {}", reported.value().balance);
+# Ok(())
+# }
+```
+"#
+)]
+//!
 //! # Verification status
 //!
 //! Every read says in its type whether it was proved.
@@ -53,36 +79,22 @@
 //! [`Client::account_reported`] checks nothing at all. The safe one is the one with the
 //! plain name.
 //!
-//! # Example
-//!
-//! ```no_run
-//! use ton_net::{Address, Client, Config};
-//!
-//! # async fn run() -> Result<(), ton_net::Error> {
-//! let config = Config::mainnet();
-//! let mut client = Client::connect(&config).await?;
-//! let elector = Address::parse("-1:3333333333333333333333333333333333333333333333333333333333333333")?;
-//!
-//! // Proved against a block the client walked to itself. The first call pays for the
-//! // walk; save `client.anchor()` and hand it to `connect_from` next time.
-//! let account = client.account(&elector).await?;
-//! println!("proved balance: {}", account.value().balance);
-//!
-//! // The server's word, for a caller who asks for it by name.
-//! let reported = client.account_reported(&elector).await?;
-//! println!("reported balance: {}", reported.value().balance);
-//! # Ok(())
-//! # }
-//! ```
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
-#![deny(rustdoc::broken_intra_doc_links)]
+// Documentation is published with every feature on, which `[package.metadata.docs.rs]`
+// fixes, so every link in this crate resolves in the build a reader is served. rustdoc has
+// no way to write a link that resolves only under a feature, and a `net`-off documentation
+// build is one nobody publishes, so the deny sits where it can find a real broken link and
+// the warning covers the build where it can only find a gated one.
+#![cfg_attr(feature = "net", deny(rustdoc::broken_intra_doc_links))]
+#![cfg_attr(not(feature = "net"), warn(rustdoc::broken_intra_doc_links))]
 // Six crate-private items serve only the networked half: the two wrappers' constructors,
 // the config's liteserver list and its fields, and the decode-error mapping. A build
 // without `net` keeps them rather than giving `Config` and `Verified` a second shape, so
 // it sees them unused. The allowance is conditioned on that build and cannot hide dead
 // code in the one that ships.
 #![cfg_attr(not(feature = "net"), allow(dead_code))]
+#![cfg_attr(docsrs, feature(doc_cfg))]
 
 pub mod adnl;
 pub mod cell;
@@ -130,8 +142,10 @@ pub const VERIFY_EPOCH: u32 = 2;
 pub use address::Address;
 pub use client::proof::verify_account;
 #[cfg(feature = "net")]
+#[cfg_attr(docsrs, doc(cfg(feature = "net")))]
 pub use client::Client;
 #[cfg(feature = "net")]
+#[cfg_attr(docsrs, doc(cfg(feature = "net")))]
 pub use client::SyncReport;
 pub use config::Config;
 pub use error::{Error, ErrorCode};
@@ -187,6 +201,6 @@ pub use crate::cell::{parse_boc, serialize_boc, MAX_BITS, MAX_CELLS, MAX_DEPTH, 
 // The README ships to crates.io and cannot be replaced once a version is published,
 // so its examples are compiled here rather than trusted. Doc-only: this does not
 // appear in the rendered documentation.
-#[cfg(doctest)]
+#[cfg(all(doctest, feature = "net"))]
 #[doc = include_str!("../README.md")]
 struct Readme;

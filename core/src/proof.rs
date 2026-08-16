@@ -281,6 +281,10 @@ pub fn verify_shard_block(
 
 /// Checks an account read against the block hash the caller trusts.
 ///
+/// This answers with [`BlockError`], the engine's own error. `ton_net::verify_account` is
+/// the identical check at the root's [`Error`](crate::Error) type, and is the one a caller
+/// working through the root wants.
+///
 /// Returns the decoded account on success. An account that does not exist at the block is
 /// a result, not a failure, but only when the proof shows it is not there: a proof that
 /// merely declines to cover the account fails with [`BlockError::NotCovered`].

@@ -9,9 +9,11 @@ pub mod proof;
 // which is a thing a target with no clock cannot answer. Both reasons point the same way,
 // so it is gated with the socket rather than beside the standalone check.
 #[cfg(feature = "net")]
+#[cfg_attr(docsrs, doc(cfg(feature = "net")))]
 mod sync;
 
 #[cfg(feature = "net")]
+#[cfg_attr(docsrs, doc(cfg(feature = "net")))]
 pub use sync::SyncReport;
 
 #[cfg(feature = "net")]
@@ -69,6 +71,7 @@ const MASTERCHAIN_SHARD: u64 = 0x8000_0000_0000_0000;
 /// another over the single channel, because each takes `&mut self`. Open more than one
 /// client for real concurrency.
 #[cfg(feature = "net")]
+#[cfg_attr(docsrs, doc(cfg(feature = "net")))]
 pub struct Client {
     lite: LiteClient<TcpTransport>,
     /// The key block trust rests on. `None` until a sync has established one.

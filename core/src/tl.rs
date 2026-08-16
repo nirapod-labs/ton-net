@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileCopyrightText: 2026 Nirapod Labs
 
-//! TL codec for ton-net: TON's Type Language wire format.
+//! The TL codec: TON's Type Language wire format.
 //!
 //! This crate defines the TON TL types the client reads and writes, derived over
 //! [`tl_proto`], and re-exports the serialize and deserialize entry points. It

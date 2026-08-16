@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileCopyrightText: 2026 Nirapod Labs
 
-//! ADNL transport for ton-net: the encrypted link to a liteserver.
+//! The ADNL transport: the encrypted link to a liteserver.
 //!
 //! ADNL is the transport TON nodes speak. This crate opens and runs a liteserver
 //! session over it, split along the sans-I/O seam of NET-ADR-002:
@@ -26,16 +26,19 @@ use sha2::{Digest, Sha256};
 // runtime, so they are the whole of what the `net` feature gates. The handshake and the
 // frame cipher are pure functions over bytes and build for any target.
 #[cfg(feature = "net")]
-pub mod connection;
-pub mod frame;
-pub mod handshake;
-pub mod transport;
+#[cfg_attr(docsrs, doc(cfg(feature = "net")))]
+mod connection;
+mod frame;
+mod handshake;
+mod transport;
 
 #[cfg(feature = "net")]
+#[cfg_attr(docsrs, doc(cfg(feature = "net")))]
 pub use connection::{AdnlConnection, AdnlError};
 pub use frame::{FrameError, SessionCiphers};
 pub use handshake::{client_handshake, Handshake, HandshakeError, HandshakeSecrets};
 #[cfg(feature = "net")]
+#[cfg_attr(docsrs, doc(cfg(feature = "net")))]
 pub use transport::TcpTransport;
 pub use transport::{Transport, TransportError};
 

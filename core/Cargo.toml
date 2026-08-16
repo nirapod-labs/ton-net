@@ -15,6 +15,12 @@ license.workspace = true
 repository.workspace = true
 rust-version.workspace = true
 
+# A feature that gates a public item is a fact a reader needs before they compile, so
+# docs.rs is asked for every feature and for the cfg that renders the pill beside each one.
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
 [lib]
 # `cargo bench` would otherwise run the unit tests with criterion's flags.
 bench = false
