@@ -194,7 +194,13 @@ against the current one and decide whether to check again.
 ## Correctness first, performance within it
 
 Correctness and safety are the floor and win any real conflict, and the code holds
-that floor structurally. Every crate forbids unsafe code. Every decoder that reads
+that floor structurally. All six library crates forbid unsafe code, and the compiler
+holds them there, since an inner allowance of a forbidden lint is an error rather than
+an override. The node binding is the one exception, and the reason belongs in the open:
+the macro that generates its bridge expands to unsafe code carrying its own allowance,
+so a binding root that forbids does not compile. It denies instead, and because a deny
+is what an allowance silently defeats, a check reads the binding's own source for one a
+person wrote. Every decoder that reads
 bytes from a peer the client does not trust returns an error rather than unwinding,
 because a panic in a decoder is a denial of service in whatever process embedded it,
 and parsing refuses a bag of cells past its cell and depth bounds before it allocates
