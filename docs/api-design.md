@@ -53,8 +53,8 @@ The re-exported surface, and the modules it is drawn from:
   `AccountState`.
 - From `tlb` and `proof`: `Account`, `AccountStatus`, `AccountRead`, `Coins`.
 - From `cell`: the model, `Cell`, `CellType`, `Identity`, `Slice`,
-  `Builder`, `CellError`, `Dict`, `DictEntry`, `DictIter`, `Lookup` and
-  `MsgAddress`; and the bag codec, `parse_boc`, `serialize_boc`, `MAX_CELLS`,
+  `Builder`, `CellError`, `Dict`, `DictEntry`, `DictIter`, `EitherRef`, `Lookup`
+  and `MsgAddress`; and the bag codec, `parse_boc`, `serialize_boc`, `MAX_CELLS`,
   `MAX_DEPTH`, `MAX_BITS` and `MAX_REFS`.
 - Nothing from `adnl` or `tl`. The wire codec and the transport are what the layers
   above them are for, and a consumer who needs one names the module.
@@ -80,7 +80,8 @@ a separate decision about which layer's error a consumer sees. An `Account`
 carries its code and data as `Cell`s, and from a `Cell` that rule reaches
 `Slice`, `Identity`, `Builder` and `CellError`, then through a `Slice` the
 `Dict` it loads, the `Lookup`, `DictEntry` and `DictIter` a dictionary is read
-through, and the `MsgAddress` a message carries. `MsgAddress` is the wire form
+through, the `MsgAddress` a message carries, and the `EitherRef` that says which
+arm of an `Either X ^X` a message wrote. `MsgAddress` is the wire form
 of an address and is not `Address`, which is the form a person writes.
 `core/tests/surface.rs` holds the rule for the methods it enumerates,
 by binding each result to a name written as `ton_net::`.
