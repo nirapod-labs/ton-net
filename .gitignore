@@ -34,3 +34,6 @@ bindings/node/THIRD-PARTY-LICENSES.md
 bindings/node/npm/*/LICENSE
 bindings/node/npm/*/NOTICE
 bindings/node/npm/*/THIRD-PARTY-LICENSES.md
+
+# Local tooling scratch. Not part of the project.
+.claude/
