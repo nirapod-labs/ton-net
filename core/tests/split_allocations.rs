@@ -228,6 +228,14 @@ fn a_split_wave_is_written_into_one_buffer() {
     // per worker beyond the spawn, and nothing at all per cell. A worker collecting its own
     // outcomes costs one more for each of them, and merging those into a list that cannot be
     // sized ahead of itself costs a further one for every time that list doubles.
+    //
+    // The reference is measured rather than fixed, which is what `calls_to_start` is for and
+    // also what it costs: a budget taken from the same run can move with the thing it bounds.
+    // With the buffer reverted to a list per worker, the helper reported twelve rather than the
+    // eight it reports here, so the budget rose by four and absorbed that much of the regression
+    // before the comparison was reached. The reading parted from it anyway, seventeen against
+    // fourteen. So the equality below is calibrated against a figure that can move with what it
+    // bounds, rather than against a constant.
     let allowed = if splits {
         calls_to_start(workers) + 1
     } else {
