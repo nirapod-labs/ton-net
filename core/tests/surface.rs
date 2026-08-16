@@ -11,7 +11,7 @@
 //! directly.
 //!
 //! So each case below binds a result to an explicitly written `ton_net::` type. Drop a
-//! name from the re-export list in `crates/ton-net/src/lib.rs` and this file stops
+//! name from the re-export list in `core/src/lib.rs` and this file stops
 //! compiling, which `cargo test` reports as a failure.
 //!
 //! Every cell type here arrives through the one `use ton_net::{..}` below, and nothing

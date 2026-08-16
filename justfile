@@ -20,7 +20,7 @@ default:
     @just --list
 
 # Everything the hermetic CI gate runs. No network.
-gate: fmt-check lint typos licenses workflows versions default-deps unsafe-posture layers census test doc
+gate: fmt-check lint typos licenses workflows versions default-deps unsafe-posture layers census test sans-io doc
 
 # A moved action tag is somebody else's code in this build. Also checks that a workflow
 # states what it may write and that a fork's schedule does not run it.
@@ -159,6 +159,13 @@ licenses:
 test:
     cargo test
     cargo test --all-features
+
+# What a build with no socket still carries, compiled in that configuration. The manifest
+# names the capabilities `--no-default-features` keeps, and `test` above runs the default
+# build and the all-features build, both of which have `net` on, so nothing else in the gate
+# ever reads this resolution. Gating one of the named items stops the file compiling here.
+sans-io:
+    cargo test --no-default-features --test sans_io
 
 doc:
     RUSTDOCFLAGS="-D warnings" cargo doc --no-deps
