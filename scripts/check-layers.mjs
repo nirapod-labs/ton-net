@@ -9,7 +9,8 @@
 // `std::net::TcpStream` opened inside the block crate compiled with nothing to change and
 // nothing to notice, and a `tokio.workspace = true` added to the same manifest passed the
 // whole gate in silence. Reading the source text is strictly stronger than reading the
-// graph, because the four reaches that arrive through `std` are the ones no graph can see.
+// graph, because the socket, the filesystem, the process, the environment, a thread and
+// the clock all arrive through `std`, and a graph can see none of them.
 //
 // The direction. The cell engine, the typed structures, the proof engine and the TL codec
 // decide over bytes already in hand. None of them may name the transport above it
