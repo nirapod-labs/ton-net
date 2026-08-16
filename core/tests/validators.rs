@@ -409,10 +409,12 @@ fn every_captured_configuration_shows_parameter_35_absent_rather_than_pruned() {
     // configuration captured here shows that: 35 absent, not pruned.
     //
     // What this settles is a property of the captured bytes, not of the code. Deleting
-    // the preference leaves it green; what would go red is `chain.rs`, which verifies
-    // every link of the same captures against the set each configuration names. The
-    // count is asserted so a capture added and not read here is caught rather than
-    // quietly left outside the word every.
+    // the preference leaves this test green, and `chain.rs` with it: where 35 is absent
+    // the two readings agree. The two constructed tests below are what hold the
+    // preference. What `chain.rs` holds is the derivation, verifying every link of the
+    // same captures against the set each configuration names. The count is asserted so a
+    // capture added and not read here is caught rather than quietly left outside the
+    // word every.
     let mut checked = 0;
     for text in FIXTURES {
         for link in links(text) {

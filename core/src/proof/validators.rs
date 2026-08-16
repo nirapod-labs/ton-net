@@ -14,22 +14,25 @@
 //! a key block, which is the one path a forward-link proof check reaches. Other readers
 //! of the same configuration take 34 alone, so the rule is scoped to this use rather than
 //! general. The reason to copy it is that a set read from the wrong parameter fails
-//! quietly: what comes back is a real set that simply did not sign the block in hand, so
+//! quietly: what comes back is a real set that did not sign the block in hand, so
 //! the weight threshold is missed rather than the parameter refused, and the refusal
 //! arrives under a name that sends a reader looking at signatures.
 //!
-//! **Parameter 35 is not what a mainnet rotation installs**, which is worth saying
-//! because the opposite is easy to assume from the name. No configuration read while
+//! **Parameter 35 is not what a mainnet rotation installs.** The rotation moves the next
+//! set into 34 and the old 34 into 32, and names 35 nowhere. No configuration read while
 //! this was written carried the parameter at all: neither the mainnet nor the testnet
 //! configuration on 2026-08-16, nor any of the key blocks captured under
 //! `tests/fixtures/`. So the rule here is conformance to the reference's selection, not
 //! the repair of anything this tree was seen refusing, and a configuration carrying the
 //! parameter is a case the tests reach only by construction.
 //!
+//! That is not the same as unreachable. A configuration parameter is settable at any
+//! index by a passed proposal, 35 among them, so the case this preference covers is one
+//! governance can produce without a rotation.
+//!
 //! **A pruned parameter 35 is not an absent one.** The configuration arrives inside a
-//! Merkle proof, so a lookup answers found, absent, or unknown, and only the middle
-//! answer licenses reading 34; the pruned case is refused as uncovered rather than
-//! assumed empty.
+//! Merkle proof, so a lookup answers found, absent, or pruned, and only absent licenses
+//! reading 34; the pruned case is refused as uncovered rather than assumed empty.
 //!
 //! What makes that refusal safe to make is a property of the server rather than of the
 //! captures. A node building the configuration proof for a forward link records the cells
@@ -137,8 +140,8 @@ impl ValidatorSet {
     ///
     /// # Errors
     ///
-    /// Returns [`BlockError::Malformed`] if the configuration shows neither parameter
-    /// present or the parameter it names is inconsistent, [`BlockError::NotCovered`] if
+    /// Returns [`BlockError::Malformed`] if the configuration shows neither parameter, or
+    /// the parameter it names is inconsistent, [`BlockError::NotCovered`] if
     /// the proof prunes the walk to parameter 35, prunes the walk to parameter 34 where
     /// 35 is absent, or prunes any descriptor in the subset, and
     /// [`BlockError::WrongConstructor`] if a tag is not what it should be.
