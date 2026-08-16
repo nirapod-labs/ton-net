@@ -10,8 +10,8 @@
 //!
 //! At `Y = ^X` the two constructors are the same payload in two places: a clear bit and the
 //! payload written where the bit ended, or a set bit and the payload in the next reference.
-//! `Maybe (Either X ^X)` puts a `nothing$0` or `just$1` bit in front of that choice. Both
-//! encodings are well formed for the same value, so the choice is the writer's, and a writer
+//! `Maybe (Either X ^X)` puts a `nothing$0` or `just$1` bit in front of that choice. Where the
+//! payload fits either way, both encodings are well formed for the same value, so the choice is the writer's, and a writer
 //! that chooses differently produces a different cell with a different hash. That is the
 //! whole reason the decision is made in one function here rather than at each field.
 //!
@@ -135,14 +135,14 @@ impl Builder {
     /// Answers with an error rather than a false when neither arm fits, so no caller writes a
     /// bit it cannot follow.
     fn either_goes_inline(&self, payload: &Cell, ahead: u16) -> Result<bool, CellError> {
-        let inline_bits = ahead.saturating_add(1).saturating_add(payload.bit_len());
+        let inline_bits = ahead + 1 + payload.bit_len();
         if self.can_extend_by(inline_bits, payload.refs().len()) {
             return Ok(true);
         }
         if self.refs_left() == 0 {
             return Err(CellError::NoRoomForRefs { limit: MAX_REFS });
         }
-        self.room_for(ahead.saturating_add(1))?;
+        self.room_for(ahead + 1)?;
         Ok(false)
     }
 
@@ -421,5 +421,41 @@ mod tests {
             Err(CellError::NoRoomForRefs { .. })
         ));
         assert_eq!(builder, before, "a refused store left the builder alone");
+    }
+
+    /// The widths at which either form refuses, enumerated rather than counted in prose.
+    ///
+    /// A fresh builder has every reference slot, so the reference arm is always open and the
+    /// only thing either form can run out of is room for the bits in front of the payload:
+    /// one for the bare form, two for the `Maybe`. That makes the refusing widths the last
+    /// one and the last two, and the union of them two widths out of the thousand and
+    /// twenty-four. The proptest header draw is weighted towards this region because a
+    /// uniform draw reaches it about twice in a thousand, and this test is what fixes the
+    /// region it is weighted towards, so the two move together or this fails.
+    #[test]
+    fn the_refusing_widths_are_the_last_two() {
+        let mut bare = Vec::new();
+        let mut maybe = Vec::new();
+        for width in 0..=MAX_BITS {
+            if filled(width).store_either_ref(payload()).is_err() {
+                bare.push(width);
+            }
+            if filled(width)
+                .store_maybe_either_ref(Some(payload()))
+                .is_err()
+            {
+                maybe.push(width);
+            }
+        }
+        assert_eq!(
+            bare,
+            [MAX_BITS],
+            "the bare form wants one bit in front of the payload"
+        );
+        assert_eq!(
+            maybe,
+            [MAX_BITS - 1, MAX_BITS],
+            "the presence bit costs the `Maybe` form one width more"
+        );
     }
 }

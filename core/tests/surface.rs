@@ -146,11 +146,17 @@ fn an_either_read_answers_with_the_arm_type_the_facade_names() {
         .expect("the discriminator reads");
     assert_eq!(arm, EitherRef::Inline);
 
-    // Eight bits left and nine needed, so the payload takes the reference arm.
+    // Eight bits left, and the inline arm needs ten: the presence bit, the discriminator
+    // and the payload's eight. So the payload takes the reference arm.
     let mut spilled = Builder::new();
     spilled
         .store_same_bit(false, MAX_BITS - 8)
         .expect("the fill fits one cell");
+    assert_eq!(
+        spilled.bits_left(),
+        8,
+        "the width the arm below is chosen at"
+    );
     spilled
         .store_maybe_either_ref(Some(payload.clone()))
         .expect("the reference arm fits");

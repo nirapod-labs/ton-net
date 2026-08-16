@@ -335,17 +335,20 @@ proptest! {
     ///
     /// The examples beside the two methods pin the widths either side of the inline
     /// boundary for one fixed payload. This asks the same two questions for a generated
-    /// payload, whose own bits and references move that boundary, at every header width
-    /// a cell has room for, and for the bare and the `Maybe` form alike. The second
+    /// payload, whose own bits and references move that boundary, over the whole range of
+    /// header widths a cell has room for, and for the bare and the `Maybe` form alike. The second
     /// question is the one an example cannot cover cheaply: a refusal at any width has to
     /// leave the builder equal to what it was, or some width writes a discriminator or a
     /// presence bit it cannot follow.
     ///
     /// The header is drawn twice over, and the second draw is what makes the refusal
-    /// reachable. A fresh builder never runs out of reference slots, so the only way
-    /// either form refuses is with fewer than two bits left, which is three of the
-    /// thousand and twenty-four widths. A uniform draw finds that region so rarely that
-    /// the refusal arm below was dead when it was written uniformly.
+    /// reachable. A fresh builder never runs out of reference slots, so the bare form
+    /// refuses only with no bit left for the discriminator and the `Maybe` form only with
+    /// fewer than two, which is two of the thousand and twenty-four widths. Those two are
+    /// enumerated rather than described by
+    /// [`the_refusing_widths_are_the_last_two`](super::builder::either::tests::the_refusing_widths_are_the_last_two).
+    /// A uniform draw finds that region so rarely that the refusal arm below was dead when
+    /// it was written uniformly.
     #[test]
     fn an_either_round_trips_or_refuses_having_written_nothing(
         payload in built_tree(),
