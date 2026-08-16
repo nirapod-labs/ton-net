@@ -286,7 +286,12 @@ impl From<crate::lite::LiteError> for Error {
         use crate::lite::LiteError;
         match error {
             LiteError::Adnl(adnl) => adnl.into(),
-            LiteError::LiteServer { code, message } => Self::LiteServer { code, message },
+            // A refusal for a request the server had already taken crosses as the error
+            // the server sent, alongside every other one, because no code on this type
+            // says that and inventing one would be a classification this type does not
+            // make. The distinction is drawn on `LiteError` and stops there.
+            LiteError::LiteServer { code, message }
+            | LiteError::DuplicateSend { code, message } => Self::LiteServer { code, message },
             LiteError::Decode(decode) => Self::Decode(decode.to_string()),
         }
     }
