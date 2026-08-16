@@ -9,9 +9,11 @@ use crate::cell::error::CellError;
 
 mod address;
 mod compare;
+mod either;
 mod snake;
 
 pub use address::MsgAddress;
+pub use either::EitherRef;
 
 /// Reads the bit at `index` of `data`, most significant bit first.
 ///
