@@ -229,7 +229,7 @@ async fn connect_rotates_past_a_dead_liteserver() {
     );
 }
 
-// The milestone's gate, and the one test here that cannot be made fast. It walks every
+// The slowest check here, and the one that cannot be made fast. It walks every
 // key block the network has published since the block the config pins, which was 1242 of
 // them and 52 MB in July 2026, so it runs on a schedule rather than on every commit. Its
 // name carries `cold_sync` so the per-commit run can skip it by that.
@@ -345,7 +345,7 @@ async fn a_sync_from_a_block_that_is_not_on_the_chain_is_refused() {
     }
 }
 
-// The milestone's point, end to end: a proved account balance with nothing handed to the
+// What a trust-minimized read is for, end to end: a proved account balance with nothing handed to the
 // client but the config. Every hash it rests on was derived by walking from the key block
 // that config pins, so it costs a first sync and runs on the same schedule as one.
 //
