@@ -58,7 +58,9 @@ The property is nonetheless real in the code as written. Counting over the three
 | `ton-net-block` | 0 |
 | `ton-net-cell` | 0 |
 
-`ton-net-cell` carries eleven `std::thread` references, all in `boc/parse.rs` and all under the `parallel` feature, which is the threaded parse and is meant to be there.
+`ton-net-cell` carries eleven `std::thread` references, all in `boc/parse.rs`. **Eight are under the `parallel` feature. Three are not**, and the reason is worth writing down because it is the same class of error this section is about. `parse.rs:349` guards with `cfg!(feature = "parallel")`, the macro rather than the `#[cfg]` attribute, so the body compiles in every configuration and `std::thread::available_parallelism()` at `:351` is in the default build. `parse.rs:1523,1525` sit in a `#[test]` at `:1499` that carries no feature attribute at all.
+
+**And randomness arrives the same way, unnoticed.** `ton-net-cell` declares no `getrandom` and reaches OS randomness anyway, nineteen times, through `HashMap` and `HashSet`: `std`'s default hasher seeds `RandomState` from the OS on first use. The sites are `cell.rs:420-421`, `boc/serialize.rs:6,41,79`, `usage.rs:18,51,65,133,173` and eight in `merkle/update.rs`. Nothing in `just gate` reads for it, and the wasm build would not catch it either, since `std::net`, `std::fs` and `SystemTime` all compile for `wasm32-unknown-unknown` and fail only at runtime.
 
 So the discipline holds today by nobody having broken it, not by anything refusing to compile. **A merge therefore surrenders no enforcement, because there is none to surrender.**
 
@@ -80,7 +82,9 @@ and asserts, in the same reading, that `src/tlb/` does reach `crate::cell` and `
 
 This catches the four `std` reaches the crate graph never could. **It is strictly stronger than the current arrangement on the property that matters, and it is work that has to be done in either structure**, since the survey established that adding `tokio.workspace = true` to `ton-net-block` today passes every check in `just gate` in silence.
 
-`std::thread` stays permitted inside `src/cell/boc/`, because the threaded parse is a deliberate capability with its own feature. That exception is named in the check rather than left as a hole in the pattern.
+`std::thread` stays permitted inside `src/cell/boc/`, because the threaded parse is a deliberate capability with its own feature. That exception is named in the check rather than left as a hole in the pattern, and the three ungated references section 2 found are fixed rather than exempted.
+
+**What the check deliberately does not flag: `HashMap` and `HashSet`.** They are how randomness actually arrives in the cell engine today, and flagging nineteen legitimate uses to catch a property nobody is attacking would be noise that gets turned off within a release. The reach is stated in section 2 rather than checked, and that gap is named rather than closed.
 
 ## 4. The module tree
 
@@ -161,20 +165,27 @@ json     = ["dep:serde_json"]
 parallel = []
 ```
 
-`just wasm` today builds three crates and stops: `cargo build --target wasm32-unknown-unknown -p ton-net-tl -p ton-net-cell -p ton-net-block` (`justfile:74`). A wasm consumer therefore cannot reach `Verified`, address parsing, or the offline proof check, because all three live in the facade.
+`just wasm` today builds three crates and stops: `cargo build --target wasm32-unknown-unknown -p ton-net-tl -p ton-net-cell -p ton-net-block` (`justfile:81-82`, mirrored at `.github/workflows/ci.yml:221-222`). A wasm consumer therefore cannot reach `Verified`, address parsing, or the offline proof check, because all three live in the facade.
 
-After the merge it is `cargo build --target wasm32-unknown-unknown --no-default-features`, and that build carries `Verified`, `address`, and `proof` as well, because none of them touches a socket. **The browser target gains three capabilities it does not have today**, and it gains them from the merge rather than from new work.
+After the merge it is `cargo build --target wasm32-unknown-unknown --no-default-features`, and that build carries `Verified`, `address`, `config`, `proof`, and the ADNL handshake and frame crypto as well, because none of them touches a socket. **The browser target gains capability it does not have today**, and it gains it from the merge rather than from new work.
+
+Two corrections to what gets gated, both from reading the sources rather than from the module names:
+
+- **`sync.rs` does not need the gate.** It names `std::time::Duration` once, as a parameter type at `:235`, and never reads a clock. `Duration` is arithmetic and builds for this target.
+- **`adnl/transport.rs` cannot be gated whole.** It holds `TcpTransport`, which is a socket, and the `Transport` trait and `TransportError`, which are pure and which `lite/client.rs` needs. The trait moves to its own file so the socket can be gated without taking the trait with it. That split is a migration step, not a follow-up.
 
 ## 6. The collisions dissolve, but one of them was a real finding
 
 Seven basenames appear twice across the six `src` trees: `address.rs`, `client.rs`, `codec.rs`, `error.rs`, `lib.rs`, `proof.rs`, `snake.rs`. Under the tree of section 4 every one of them lands under a different parent, so none collides: `cell/codec.rs` beside `codec.rs`, `cell/error.rs` beside `tlb/error.rs` beside `error.rs`, `lite/client.rs` beside `client.rs`, `proof/` beside `proof.rs`.
 
-**One of them was a finding rather than a collision, and it survives the reshuffle.** Both files implement base64:
+**One of them is two base64 decoders in one library, and an earlier draft of this plan got the resolution wrong.** That draft said to merge them behind a differential, and to treat disagreement as a bug the migration found. They disagree, and it is not a bug: each rule is deliberate and each has a test pinning it.
 
-- `crates/ton-net-cell/src/codec.rs`: "Base64 and hex: the two spellings a bag of cells and a cell hash travel in."
-- `crates/ton-net/src/codec.rs`: "Small self-contained encoders: base64 and CRC16 ... written here rather than pulled as dependencies."
+- `crates/ton-net-cell/src/codec.rs:37` **refuses** the URL-safe alphabet, pinned by `base64_refuses_the_url_safe_alphabet` at `:362`. A bag of cells and a cell hash travel in standard base64, and accepting a second spelling of the same bytes would give one bag two encodings.
+- `crates/ton-net/src/codec.rs:14-16` **accepts both**, pinned by `base64_decodes_the_url_safe_alphabet` at `:157` and `both_alphabets_spell_one_value` at `:176`. It serves config keys, which are standard, and user-friendly addresses, which are URL-safe.
 
-Two base64 implementations, in one library, invisible to each other because a crate boundary sat between them. They merge into one, and the merge is gated on a differential: the two must agree byte for byte over the same inputs before either is deleted, since one may be standard alphabet and the other url-safe. **If they disagree, that is a bug this migration found, and it is reported rather than papered over.**
+Two domains, two acceptance rules, both correct. Merging them into one function breaks one test set and would silently widen what the cell decoder accepts, which is the opposite of what this library is for.
+
+**Resolution: two named functions in one `codec.rs`**, the strict one and the permissive one, each keeping its own tests and its own doc sentence saying which domain it serves. The duplication that does go away is smaller than it looked: the facade's side is decode only, it has no encoder, and `crates/ton-net/src/codec.rs:9-10` already records that hex is not duplicated because it calls the cell crate's. **One function was duplicated, not a module.**
 
 ## 7. The five published names
 
@@ -182,7 +193,52 @@ Two base64 implementations, in one library, invisible to each other because a cr
 
 Each gets one final release whose `lib.rs` is a deprecation notice and nothing else, pointing at the module inside `ton-net` that replaced it. After that they stop moving. `docs/release-process.md` records that the five are frozen and why.
 
-## 8. The migration, as one pull request
+## 8. The record that rejected this, answered
+
+`NET-ADR-009` did not overlook one crate. It considered it and refused it, at `docs/adr/NET-ADR-009-code-structure.md:102-105`:
+
+> "**One crate for the whole client.** Rejected. A single library has no enforced layering, so the audit target is one undivided blob and a consumer that wants only the cell model pulls the transport and the network with it. The flat layered crates give the reviewer a bounded target and the consumer a base crate it can take alone."
+
+Two reasons. Both are answerable, and one of them turned out to be false about the tree it was written for.
+
+**"A single library has no enforced layering."** Neither does this one. The layering is a shape in the manifests that nothing reads: adding `tokio.workspace = true` to `ton-net-block` clears every check in `just gate`, and `std::net::TcpStream` compiles there today with no manifest change at all. The premise is that the six crates enforce something. They do not, and section 2 is the demonstration. `scripts/check-layers.mjs` enforces more than the split ever did, including the four `std` reaches no dependency edge can see.
+
+**"A consumer that wants only the cell model pulls the transport and the network with it."** This one is true of a naive merge and false of the one in section 5. `default-features = false` gives a consumer the cell engine, the typed structures, the proof engine, `Verified`, address parsing and the config reader, with no tokio, no socket and no transport in the graph. That is more than `ton-net-cell` alone gives them today, not less, and it is one dependency line rather than a choice between five.
+
+What the record gets right and this plan keeps: the reviewer wants a bounded target. The bound moves from a crate boundary to a module boundary with a check on it, which is where `NET-ADR-009`'s own decisions 4 and 5 already put the currency, `pub(super)` at `:67-76`.
+
+**This supersedes `NET-ADR-009` decisions 1 through 3 and the alternative above.** Decisions 4 through 7 stand unchanged and are what the module tree of section 4 follows. `NET-ADR-002:78,151` and `NET-ADR-008:16,39-45` carry the same six-crate statement and are edited with it.
+
+## 9. The size of the move, measured
+
+Every number here was counted, and where a count is a floor rather than a measurement it says so.
+
+| | count |
+|---|---:|
+| crate-path occurrences to rewrite (`ton_net_x::`) | **237** |
+| of those, cross-crate rather than self-references | **116** |
+| inside `///` or `//!` doc comments, so real compile units | 134 |
+| path edits needed in `bindings/node` | **0** |
+| `pub` items declared across the six crates | 451 |
+| of those, already on a private module path and therefore already unreachable | 362 |
+| **`pub` items that genuinely lose a boundary** | **89** |
+| `pub` items reached by nothing at all, a floor on what can drop | 93 |
+| integration test targets | 17 |
+| **test target name collisions** | **1**, `mainnet`, three ways |
+| `#[test]` function names across the workspace | 569 |
+| **cross-crate test-name collisions** | **0** |
+| fixture files | 16, 680,647 bytes |
+| **fixture pairs that are byte-identical and dedupe** | **4**, 101,871 bytes removed |
+
+Three of these change the shape of the work.
+
+**The binding needs no edits.** `bindings/node/src/lib.rs` names `ton_net::` twenty-three times and names none of the five lower crates. It moves through this migration untouched.
+
+**The visibility work is 89 items, not 451.** `ton-net-cell`, `ton-net-lite` and `ton-net` declare every root module private, so 362 of the 451 `pub` items are already unreachable from outside their crate and changing their keyword is cosmetic. The items that genuinely lose a boundary sit in the three crates that declare `pub mod` at their root: `ton-net-tl` (32), `ton-net-adnl` (22), and `ton-net-block`'s four public modules (28).
+
+**The 93 that nothing reaches are not all free to drop.** Some are named in a `pub use` list and are therefore published API with no in-tree user, so removing them is a breaking change to a published crate rather than a cleanup. And the 93 is a floor: 49 of the items counted as reached have names too generic for a grep to separate a real call from a collision (`new`, `len`, `parse`, `hash`, `verify`), so the true figure is higher and needs type information to settle.
+
+## 10. The migration, as one pull request
 
 Ordered so the tree compiles at as many points as it can, and so history survives.
 
@@ -193,14 +249,15 @@ Ordered so the tree compiles at as many points as it can, and so history survive
 5. Merge the two `codec.rs` behind the differential of section 6.
 6. Reparent `error.rs` into `src/error/`.
 7. Feature-gate `adnl/`, `lite/`, `client.rs`, `sync.rs` and `send.rs` behind `net`. `verified.rs`, `address.rs`, `proof.rs` and `config.rs` stay ungated, which is what gives the browser target the three capabilities section 5 names.
-8. Merge `tests/` trees, renaming any colliding target, and merge `benches/`.
+8. Merge `tests/` trees. One target collides, `mainnet`, three ways, and becomes `mainnet_adnl`, `mainnet_lite`, `mainnet_client`. No `#[test]` function name collides across crates, so nothing else renames. Four fixture pairs are byte-identical and dedupe to one copy each, removing 101,871 bytes of 680,647. Merge `benches/`; `cells`, `dict` and `verify` do not collide.
 9. One `Cargo.toml`; workspace `members` drops to two entries.
 10. `deny.toml`, `about.hbs`, the notices, and the release workflow.
 11. `scripts/check-versions.mjs`, `docs/release-process.md`, `docs/architecture.md`, `docs/api-design.md`, `docs/design/system-design.md`, `NET-ADR-008`, `NET-ADR-009`.
 12. `scripts/check-layers.mjs` and its `just gate` entry, per section 3.
-13. The five deprecation releases, per section 7.
+13. Split the `Transport` trait out of `adnl/transport.rs` so the socket can be gated without it, per section 5.
+14. The five deprecation releases, per section 7.
 
-## 9. The floor: what proves the move changed nothing
+## 11. The floor: what proves the move changed nothing
 
 The whole risk of this migration is a semantic change smuggled in under a mechanical one. Three things bound it, and all three are commands.
 
@@ -212,16 +269,20 @@ The whole risk of this migration is a semantic change smuggled in under a mechan
 
 Plus the standing floor: `just gate` green, and `just wasm` replaced by the `--no-default-features` build of section 5.
 
-## 10. What this does not do
+## 12. What this does not do
 
 - It does not merge the binding. `crates/ton-net-node` stays its own crate, with its own MSRV of 1.88 against the library's 1.85 (`justfile:165-166`).
 - It does not change any public type, function signature, or wire behaviour. A consumer's `use ton_net::X` keeps working; a consumer's `use ton_net_cell::X` does not, which is why the five get a deprecation release rather than silence.
 - It does not raise the verification epoch.
 - It does not settle where seed-phrase import lands. That is the v0.5.0 plan's, and this migration is what makes it a placement question rather than a publishing one.
 
-## 11. The cost that is real, and not talked out of
+## 13. The cost that is real, and not talked out of
 
-**Incremental compile time.** Six crates compile in parallel and cache independently; one crate is one compilation unit, so an edit anywhere in 23,077 lines recompiles all of it. The workspace already shares one `target/`, so nothing else changes, but this is a genuine loss and it grows with the crate. It is accepted because the alternative has been paid in a different currency: a published artifact per module, and a design question turned into a release question.
+**Incremental compile time, and the worst case is 42.7 to one.** An edit inside `ton-net-lite` today recompiles 541 lines. After the merge it recompiles 23,077. Six crates compile in parallel and cache independently; one crate is one compilation unit. The workspace already shares a single `target/` with no `.cargo/config.toml` override, so dependency artifacts are shared today and nothing changes there; what is lost is six independently cacheable units.
+
+A second cost rides with it: `criterion`, `proptest` and `ed25519-dalek` are dev-dependencies of two crates today, so `cargo test -p ton-net-lite` builds none of them. After the merge every `cargo test` does.
+
+Both are accepted because the alternative has been paid in a different currency: a published artifact per module, and a design question turned into a release question.
 
 **One docs.rs page for 23,077 lines.** Module docs carry more weight after this, not less.
 
