@@ -167,11 +167,10 @@ impl<T: Transport> LiteClient<T> {
     /// about liteserver behaviour rather than anything this tree checks. On this path the
     /// server deduplicates on a hash of the whole serialized request, not the message
     /// inside it, because the same node keys its broadcast path on the message bytes
-    /// instead. So it is these exact bytes that are compared, and the comparison covers
-    /// a bounded recent
-    /// window rather than all of history. Within that window an identical request reached
-    /// this server and the server did not refuse it. That is
-    /// less than saying the earlier offer succeeded: an entry is recorded before the
+    /// instead. So it is these exact bytes that are compared, and the comparison covers a
+    /// bounded recent window rather than all of history. Within that window an identical
+    /// request reached this server and the server did not refuse it. That is less than
+    /// saying the earlier offer succeeded: an entry is recorded before the
     /// message is run and removed again if the run fails, so a second request arriving
     /// while the first is still being run is refused as a duplicate too. Nothing about
     /// inclusion follows from it either, for the reason [`Accepted`] gives.
