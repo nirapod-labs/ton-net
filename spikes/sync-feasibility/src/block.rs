@@ -10,9 +10,9 @@
 use std::collections::HashMap;
 
 use sha2::{Digest, Sha256};
-use ton_net_block::{proof::verify_merkle_proof, Lookup};
-use ton_net_cell::Dict;
-use ton_net_cell::{parse_boc, Cell, Slice};
+use ton_net::cell::Dict;
+use ton_net::cell::{parse_boc, Cell, Lookup, Slice};
+use ton_net::proof::verify_merkle_proof;
 
 /// `block#11ef55aa`
 const BLOCK_TAG: u32 = 0x11ef_55aa;

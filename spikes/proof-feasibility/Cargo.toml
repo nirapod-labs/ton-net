@@ -11,7 +11,7 @@ publish = false
 # adnl spike. It reuses the v0.1.0 facade to capture a real account and proof, then
 # hand-rolls the bag-of-cells parse and the cell hashing that v0.2.0 will build.
 [dependencies]
-ton-net = { path = "../../crates/ton-net" }
+ton-net = { path = "../../core" }
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 sha2 = "0.10"
 
