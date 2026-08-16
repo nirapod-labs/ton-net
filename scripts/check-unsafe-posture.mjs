@@ -56,9 +56,9 @@ const code = (source) => source.replace(/\/\/[^\n]*/g, "");
 
 // Each pattern carries every shape it must match, so the reading is proved before it is
 // trusted to have found nothing. `expect` sits beside `allow` because it defeats a deny
-// exactly as quietly, and `extern` and `static` sit beside `fn` because an `unsafe extern
-// "C" fn` is the shape a hand-written N-API export takes, which an earlier revision of
-// this file read straight past.
+// exactly as quietly. `extern` and `static` sit beside `fn` because a reading that stops
+// at `fn` walks straight past `unsafe extern "C" fn`, which is the shape a hand-written
+// N-API export takes, and this is the one crate where somebody would write one.
 const HAND_WRITTEN = [
   {
     what: "an allowance of the unsafe-code lint",
