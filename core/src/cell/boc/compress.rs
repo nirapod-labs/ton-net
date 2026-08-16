@@ -4,8 +4,8 @@
 //! LZ4 compression of a serialized bag of cells.
 //!
 //! TON compresses a bag of cells with LZ4, and this reads and writes that form. [`compress`]
-//! and [`decompress`] work on the bytes a [`serialize_boc`](super::serialize_boc) gives and a
-//! [`parse_boc`](super::parse_boc) reads; [`compress_boc`] and [`decompress_boc`] do the two
+//! and [`decompress`] work on the bytes a [`serialize_boc`] gives and a
+//! [`parse_boc`] reads; [`compress_boc`] and [`decompress_boc`] do the two
 //! steps at once.
 //!
 //! The decode side is on the untrusted boundary. A compressed bag names the length it
@@ -33,7 +33,7 @@ const MAX_DECOMPRESSED: usize = 64 << 20;
 ///
 /// The output is the LZ4 block form with the original length prepended, the form
 /// [`decompress`] reads back. The input is the bytes a
-/// [`serialize_boc`](super::serialize_boc) gives; [`compress_boc`] pairs the two.
+/// [`serialize_boc`] gives; [`compress_boc`] pairs the two.
 #[must_use]
 pub fn compress(bag: &[u8]) -> Vec<u8> {
     compress_prepend_size(bag)
@@ -71,11 +71,11 @@ pub fn decompress(bytes: &[u8]) -> Result<Vec<u8>, CellError> {
     decompress_size_prepended(bytes).map_err(|_| CellError::Malformed("bytes are not valid lz4"))
 }
 
-/// Compresses the bag [`serialize_boc`](super::serialize_boc) would write for `roots`.
+/// Compresses the bag [`serialize_boc`] would write for `roots`.
 ///
 /// # Errors
 ///
-/// As [`serialize_boc`](super::serialize_boc).
+/// As [`serialize_boc`].
 pub fn compress_boc(roots: &[Cell]) -> Result<Vec<u8>, CellError> {
     Ok(compress(&serialize_boc(roots)?))
 }
@@ -84,7 +84,7 @@ pub fn compress_boc(roots: &[Cell]) -> Result<Vec<u8>, CellError> {
 ///
 /// # Errors
 ///
-/// As [`decompress`] for the expansion, then as [`parse_boc`](super::parse_boc) for the bag
+/// As [`decompress`] for the expansion, then as [`parse_boc`] for the bag
 /// it uncovers.
 pub fn decompress_boc(bytes: &[u8]) -> Result<Vec<Cell>, CellError> {
     parse_boc(&decompress(bytes)?)
