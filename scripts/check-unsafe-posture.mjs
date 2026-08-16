@@ -113,11 +113,17 @@ for (const [rel, why] of DENIES) {
 
 // Only the sources a person edits. A generated file under target/ is not in git, and the
 // macro's own expansion never appears here, which is the whole point of reading the text
-// rather than the built artifact.
-const sources = execFileSync("git", ["ls-files", "bindings/*/src/*.rs", "bindings/*/src/**/*.rs"], {
-  cwd: root,
-  encoding: "utf8",
-})
+// rather than the built artifact. The build script is included because it is the binding's
+// own source as much as the library target is, it is a crate of its own that no root lint
+// reaches, and it runs on whatever machine builds this.
+const sources = execFileSync(
+  "git",
+  ["ls-files", "bindings/*/src/*.rs", "bindings/*/src/**/*.rs", "bindings/*/build.rs"],
+  {
+    cwd: root,
+    encoding: "utf8",
+  },
+)
   .split("\n")
   .filter((rel) => rel.length > 0);
 
@@ -129,7 +135,7 @@ for (const rel of sources) {
   const body = code(readFileSync(join(root, rel), "utf8"));
   for (const { what, pattern } of HAND_WRITTEN) {
     if (pattern.test(body)) {
-      problems.push(`${rel} carries ${what}, which the binding's deny cannot refuse on its own`);
+      problems.push(`${rel} carries ${what}, which no lint on this crate refuses by itself`);
     }
   }
 }
