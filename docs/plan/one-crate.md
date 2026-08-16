@@ -123,7 +123,7 @@ So the shape is followed where the scope overlaps and nowhere else. What that yi
 
 - **Taken as-is:** `tl`, `adnl`, `liteclient`, `tlb` and `address` at the top level, each one package there and one module here.
 - **Taken with the parent dropped:** their cell engine sits under the emulator package, at `<vm>/cell`. There is no emulator here, so it is `cell/` at the root rather than nested under a thing that does not exist.
-- **Taken including the nesting:** the wallet is a subpackage of the client there and a submodule of the client here. That is not a detail; it is what answers the seed-phrase placement question below.
+- **Taken including the nesting:** the wallet is a subpackage of the client there and a submodule of the client here, rather than a sibling of it at the root.
 - **A growth shape taken on credit:** the client package there also holds `<client>/nft`, `<client>/jetton` and `<client>/dns`, contract families as siblings of the wallet. When a second family lands here it goes to `client/`, beside `wallet/`, for the same reason and without a new argument.
 - **Not taken:** the emulator, the peer-to-peer stack, an HTTP API client, and an examples tree. Their absence is scope, not disagreement.
 
@@ -190,11 +190,13 @@ Here it is `proof/`, holding `chain`, `validators` and `signature` beside the en
 
 **`account.rs` goes to `tlb/`, once.** It cannot sit under both `tlb/` and `proof/`: there is one `crates/ton-net-block/src/account.rs` and it is a decoder, `Account`, `AccountStatus`, `skip_address`, `load_status`. The account *check* is not a file at all, it is `verify_account` inside `crates/ton-net-block/src/proof.rs:255`, and it travels with the engine body.
 
-### One placement question the shape answers outright
+### What stays with the wallet, and the question this migration reopens
 
-Seed-phrase handling sits **inside the wallet package** in the reference, beside the families that consume what it derives, not in a crypto package and not in a module of its own. So: `core/src/client/wallet/seed.rs`. TON Connect proof verification sits there too, and that one is not an inference: it is a file in that package, which is why it is the one piece of proof code that does not move to `proof/` here either.
+TON Connect proof verification sits **inside the wallet package** in the reference. That one is observed rather than inferred: it is a file in that package, which is why it is the one piece of proof code that does not move to `proof/` here.
 
-That is where a month of argument about a seventh crate lands: **it is a file next to the wallet.**
+The other question that ran beside it is not answered by this shape, and the change runs the other way. `docs/plan/v0.5.0.md:150` records that the one shape which preserved D1's custody sentence was a crate outside the published crate's dependency closure, and that the shape was declined on the cost of a seventh published artifact rather than on the boundary being wrong. Collapsing six crates into one removes that position: after this migration there is no second crate to be outside the closure, because there is no second crate.
+
+So the merge turns the seventh crate from a publishing cost into a placement question, and it removes the position seed-phrase import was held for. Whether such a file can sit anywhere under one crate without falsifying `docs/plan/v0.5.0.md:134`, and if so where, is reopened by this migration rather than answered by it. Nothing here decides what replaces the position that is gone.
 
 ## 5. Features, and the wasm build gets better
 
