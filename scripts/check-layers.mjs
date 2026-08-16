@@ -81,6 +81,14 @@ const WIRE_DECIDES_WITHOUT = [["crate::cell", "an answer leaves this layer as th
 // that code rather than a leak into it.
 const PERMITTED = [["std::thread", "core/src/cell/boc/"]];
 
+// A layer that is planned and not written. Building an external message needs no socket,
+// and it is the one thing under `client` that has to stay reachable from a build with the
+// socket turned off, so it belongs with the deciding layers. Putting it in `DECIDING` today
+// would fail on an empty reading, and a refusal that reads nothing is the no-op this file
+// exists to catch. So it waits here instead: the run below refuses to pass the day the
+// directory appears, until somebody moves the name up.
+const AWAITED = ["client/wallet"];
+
 // The edges that are supposed to be there, read by the same patterns as the absences
 // above. These are what stand between a silent no-op and a passing gate.
 const PRESENT = [
@@ -181,6 +189,14 @@ for (const module of DECIDING) {
   refuse(module, DECIDES_WITHOUT);
 }
 refuse(WIRE, WIRE_DECIDES_WITHOUT);
+
+for (const module of AWAITED) {
+  if (sources(module).length > 0) {
+    problems.push(
+      `${module} has sources now and no reading covers it; move it into the deciding set`,
+    );
+  }
+}
 
 for (const [module, path] of PRESENT) {
   const found = read.get(module).some(([, body]) => reach(path).test(body));
