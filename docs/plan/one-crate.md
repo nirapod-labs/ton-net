@@ -161,7 +161,7 @@ core/
     client.rs  client/    the facade
       sync.rs  send.rs                                               [feature: net]
       proof.rs              the standalone check, at the facade's error type
-      wallet.rs wallet/     v4r2, seed, address                       W4
+      wallet.rs wallet/     v4r2, address
 
     address.rs  codec.rs  config.rs  error.rs  verified.rs
 
