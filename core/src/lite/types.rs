@@ -83,9 +83,18 @@ impl<T> ServerReported<T> {
 ///
 /// This is a third result shape beside [`ServerReported`] and
 /// [`Verified`](crate::Verified), and it is a separate type because a send is neither
-/// kind of read. There is no chain value inside it to reach, so it offers no `value`,
-/// no `try_map`, and no conversion into either read wrapper: no expression in this
-/// library turns an acknowledgement into a read.
+/// kind of read. There is no chain value inside it to reach, so it offers no `value` and
+/// no `try_map` of its own, and nothing turns one into a [`Verified`](crate::Verified):
+/// that wrapper's constructor is crate-private and it carries no map, so the type an
+/// acknowledgement cannot reach is the proven one.
+///
+/// **The unverified wrapper is not sealed the same way**, and the difference is worth
+/// naming rather than glossed. [`ServerReported::try_map`] bounds neither what it maps
+/// to nor what it maps from, so a caller holding any reported value can put an `Accepted`
+/// inside one and hold a `ServerReported<Accepted>` whose proof bytes belong to the read
+/// it was mapped from. Nothing in this library produces that value and nothing consumes
+/// it, so what the shape offers a caller is a mislabel of their own making rather than a
+/// route from an acknowledgement to a read.
 ///
 /// **What an acknowledgement establishes.** This is an external fact about how a
 /// liteserver behaves, not a property this tree checks, and it is written here because
