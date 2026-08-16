@@ -250,3 +250,19 @@ pub struct AccountState {
     /// exist at the block.
     pub state: Vec<u8>,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::Accepted;
+
+    // The reference node writes 1 at its one construction site, so 1 is the value that
+    // tells a carried integer apart from nothing at all: an accessor answering a
+    // constant reads the same as an accessor answering the field. The values away from
+    // 1 are what the claim on `status` rests on.
+    #[test]
+    fn an_acknowledgement_carries_the_integer_the_server_sent() {
+        assert_eq!(Accepted::new(1).status(), 1);
+        assert_eq!(Accepted::new(0).status(), 0);
+        assert_eq!(Accepted::new(-7).status(), -7);
+    }
+}
