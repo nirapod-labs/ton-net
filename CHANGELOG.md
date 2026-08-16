@@ -38,6 +38,33 @@ never published.
   graph. The socket and the per-session randomness sit behind the `net` feature,
   which is on by default and is what `Client` and `SyncReport` need.
 - `VERIFY_EPOCH` stays at `2`. Nothing moved in what the library accepts as proven.
+- The parallel finalization wave writes its outcomes into one pre-sized buffer rather
+  than collecting per worker and collecting again, so a wave the split reaches is held
+  once instead of twice. The saving is in bytes rather than in calls: the merged collect
+  reserved close to the right size on its first element, so the count barely moved while
+  the wave's outcomes were taken at five thousand entries' worth against two thousand.
+  Behaviour is unchanged, and the shares are cut the way the dispatch cuts them, so an
+  outcome still lands against the cell it came from.
+- The validator set is read from configuration parameter 35 where the configuration
+  carries it and from parameter 34 only where it shows 35 absent, which is the selection
+  the reference makes. A parameter 35 the proof prunes is refused as uncovered rather
+  than read as an absent one, so a server choosing what to prune cannot choose which set
+  is derived.
+
+### Added
+
+- `Builder::store_either_ref` and `Builder::store_maybe_either_ref` write TL-B
+  `Either X ^X` and `Maybe (Either X ^X)`, inline where the payload fits beside what is
+  already stored and in a reference where it does not, with the choice made in one place
+  so two fields cannot encode the same value differently. `Slice::load_either_ref` and
+  `Slice::load_maybe_either_ref` read them back and answer with `EitherRef`, which says
+  which arm was taken, since the encoding gives a reader no other way to tell.
+- `LiteClient::send_message` offers an external message to a server over
+  `liteServer.sendMessage`. The acknowledgement is an `Accepted`: not a read, with no
+  conversion into one, because acceptance is not inclusion and one server running a
+  message against its own state proves nothing about a block. A server refusing a request
+  it has already been given arrives as `LiteError::DuplicateSend` rather than an ordinary
+  failure, because that refusal means the first offer was taken.
 
 ## [0.4.2] - 2026-08-14
 
