@@ -124,10 +124,12 @@ pub struct GetBlockProof {
 /// This is the only request in this module that asks a server to do something rather
 /// than to report something, and the difference reaches the wire in a way worth naming:
 /// a server deduplicates these on a hash of the whole serialized request, so two calls
-/// carrying identical [`body`](Self::body) bytes are one offer and the second comes back
-/// as an error rather than a status. That is an external fact about the reference node's
-/// liteserver, and it is stated here because the bytes this type lays out are what that
-/// hash is taken over.
+/// carrying identical [`body`](Self::body) bytes are one offer inside the bounded recent
+/// window that server keeps, and a second arriving inside it comes back as an error
+/// rather than a status. The window is bounded on both a clock and a capacity, so the
+/// same bytes offered again after it has moved on are a fresh offer. That is an external
+/// fact about the reference node's liteserver, and it is stated here because the bytes
+/// this type lays out are what that hash is taken over.
 #[derive(TlRead, TlWrite, Debug, Clone, PartialEq, Eq)]
 #[tl(boxed, id = 0x690ad482)]
 pub struct SendMessage {
