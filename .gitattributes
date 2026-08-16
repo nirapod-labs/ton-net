@@ -8,7 +8,7 @@
 # byte. Marking them generated keeps them out of language statistics and collapses
 # them in a diff, where a wall of hex hides the change that matters.
 *.hex linguist-generated=true -diff
-crates/ton-net/src/mainnet.config.json linguist-generated=true
+core/src/mainnet.config.json linguist-generated=true
 
 # Lockfiles are resolved output. A conflict in one is settled by re-resolving.
 Cargo.lock linguist-generated=true
