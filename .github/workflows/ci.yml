@@ -239,6 +239,11 @@ jobs:
       # whole of what `net` holds back.
       - name: the library without the socket, on wasm32
         run: cargo build --target wasm32-unknown-unknown --no-default-features
+      # A build says the code compiles; it does not say the capabilities the manifest
+      # names are still reachable. This runs on the host, because the question is which
+      # items survive the feature and not which target they run on.
+      - name: what the build without the socket still carries
+        run: cargo test --no-default-features --test sans_io
 
   release-ready:
     name: versions and packaging
